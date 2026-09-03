@@ -14,13 +14,21 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import type { HttpClient } from "effect/unstable/http";
 import { HttpClientResponse } from "effect/unstable/http";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveClaudeHomePath } from "../Drivers/ClaudeHome.ts";
 import { type ProviderAdapterError, ProviderAdapterRequestError } from "../Errors.ts";
+import { spawnAndCollect } from "../providerSnapshot.ts";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const REQUEST_TIMEOUT = "10 seconds";
 const METHOD = "claude.ai/usage";
+// Claude Code stores its login in this item on macOS. The first read from a
+// new process prompts once in Keychain; "Always Allow" silences it.
+// Only the default config dir maps to this item; a custom homePath or
+// CLAUDE_CONFIG_DIR stores under a different name, so those keep relying on turn events.
+const KEYCHAIN_SERVICE = "Claude Code-credentials";
+const KEYCHAIN_TIMEOUT = "60 seconds";
 
 const StoredCredentials = Schema.Struct({
   claudeAiOauth: Schema.optional(
@@ -199,6 +207,8 @@ export interface ClaudeAccountLimitsServices {
   readonly fileSystem: FileSystem.FileSystem;
   readonly path: Path.Path;
   readonly httpClient: HttpClient.HttpClient;
+  readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
+  readonly platform: NodeJS.Platform;
 }
 
 /**
@@ -210,7 +220,18 @@ export interface ClaudeAccountLimitsServices {
 export function makeClaudeAccountLimitsReader(
   services: ClaudeAccountLimitsServices,
 ): Effect.Effect<UsageLimitsUpdate | null, ProviderAdapterError> {
-  const { settings, environment, fileSystem, path, httpClient } = services;
+  const { settings, environment, fileSystem, path, httpClient, spawner, platform } = services;
+
+  const readKeychain = spawnAndCollect(
+    "security",
+    ChildProcess.make("security", ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"]),
+  ).pipe(
+    Effect.map((result) => (result.code === 0 ? result.stdout : null)),
+    Effect.timeoutOption(KEYCHAIN_TIMEOUT),
+    Effect.map((result) => (result._tag === "Some" ? result.value : null)),
+    Effect.orElseSucceed(() => null),
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+  );
 
   const readCredentials = Effect.gen(function* () {
     const home = yield* resolveClaudeHomePath(settings).pipe(
@@ -222,12 +243,15 @@ export function makeClaudeAccountLimitsReader(
       resolvedHome: home,
       join: (...parts) => path.join(...parts),
     });
-    // macOS keeps Claude Code's credentials in the login keychain, and reading
-    // that item from another process triggers a Keychain prompt on every
-    // refresh. Until that is an explicit opt-in, macOS relies on turn events.
-    const raw = yield* fileSystem
+    // macOS keeps Claude Code's credentials in the login keychain; the file is
+    // only present where the CLI could not use a keychain.
+    const fromFile = yield* fileSystem
       .readFileString(path.join(configDir, ".credentials.json"))
       .pipe(Effect.orElseSucceed(() => null));
+    const defaultConfigDir =
+      settings.homePath.trim() === "" && !environment?.CLAUDE_CONFIG_DIR?.trim();
+    const raw =
+      fromFile ?? (platform === "darwin" && defaultConfigDir ? yield* readKeychain : null);
     if (raw === null) return null;
     const parsed = yield* decodeStoredCredentials(raw).pipe(Effect.orElseSucceed(() => null));
     const oauth = parsed?.claudeAiOauth;
