@@ -18,9 +18,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { useUsage, useUsageLimits, type EnvironmentUsageStatus } from "../../state/usage";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
+import { UsageLimitsSection } from "./UsageLimitsSection";
 import type { UsageChartMetric } from "./usageChartData";
 import { PROVIDER_LABEL, useProviderColors } from "./usageProviders";
 
@@ -43,6 +44,7 @@ export function UsageRouteScreen() {
   const [metric, setMetric] = useState<UsageChartMetric>("cost");
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
+  const limits = useUsageLimits();
   const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
 
   const days = useMemo(
@@ -72,7 +74,8 @@ export function UsageRouteScreen() {
   // The pull spinner tracks re-scans of environments that have answered
   // before. The initial scan renders its own placeholder, and an unreachable
   // environment stays pending forever — neither may pin the spinner on.
-  const refreshing = environments.some((entry) => entry.isPending && entry.summary !== null);
+  const refreshing =
+    environments.some((entry) => entry.isPending && entry.summary !== null) || limits.isRefreshing;
   const selectWindow = (days: number) => {
     setWindowSelection({
       days,
@@ -80,6 +83,7 @@ export function UsageRouteScreen() {
     });
   };
   const refreshWindow = () => {
+    limits.refresh();
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
     if (
       nextWindow.sinceDay === window.sinceDay &&
@@ -139,6 +143,13 @@ export function UsageRouteScreen() {
               timeZone={window.timeZone}
             />
             <ProviderSection merged={merged} metric={metric} />
+            <UsageLimitsSection
+              providers={limits.providers}
+              failedEnvironments={limits.failedEnvironments}
+              pendingEnvironments={limits.pendingEnvironments}
+              now={limits.receivedAt}
+              isPending={limits.isPending}
+            />
             <TotalsSection merged={merged} isPast24Hours={isPast24Hours} />
             <ModelsSection merged={merged} />
           </>
