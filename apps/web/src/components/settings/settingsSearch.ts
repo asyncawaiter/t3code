@@ -151,6 +151,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["combine matching repositories environments sidebar"],
   },
   {
+    id: "profiles",
+    title: "Profiles",
+    to: "/settings/general",
+    searchTerms: ["named colored groups of projects sidebar arc swipe"],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",

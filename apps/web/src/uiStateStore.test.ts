@@ -24,6 +24,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
+    activeProfileId: null,
     ...overrides,
   };
 }
@@ -183,6 +184,7 @@ describe("parsePersistedState", () => {
           "turn-2": true,
         },
       },
+      activeProfileId: null,
     });
   });
 
@@ -303,6 +305,7 @@ describe("uiStateStore persistence", () => {
           "turn-2": true,
         },
       },
+      activeProfileId: null,
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,

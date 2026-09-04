@@ -256,6 +256,20 @@ describe("ServerSettings thread settlement", () => {
   });
 });
 
+describe("ServerSettings.profiles", () => {
+  it("defaults to an empty array", () => {
+    expect(decodeServerSettings({}).profiles).toEqual([]);
+  });
+
+  it("round-trips a valid profiles array", () => {
+    const profiles = [
+      { id: "work", name: "Work", color: "blue", projectKeys: ["env-1:proj-1"] },
+    ];
+    expect(decodeServerSettings({ profiles }).profiles).toEqual(profiles);
+    expect(decodeServerSettingsPatch({ profiles }).profiles).toEqual(profiles);
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults text generation to Luna at low reasoning effort", () => {
     expect(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection).toEqual({

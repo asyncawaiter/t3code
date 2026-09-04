@@ -17,6 +17,14 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 
 ### Project and workspace
 
+#### Profile
+
+A named, colored group of projects shown in the sidebar. Profile definitions are stored as `Profile` records ([`profile.ts`][30]) on server settings and sync to every connected environment; the synthesized `all` profile matches every project and is never persisted. The profile a client currently has selected is client-local state, tracked separately.
+
+#### Dashboard
+
+The cross-project view of threads, grouped into Needs you, Running, Monitoring, and Done lanes. Lanes are derived client-side from thread shells in [dashboard.ts][31], so web and mobile share the same classification logic. See [dashboard.md][32].
+
 #### Project
 
 The top-level workspace record in the app. In [the orchestration contracts][1], a project has a `workspaceRoot` and a title. It does not contain threads: `OrchestrationProject` and `OrchestrationThread` are separate arrays on the read model, and a project can have zero threads. See [workspace-layout.md][2].
@@ -216,3 +224,6 @@ ships T3 Code already matching it.
 [27]: ../user/forking-a-chat.md
 [28]: ../../apps/server/src/orchestration/forkContext.ts
 [29]: ../../apps/server/src/orchestration/Layers/ThreadForkService.ts
+[30]: ../../packages/contracts/src/profile.ts
+[31]: ../../packages/client-runtime/src/state/dashboard.ts
+[32]: ../user/dashboard.md

@@ -6,6 +6,8 @@
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Organizing threads](./user/thread-sidebar.md)
+- [Profiles](./user/profiles.md)
+- [Dashboard](./user/dashboard.md)
 - [Forking a chat](./user/forking-a-chat.md)
 - [Review usage](./user/usage.md)
 - [Customize a project icon](./user/project-settings.md)

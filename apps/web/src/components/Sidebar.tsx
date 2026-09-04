@@ -27,10 +27,17 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 import {
   scopeProjectRef,
   scopeThreadRef,
+  scopedProjectKey,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import {
+  ALL_PROFILE,
+  ALL_PROFILE_ID,
+  findProfile,
+  isProjectInProfile,
+  nextProfileId,
   resolveEnvironmentMachineKind,
+  resolveProfiles,
   type EnvironmentMachineKind,
   type ProjectIconOverride,
   type ScopedThreadRef,
@@ -68,6 +75,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
   type ReactNode,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
@@ -79,6 +87,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { isElectron } from "../env";
 import {
+  profileTraversalDirectionFromCommand,
   resolveShortcutCommand,
   shortcutLabelForCommand,
   shouldShowThreadJumpHintsForModifiers,
@@ -106,7 +115,7 @@ import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, usePrimarySettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -126,6 +135,8 @@ import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat"
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { ProfileStrip } from "./sidebar/ProfileStrip";
+import { INITIAL_PROFILE_SWIPE_STATE, reduceProfileSwipe } from "./sidebar/profileSwipe";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
@@ -1784,6 +1795,34 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 
 export default function Sidebar() {
   const projects = useProjects();
+  const rawProfiles = usePrimarySettings((s) => s.profiles);
+  const resolvedProfiles = useMemo(() => resolveProfiles(rawProfiles), [rawProfiles]);
+  const activeProfileId = useUiStateStore((store) => store.activeProfileId);
+  const setActiveProfileId = useUiStateStore((store) => store.setActiveProfileId);
+  const activeProfile = useMemo(
+    () => findProfile(resolvedProfiles, activeProfileId) ?? ALL_PROFILE,
+    [resolvedProfiles, activeProfileId],
+  );
+  // The set of scoped project keys the active profile allows, or null for
+  // All (no restriction). Intersected below with the project-scope picker's
+  // own restriction, so the two filters compose instead of one silently
+  // overriding the other.
+  const profileProjectKeys = useMemo(
+    () => (activeProfile.id === ALL_PROFILE_ID ? null : new Set(activeProfile.projectKeys)),
+    [activeProfile],
+  );
+  const visibleProjects = useMemo(
+    () =>
+      profileProjectKeys === null
+        ? projects
+        : projects.filter((project) =>
+            isProjectInProfile(
+              activeProfile,
+              scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
+            ),
+          ),
+    [activeProfile, profileProjectKeys, projects],
+  );
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const router = useRouter();
@@ -1925,7 +1964,7 @@ export default function Sidebar() {
   const orderedProjects = useMemo(
     () =>
       orderItemsByPreferredIds({
-        items: projects,
+        items: visibleProjects,
         preferredIds: projectOrder,
         getId: getProjectOrderKey,
         getPreferenceIds: (project) => [
@@ -1933,12 +1972,12 @@ export default function Sidebar() {
           legacyProjectCwdPreferenceKey(project.workspaceRoot),
         ],
       }),
-    [projectOrder, projects],
+    [projectOrder, visibleProjects],
   );
   const unsortedProjectGroups = useMemo(
     () =>
       buildSidebarProjectSnapshots({
-        projects: sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
+        projects: sidebarProjectSortOrder === "manual" ? orderedProjects : visibleProjects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
@@ -1948,7 +1987,7 @@ export default function Sidebar() {
       orderedProjects,
       primaryEnvironmentId,
       projectGroupingSettings,
-      projects,
+      visibleProjects,
       sidebarProjectSortOrder,
     ],
   );
@@ -2072,17 +2111,22 @@ export default function Sidebar() {
         : (projectGroups.find((project) => project.projectKey === projectScopeKey) ?? null),
     [projectGroups, projectScopeKey],
   );
-  const scopedProjectKeys = useMemo(
-    () =>
+  const scopedProjectKeys = useMemo(() => {
+    const pickerScopeKeys =
       scopedProjectGroup === null
         ? null
         : new Set(
             scopedProjectGroup.memberProjectRefs.map(
               (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
             ),
-          ),
-    [scopedProjectGroup],
-  );
+          );
+    // The project-scope picker (one project) and the active profile (a
+    // named group of projects) both restrict which threads show; combine
+    // them so neither silently overrides the other.
+    if (pickerScopeKeys === null) return profileProjectKeys;
+    if (profileProjectKeys === null) return pickerScopeKeys;
+    return new Set([...pickerScopeKeys].filter((key) => profileProjectKeys.has(key)));
+  }, [profileProjectKeys, scopedProjectGroup]);
   useEffect(() => {
     if (projectScopeKey !== null && scopedProjectGroup === null) {
       setProjectScopeKey(null);
@@ -2118,7 +2162,7 @@ export default function Sidebar() {
   // hidden now, and bulk actions must never count or touch invisible rows.
   useEffect(() => {
     clearSelection();
-  }, [clearSelection, projectScopeKey]);
+  }, [clearSelection, projectScopeKey, activeProfile.id]);
 
   const openProjectSettings = useCallback(
     (projectGroup: SidebarProjectSnapshot) => {
@@ -3422,6 +3466,16 @@ export default function Sidebar() {
         );
         return;
       }
+      const profileDirection = profileTraversalDirectionFromCommand(command);
+      if (profileDirection !== null) {
+        if (resolvedProfiles.length > 1) {
+          event.preventDefault();
+          event.stopPropagation();
+          const nextId = nextProfileId(resolvedProfiles, activeProfileId ?? ALL_PROFILE_ID, profileDirection);
+          setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
+        }
+        return;
+      }
       const jumpIndex = threadJumpIndexFromCommand(command ?? "");
       if (jumpIndex === null) return;
       navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
@@ -3429,11 +3483,14 @@ export default function Sidebar() {
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [
+    activeProfileId,
     keybindings,
     navigateToThread,
     orderedThreadKeys,
+    resolvedProfiles,
     routeTerminalOpen,
     routeThreadKey,
+    setActiveProfileId,
     threadByKey,
   ]);
 
@@ -3500,6 +3557,51 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+
+  // Trackpad swipe between profiles. State lives in a ref (not React state)
+  // because a gesture is many wheel events per frame and none of them need
+  // to trigger a render themselves. Only firing does, via setActiveProfileId.
+  const profileSwipeStateRef = useRef(INITIAL_PROFILE_SWIPE_STATE);
+  const handleSidebarWheel = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      if (resolvedProfiles.length <= 1) return;
+      // deltaMode reports whether delta values are pixels (0), lines (1), or
+      // pages (2); the reducer's thresholds assume pixels, so scale line/page
+      // deltas up before feeding them in.
+      const deltaScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
+      const { state, fire } = reduceProfileSwipe(profileSwipeStateRef.current, {
+        deltaX: event.deltaX * deltaScale,
+        deltaY: event.deltaY * deltaScale,
+        timestamp: event.timeStamp,
+      });
+      profileSwipeStateRef.current = state;
+      if (fire === null) return;
+      const nextId = nextProfileId(resolvedProfiles, activeProfileId ?? ALL_PROFILE_ID, fire);
+      setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
+    },
+    [activeProfileId, resolvedProfiles, setActiveProfileId],
+  );
+
+  // One-shot slide when the active profile changes, played imperatively so
+  // switching profiles doesn't remount (and lose scroll position, DOM focus,
+  // etc. in) the whole thread list. Skipped on the initial mount and when
+  // the user asked for reduced motion.
+  const profileListRef = useRef<HTMLDivElement>(null);
+  const previousProfileIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previousProfileId = previousProfileIdRef.current;
+    previousProfileIdRef.current = activeProfile.id;
+    if (previousProfileId === null || previousProfileId === activeProfile.id) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    profileListRef.current?.animate(
+      [
+        { opacity: 0.6, transform: "translateX(4px)" },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration: 150, easing: "ease-out" },
+    );
+  }, [activeProfile.id]);
+
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
@@ -3600,6 +3702,11 @@ export default function Sidebar() {
                 </Tooltip>
               </div>
             </div>
+            <ProfileStrip
+              profiles={resolvedProfiles}
+              activeProfileId={activeProfileId}
+              onSelect={(id) => setActiveProfileId(id === ALL_PROFILE_ID ? null : id)}
+            />
             {projectGroups.length > 0 ? (
               <div className="flex items-center gap-1">
                 <Combobox
@@ -3744,7 +3851,11 @@ export default function Sidebar() {
           </SidebarGroup>
         }
       >
-        <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
+        <SidebarGroup
+          ref={profileListRef}
+          onWheel={handleSidebarWheel}
+          className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0"
+        >
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider

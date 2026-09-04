@@ -6,12 +6,13 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopedProjectKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AsyncResult } from "effect/unstable/reactivity";
 import {
   deriveProjectGroupingOverrideKey,
   selectProjectGroupingSettings,
 } from "../../logicalProject";
+import { ALL_PROFILE_ID, profileForProject } from "@t3tools/contracts";
 import type {
   ContextMenuItem,
   ModelSelection,
@@ -45,6 +46,8 @@ import {
   useEnvironmentSettings,
   useUpdateClientSettings,
   usePrimarySettings,
+  usePrimarySettingsLoaded,
+  useUpdatePrimarySettings,
 } from "../../hooks/useSettings";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useT3ProjectFileState } from "../../hooks/useT3ProjectFileScripts";
@@ -119,7 +122,7 @@ import {
   canPickExternalProjectFavicon,
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
-import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
+import { moveProjectToProfile, projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
 
 const ProjectIconPickerDialog = lazy(() =>
   import("./ProjectIconPickerDialog").then((module) => ({
@@ -317,6 +320,8 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
     useAtomValue(serverEnvironment.providersValueAtom(representative.environmentId)) ??
     EMPTY_SERVER_PROVIDERS;
   const updateClientSettings = useUpdateClientSettings();
+  const updatePrimarySettings = useUpdatePrimarySettings();
+  const primarySettingsLoaded = usePrimarySettingsLoaded();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const threads = useThreadShells();
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
@@ -805,6 +810,10 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
       deriveProjectGroupingOverrideKey(selectedCheckout)
     ] ?? "inherit";
   const selectedCheckoutLabel = selectedCheckout.environmentLabel ?? "This machine";
+  const selectedCheckoutProjectKey = scopedProjectKey(
+    scopeProjectRef(selectedCheckout.environmentId, selectedCheckout.id),
+  );
+  const selectedCheckoutProfile = profileForProject(settings.profiles, selectedCheckoutProjectKey);
 
   return (
     <>
@@ -1092,6 +1101,40 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                   <SelectItem hideIndicator value="separate">
                     {PROJECT_GROUPING_MODE_LABELS.separate}
                   </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+          <SettingsRow
+            serverScoped
+            title="Profile"
+            description="Which profile this checkout belongs to in the sidebar."
+            control={
+              <Select
+                value={selectedCheckoutProfile?.id ?? ALL_PROFILE_ID}
+                disabled={!primarySettingsLoaded}
+                onValueChange={(value) => {
+                  updatePrimarySettings({
+                    profiles: moveProjectToProfile(
+                      settings.profiles,
+                      selectedCheckoutProjectKey,
+                      value === ALL_PROFILE_ID ? null : String(value),
+                    ),
+                  });
+                }}
+              >
+                <SelectTrigger size="sm" aria-label={`Profile for ${selectedCheckoutLabel}`}>
+                  <SelectValue>{selectedCheckoutProfile?.name ?? "None"}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value={ALL_PROFILE_ID}>
+                    None
+                  </SelectItem>
+                  {settings.profiles.map((profile) => (
+                    <SelectItem key={profile.id} hideIndicator value={profile.id}>
+                      {profile.name}
+                    </SelectItem>
+                  ))}
                 </SelectPopup>
               </Select>
             }

@@ -41,7 +41,11 @@ import {
 import * as Struct from "effect/Struct";
 import { toastManager } from "~/components/ui/toast";
 import { isHostedStaticApp } from "~/hostedPairing";
-import { primaryServerSettingsAtom, serverEnvironment } from "~/state/server";
+import {
+  primaryServerConfigAtom,
+  primaryServerSettingsAtom,
+  serverEnvironment,
+} from "~/state/server";
 import {
   type EnvironmentPresentation,
   useEnvironments,
@@ -318,14 +322,28 @@ export function usePrimarySettings<T = UnifiedSettings>(
   return useMergedSettings(useAtomValue(primaryServerSettingsAtom), selector);
 }
 
+/**
+ * Whether `usePrimarySettings` is backed by a real, loaded server config
+ * rather than `DEFAULT_SERVER_SETTINGS`. Shared keys (like `profiles`) fan
+ * out a write to every connected environment, so writing from the
+ * pre-load default snapshot would overwrite real values everywhere.
+ * Callers that write shared keys must gate on this, not just render with it.
+ */
+export function usePrimarySettingsLoaded(): boolean {
+  return useAtomValue(primaryServerConfigAtom) !== null;
+}
+
 export const PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE =
   "This setting is saved on a server, and the hosted app is not anchored to one. Change it from the desktop app or from the server's own address.";
 
 /**
  * Whether primary-scoped server settings have a server to live on. The
  * hosted app connects to every environment as a remote, so it has no primary:
- * `usePrimarySettings` reads schema defaults there and writes have nowhere
- * to go. Desktop and server-served web always have one.
+ * `usePrimarySettings` reads schema defaults there. Shared keys (like
+ * `profiles`) still fan a write out to every connected environment in that
+ * case, which is exactly why writes from an unloaded primary must be gated
+ * separately with `usePrimarySettingsLoaded`. Desktop and server-served web
+ * always have a primary.
  */
 export function usePrimarySettingsAvailable(): boolean {
   const primaryEnvironment = usePrimaryEnvironment();

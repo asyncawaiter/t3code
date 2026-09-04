@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  scopedProjectKey,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
@@ -28,6 +29,9 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  ALL_PROFILE_ID,
+  findProfile,
+  resolveProfiles,
   type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
@@ -38,14 +42,16 @@ import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
-import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { useCanGoBack, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  CircleIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  LayoutDashboardIcon,
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
@@ -71,7 +77,13 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
-import { useClientSettings } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  usePrimarySettingsLoaded,
+  useUpdatePrimarySettings,
+} from "../hooks/useSettings";
+import { moveProjectToProfile } from "./settings/ProjectSettingsPanel.logic";
 import { useTheme } from "../hooks/useTheme";
 import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
@@ -416,6 +428,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
+  const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const canGoBack = useCanGoBack();
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -467,6 +482,21 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         });
         return;
       }
+      if (command === "dashboard.toggle") {
+        if (state.open) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (pathname === "/dashboard") {
+          if (canGoBack) {
+            window.history.back();
+          }
+          // The index route creates a draft thread; with nowhere real to go
+          // back to, do nothing rather than spawn one as a side effect.
+        } else {
+          void navigate({ to: "/dashboard" });
+        }
+        return;
+      }
       const mode = overlayModeForCommand(command);
       if (mode === null) {
         return;
@@ -477,7 +507,19 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, previewOpen, resolvedTheme, terminalOpen, theme, themeHalves, toggleMode]);
+  }, [
+    canGoBack,
+    keybindings,
+    navigate,
+    pathname,
+    previewOpen,
+    resolvedTheme,
+    state.open,
+    terminalOpen,
+    theme,
+    themeHalves,
+    toggleMode,
+  ]);
 
   useEffect(
     () =>
@@ -579,6 +621,12 @@ function OpenCommandPaletteDialog(props: {
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const clientSettings = useClientSettings();
+  const rawProfiles = usePrimarySettings((s) => s.profiles);
+  const resolvedProfiles = useMemo(() => resolveProfiles(rawProfiles), [rawProfiles]);
+  const activeProfileId = useUiStateStore((store) => store.activeProfileId);
+  const setActiveProfileId = useUiStateStore((store) => store.setActiveProfileId);
+  const updatePrimarySettings = useUpdatePrimarySettings();
+  const primarySettingsLoaded = usePrimarySettingsLoaded();
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
@@ -1685,6 +1733,22 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
+  const userProfiles = resolvedProfiles.filter((profile) => profile.id !== ALL_PROFILE_ID);
+  if (userProfiles.length > 0) {
+    for (const profile of resolvedProfiles) {
+      actionItems.push({
+        kind: "action",
+        value: `action:profile:${profile.id}`,
+        searchTerms: ["profile", "switch to profile", profile.name],
+        title: `Switch to profile: ${profile.name}`,
+        icon: <CircleIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          setActiveProfileId(profile.id === ALL_PROFILE_ID ? null : profile.id);
+        },
+      });
+    }
+  }
+
   if (wslAddProjectEnvironmentOption) {
     actionItems.push({
       kind: "action",
@@ -1724,6 +1788,17 @@ function OpenCommandPaletteDialog(props: {
     icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:dashboard",
+    searchTerms: ["dashboard", "board", "attention", "needs you"],
+    title: "Open dashboard",
+    icon: <LayoutDashboardIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/dashboard" });
     },
   });
 
@@ -1916,6 +1991,25 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
+      // A new project created while a profile is active joins that profile,
+      // or it would be created invisible: the sidebar filters everything
+      // outside the active profile's project set. Skipped while primary
+      // settings haven't loaded: writing from the pre-load default profile
+      // list would fan an empty-profiles patch out to every environment.
+      if (primarySettingsLoaded && activeProfileId !== null && activeProfileId !== ALL_PROFILE_ID) {
+        const activeProfile = findProfile(resolvedProfiles, activeProfileId);
+        if (activeProfile !== undefined) {
+          const newProjectKey = scopedProjectKey(scopeProjectRef(input.environmentId, projectId));
+          updatePrimarySettings({
+            profiles: moveProjectToProfile(
+              resolvedProfiles.filter((profile) => profile.id !== ALL_PROFILE_ID),
+              newProjectKey,
+              activeProfile.id,
+            ),
+          });
+        }
+      }
+
       const navigationResult = await settlePromise(() =>
         handleNewThread(scopeProjectRef(input.environmentId, projectId)),
       );
@@ -1933,16 +2027,20 @@ function OpenCommandPaletteDialog(props: {
       setOpen(false);
     },
     [
+      activeProfileId,
       handleNewThread,
       createProject,
       environments,
       navigate,
       primaryEnvironmentId,
+      primarySettingsLoaded,
       projects,
       providers,
+      resolvedProfiles,
       setOpen,
       clientSettings.sidebarThreadSortOrder,
       threads,
+      updatePrimarySettings,
     ],
   );
 

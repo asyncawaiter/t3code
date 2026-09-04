@@ -69,7 +69,11 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  useLegacySidebarEnabled,
+  usePrimarySettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -118,6 +122,7 @@ import {
 } from "../../appearanceFonts";
 import { CodeFontPreview, PromptFontPreview, TerminalFontPreview } from "./SettingsFontPreviews";
 import { SharedSettingsMismatchAlert } from "./SharedSettingsMismatchAlert";
+import { ProfilesSettings } from "./ProfilesSettings";
 import { discoverInstalledFonts, FontFamilyPicker, useFontEnumeration } from "./FontFamilyPicker";
 import {
   NumberField,
@@ -2000,6 +2005,7 @@ function LegacyFeaturesSection() {
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
+  const legacySidebarEnabled = useLegacySidebarEnabled();
   const navigate = useNavigate();
   const environmentId = usePrimaryEnvironmentId();
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
@@ -2102,6 +2108,8 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        {legacySidebarEnabled ? null : <ProfilesSettings />}
 
         {supportsAutoSettlement ? (
           <>

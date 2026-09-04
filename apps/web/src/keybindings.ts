@@ -288,6 +288,14 @@ export function threadTraversalDirectionFromCommand(
   return null;
 }
 
+export function profileTraversalDirectionFromCommand(
+  command: string | null,
+): "previous" | "next" | null {
+  if (command === "profile.previous") return "previous";
+  if (command === "profile.next") return "next";
+  return null;
+}
+
 export function shouldShowThreadJumpHints(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
