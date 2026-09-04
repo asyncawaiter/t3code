@@ -43,6 +43,8 @@ import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import { ThreadForkContextRepositoryLive } from "./persistence/Layers/ThreadForkContext.ts";
+import { ThreadForkServiceLive } from "./orchestration/Layers/ThreadForkService.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
@@ -362,6 +364,16 @@ const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
 
+// ThreadForkContextRepositoryLive also rides the OrchestrationProjectionPipeline
+// SQL client (see ProjectionPipeline.ts), but that pipeline's output is not
+// merged outward to sibling reactors/services, so it is provided again here
+// for ThreadForkService and anything else outside the pipeline that reads it
+// (ProviderCommandReactor's first-turn fork context injection).
+const ThreadForkLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(ThreadForkServiceLive),
+  Layer.provideMerge(ThreadForkContextRepositoryLive),
+);
+
 const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
 
 const TerminalLayerLive = TerminalManager.layer.pipe(
@@ -448,6 +460,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
+  Layer.provideMerge(ThreadForkLayerLive),
   Layer.provideMerge(
     Layer.mergeAll(SourceControlProviderRegistryLayerLive, PullRequestServiceLive),
   ),

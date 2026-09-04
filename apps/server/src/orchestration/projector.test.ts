@@ -104,6 +104,54 @@ describe("orchestration projector", () => {
     ]);
   });
 
+  it("carries forkedFrom onto the projected thread", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const model = createEmptyReadModel(now);
+
+    const next = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-child",
+          occurredAt: now,
+          commandId: "cmd-fork-create",
+          payload: {
+            threadId: "thread-child",
+            projectId: "project-1",
+            title: "Forked thread",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+            forkedFrom: {
+              threadId: "thread-source",
+              messageId: "msg-1",
+              turnId: null,
+              sequence: 7,
+              forkedAt: now,
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.forkedFrom).toEqual({
+      threadId: "thread-source",
+      messageId: "msg-1",
+      turnId: null,
+      sequence: 7,
+      forkedAt: now,
+    });
+  });
+
   it("fails when event payload cannot be decoded by runtime schema", async () => {
     const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);

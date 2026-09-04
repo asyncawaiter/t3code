@@ -315,6 +315,21 @@ function mapLatestTurn(
   };
 }
 
+function buildForkedFrom(row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>) {
+  if (row.forkSourceThreadId === null) {
+    return {};
+  }
+  return {
+    forkedFrom: {
+      threadId: row.forkSourceThreadId,
+      messageId: row.forkSourceMessageId!,
+      turnId: row.forkSourceTurnId,
+      sequence: row.forkSourceSequence!,
+      forkedAt: row.forkForkedAt!,
+    },
+  };
+}
+
 function mapTitleRegeneration(row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>) {
   return row.titleRegenerationRequestId != null && row.titleRegenerationStartedAt != null
     ? {
@@ -471,6 +486,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_source_thread_id AS "forkSourceThreadId",
+          fork_source_message_id AS "forkSourceMessageId",
+          fork_source_turn_id AS "forkSourceTurnId",
+          fork_source_sequence AS "forkSourceSequence",
+          fork_forked_at AS "forkForkedAt",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -509,6 +529,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_source_thread_id AS "forkSourceThreadId",
+          fork_source_message_id AS "forkSourceMessageId",
+          fork_source_turn_id AS "forkSourceTurnId",
+          fork_source_sequence AS "forkSourceSequence",
+          fork_forked_at AS "forkForkedAt",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -549,6 +574,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_source_thread_id AS "forkSourceThreadId",
+          fork_source_message_id AS "forkSourceMessageId",
+          fork_source_turn_id AS "forkSourceTurnId",
+          fork_source_sequence AS "forkSourceSequence",
+          fork_forked_at AS "forkForkedAt",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1011,6 +1041,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_source_thread_id AS "forkSourceThreadId",
+          fork_source_message_id AS "forkSourceMessageId",
+          fork_source_turn_id AS "forkSourceTurnId",
+          fork_source_sequence AS "forkSourceSequence",
+          fork_forked_at AS "forkForkedAt",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1910,6 +1945,7 @@ pending_approval_requests AS (
                 ...(row.linkedPullRequest === null
                   ? {}
                   : { linkedPullRequest: row.linkedPullRequest }),
+                ...buildForkedFrom(row),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2123,6 +2159,7 @@ pending_approval_requests AS (
                   ...(row.linkedPullRequest === null
                     ? {}
                     : { linkedPullRequest: row.linkedPullRequest }),
+                  ...buildForkedFrom(row),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2263,6 +2300,7 @@ pending_approval_requests AS (
                       ...(row.linkedPullRequest === null
                         ? {}
                         : { linkedPullRequest: row.linkedPullRequest }),
+                      ...buildForkedFrom(row),
                       latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                       createdAt: row.createdAt,
                       updatedAt: row.updatedAt,
@@ -2411,6 +2449,7 @@ pending_approval_requests AS (
                 ...(row.linkedPullRequest === null
                   ? {}
                   : { linkedPullRequest: row.linkedPullRequest }),
+                ...buildForkedFrom(row),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2705,6 +2744,7 @@ pending_approval_requests AS (
         ...(threadRow.value.linkedPullRequest === null
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
+        ...buildForkedFrom(threadRow.value),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -2943,6 +2983,7 @@ pending_approval_requests AS (
         ...(threadRow.value.linkedPullRequest === null
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
+        ...buildForkedFrom(threadRow.value),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,

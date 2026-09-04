@@ -24,6 +24,7 @@ import {
   requireThreadArchived,
   requireThreadAbsent,
   requireThreadNotArchived,
+  requireThreadNotDeleted,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
@@ -336,6 +337,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const forkedFrom = command.forkedFrom;
+      if (forkedFrom) {
+        const sourceThread = yield* requireThreadNotDeleted({
+          readModel,
+          command,
+          threadId: forkedFrom.threadId,
+        });
+        if (sourceThread.projectId !== command.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Fork source thread '${forkedFrom.threadId}' belongs to project '${sourceThread.projectId}', not '${command.projectId}'.`,
+          });
+        }
+        // No check that forkedFrom.messageId exists on sourceThread here: the
+        // command read model never carries historical messages (see
+        // ProjectionSnapshotQuery.getCommandReadModel), so sourceThread.messages
+        // is always empty and any such check would reject every fork whose
+        // source message predates this server process. Message existence (and
+        // that it's an assistant message) is validated by ThreadForkService,
+        // which reads the full thread-detail projection before dispatching.
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -355,6 +377,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
+          ...(forkedFrom !== undefined ? { forkedFrom } : {}),
         },
       };
     }

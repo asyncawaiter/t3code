@@ -26,6 +26,7 @@ import {
   SqlitePersistenceMemory,
 } from "../../persistence/Layers/Sqlite.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
+import { ThreadForkContextRepository } from "../../persistence/Services/ThreadForkContext.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import {
@@ -3702,3 +3703,215 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
     }),
   );
 });
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-fork-context-delete-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("deletes the thread_fork_context row when its (child) thread is deleted", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const forkContextRepository = yield* ThreadForkContextRepository;
+        const now = "2026-01-01T00:00:00.000Z";
+        const projectId = ProjectId.make("project-fork-context-delete");
+        const sourceThreadId = ThreadId.make("thread-fork-context-delete-source");
+        const childThreadId = ThreadId.make("thread-fork-context-delete-child");
+
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+        yield* appendAndProject({
+          type: "project.created",
+          eventId: EventId.make("evt-fork-context-delete-1"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-fork-context-delete-1"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-fork-context-delete-1"),
+          metadata: {},
+          payload: {
+            projectId,
+            title: "Project Fork Context Delete",
+            workspaceRoot: "/tmp/project-fork-context-delete",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.created",
+          eventId: EventId.make("evt-fork-context-delete-2"),
+          aggregateKind: "thread",
+          aggregateId: childThreadId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-fork-context-delete-2"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-fork-context-delete-2"),
+          metadata: {},
+          payload: {
+            threadId: childThreadId,
+            projectId,
+            title: "Forked thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* forkContextRepository.upsert({
+          threadId: childThreadId,
+          sourceThreadId,
+          sourceMessageId: MessageId.make("msg-fork-context-delete"),
+          sourceSequence: 1,
+          entries: [{ kind: "user", text: "hello" }],
+          capturedChars: 5,
+          consumedAt: null,
+          createdAt: now,
+        });
+
+        const rowBeforeDelete = yield* forkContextRepository.get({
+          threadId: childThreadId,
+        });
+        assert.isTrue(Option.isSome(rowBeforeDelete));
+
+        yield* appendAndProject({
+          type: "thread.deleted",
+          eventId: EventId.make("evt-fork-context-delete-3"),
+          aggregateKind: "thread",
+          aggregateId: childThreadId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-fork-context-delete-3"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-fork-context-delete-3"),
+          metadata: {},
+          payload: {
+            threadId: childThreadId,
+            deletedAt: now,
+          },
+        });
+
+        const rowAfterDelete = yield* forkContextRepository.get({
+          threadId: childThreadId,
+        });
+        assert.isTrue(Option.isNone(rowAfterDelete));
+      }),
+    );
+
+    it.effect(
+      "deletes thread_fork_context rows whose source_thread_id is the deleted (source) thread",
+      () =>
+        Effect.gen(function* () {
+          const projectionPipeline = yield* OrchestrationProjectionPipeline;
+          const eventStore = yield* OrchestrationEventStore;
+          const forkContextRepository = yield* ThreadForkContextRepository;
+          const now = "2026-01-01T00:00:00.000Z";
+          const projectId = ProjectId.make("project-fork-context-source-delete");
+          const sourceThreadId = ThreadId.make("thread-fork-context-source-delete-source");
+          const childThreadId = ThreadId.make("thread-fork-context-source-delete-child");
+
+          const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+            eventStore
+              .append(event)
+              .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+          yield* appendAndProject({
+            type: "project.created",
+            eventId: EventId.make("evt-fork-context-source-delete-1"),
+            aggregateKind: "project",
+            aggregateId: projectId,
+            occurredAt: now,
+            commandId: CommandId.make("cmd-fork-context-source-delete-1"),
+            causationEventId: null,
+            correlationId: CorrelationId.make("cmd-fork-context-source-delete-1"),
+            metadata: {},
+            payload: {
+              projectId,
+              title: "Project Fork Context Source Delete",
+              workspaceRoot: "/tmp/project-fork-context-source-delete",
+              defaultModelSelection: null,
+              scripts: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+
+          yield* appendAndProject({
+            type: "thread.created",
+            eventId: EventId.make("evt-fork-context-source-delete-2"),
+            aggregateKind: "thread",
+            aggregateId: childThreadId,
+            occurredAt: now,
+            commandId: CommandId.make("cmd-fork-context-source-delete-2"),
+            causationEventId: null,
+            correlationId: CorrelationId.make("cmd-fork-context-source-delete-2"),
+            metadata: {},
+            payload: {
+              threadId: childThreadId,
+              projectId,
+              title: "Forked thread",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5-codex",
+              },
+              runtimeMode: "full-access",
+              branch: null,
+              worktreePath: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+
+          yield* forkContextRepository.upsert({
+            threadId: childThreadId,
+            sourceThreadId,
+            sourceMessageId: MessageId.make("msg-fork-context-source-delete"),
+            sourceSequence: 1,
+            entries: [{ kind: "user", text: "hello" }],
+            capturedChars: 5,
+            consumedAt: null,
+            createdAt: now,
+          });
+
+          const rowBeforeDelete = yield* forkContextRepository.get({
+            threadId: childThreadId,
+          });
+          assert.isTrue(Option.isSome(rowBeforeDelete));
+
+          // Deleting the SOURCE thread (not the child that owns the row) is
+          // what deleteBySourceThreadId is for: the row still names a now-
+          // gone thread as sourceThreadId and must be cleaned up too.
+          yield* appendAndProject({
+            type: "thread.deleted",
+            eventId: EventId.make("evt-fork-context-source-delete-3"),
+            aggregateKind: "thread",
+            aggregateId: sourceThreadId,
+            occurredAt: now,
+            commandId: CommandId.make("cmd-fork-context-source-delete-3"),
+            causationEventId: null,
+            correlationId: CorrelationId.make("cmd-fork-context-source-delete-3"),
+            metadata: {},
+            payload: {
+              threadId: sourceThreadId,
+              deletedAt: now,
+            },
+          });
+
+          const rowAfterDelete = yield* forkContextRepository.get({
+            threadId: childThreadId,
+          });
+          assert.isTrue(Option.isNone(rowAfterDelete));
+        }),
+    );
+  },
+);

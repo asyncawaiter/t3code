@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { codexFeedbackMessage } from "@t3tools/client-runtime/state/threads";
 
 import {
+  EnvironmentId,
   EventId,
   MessageId,
   ProjectId,
@@ -10,9 +11,11 @@ import {
   TurnId,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
+  type ThreadForkOrigin,
 } from "@t3tools/contracts";
 
 import {
+  buildForkSeamHref,
   buildPendingUserInputAnswers,
   buildThreadFeed,
   derivePendingApprovals,
@@ -330,6 +333,29 @@ function makeThread(
 }
 
 describe("buildThreadFeed", () => {
+  it("renders fork.context-sent as a plain info row, not a tool row", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-fork-context-sent"),
+      projectId: ProjectId.make("project-1"),
+      title: "Forked chat",
+      activities: [
+        makeActivity({
+          id: EventId.make("fork-context-sent"),
+          kind: "fork.context-sent",
+          tone: "info",
+          summary: "Sent the source chat's context",
+          createdAt: "2026-09-01T00:00:00.000Z",
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    const [row] = group.activities;
+    expect(row?.toolLike).toBe(false);
+  });
+
   it("keeps long Claude commands expandable without repeating them in full detail", () => {
     const command = `printf 'first line\nsecond line'\n&& printf done`;
     const thread = makeThread({
@@ -2156,5 +2182,80 @@ describe("quiet timeline: nested agents", () => {
     expect(deriveThreadFeedPresentation(feed, null, new Set())).toMatchObject([
       { type: "activity-group", id: "nested-done" },
     ]);
+  });
+});
+
+describe("fork seam", () => {
+  const forkedFrom: ThreadForkOrigin = {
+    threadId: ThreadId.make("thread-source"),
+    messageId: MessageId.make("message-boundary"),
+    turnId: TurnId.make("turn-1"),
+    sequence: 4,
+    forkedAt: "2026-09-01T00:00:00.000Z",
+  };
+
+  it("emits the fork seam first only when the thread has forkedFrom", () => {
+    const forked = makeThread({
+      id: ThreadId.make("thread-child"),
+      projectId: ProjectId.make("project-1"),
+      title: "Continued chat",
+      forkedFrom,
+      messages: [
+        {
+          id: MessageId.make("m1"),
+          role: "user",
+          text: "hi",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-09-01T00:00:01.000Z",
+          updatedAt: "2026-09-01T00:00:01.000Z",
+        },
+      ],
+    });
+    const feed = buildThreadFeed(forked);
+    expect(feed[0]).toMatchObject({ type: "fork-seam", forkedFrom });
+    expect(deriveThreadFeedPresentation(feed, null, new Set())[0]).toMatchObject({
+      type: "fork-seam",
+      forkedFrom,
+    });
+
+    const notForked = makeThread({
+      id: ThreadId.make("thread-plain"),
+      projectId: ProjectId.make("project-1"),
+      title: "Plain chat",
+    });
+    expect(buildThreadFeed(notForked).some((entry) => entry.type === "fork-seam")).toBe(false);
+  });
+
+  it("builds a link to the source thread with an anchor query param", () => {
+    const environmentId = EnvironmentId.make("env-1");
+    expect(buildForkSeamHref(environmentId, forkedFrom)).toBe(
+      "/threads/env-1/thread-source?anchorMessageId=message-boundary",
+    );
+  });
+
+  it("omits the fork seam while older turns are still unloaded", () => {
+    const forked = makeThread({
+      id: ThreadId.make("thread-child-windowed"),
+      projectId: ProjectId.make("project-1"),
+      title: "Continued chat",
+      forkedFrom,
+      messages: [
+        {
+          id: MessageId.make("m1"),
+          role: "user",
+          text: "hi",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-09-01T00:00:01.000Z",
+          updatedAt: "2026-09-01T00:00:01.000Z",
+        },
+      ],
+    });
+    const windowed = buildThreadFeed(forked, { hasOlderTurns: true });
+    expect(windowed.some((entry) => entry.type === "fork-seam")).toBe(false);
+
+    const fullyLoaded = buildThreadFeed(forked, { hasOlderTurns: false });
+    expect(fullyLoaded[0]).toMatchObject({ type: "fork-seam", forkedFrom });
   });
 });

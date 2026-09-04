@@ -33,6 +33,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
+  OrchestrationForkThreadError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
@@ -88,6 +89,7 @@ import {
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
+import { ThreadForkService } from "./orchestration/Layers/ThreadForkService.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -146,6 +148,7 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isOrchestrationForkThreadError = Schema.is(OrchestrationForkThreadError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -500,6 +503,7 @@ const makeWsRpcLayer = (
         }
       };
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+      const threadForkService = yield* ThreadForkService;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
@@ -1383,6 +1387,22 @@ const makeWsRpcLayer = (
                     message: "Failed to load full thread diff",
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.forkThread]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.forkThread,
+            threadForkService.forkThread(input).pipe(
+              Effect.mapError((cause) =>
+                isOrchestrationForkThreadError(cause)
+                  ? cause
+                  : new OrchestrationForkThreadError({
+                      reason: "source-not-found",
+                      message: "Failed to fork the thread",
+                      cause,
+                    }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },

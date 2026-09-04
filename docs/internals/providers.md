@@ -298,6 +298,16 @@ Provider output comes back as internal commands such as `thread.message.assistan
 `thread.session.set`, which clients observe through `orchestration.subscribeThread`. See
 [overview.md](./overview.md) for the command/event loop.
 
+### Fork context on the first turn
+
+A forked thread's first turn gets one extra step. [`ProviderCommandReactor`][cmd] checks whether the
+thread has a `forkedFrom` origin and an unconsumed fork context row; if so, it prepends the bounded
+transcript captured from the source thread to the provider input for that turn only, honoring the
+120,000-character input limit by packing the newest entries first and noting how many older entries
+were omitted. Every later turn on that thread sends only the user's own message, exactly as on any
+other thread. The persisted user message is never rewritten, and no adapter needs to know a fork
+happened.
+
 ## Server-side workers
 
 Provider work flows through three queue-backed workers. All three are built with

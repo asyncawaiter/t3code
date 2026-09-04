@@ -101,6 +101,44 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.branch).toBe("main");
         expect(result.thread.messages).toEqual([]);
         expect(result.thread.session).toBeNull();
+        expect(result.thread.forkedFrom).toBeUndefined();
+      }
+    });
+
+    it("carries forkedFrom onto a forked thread", () => {
+      const result = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 1,
+        occurredAt: "2026-04-01T01:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-child"),
+        type: "thread.created",
+        payload: {
+          threadId: ThreadId.make("thread-child"),
+          projectId: ProjectId.make("project-1"),
+          title: "Forked Thread",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "main",
+          worktreePath: null,
+          createdAt: "2026-04-01T01:00:00.000Z",
+          updatedAt: "2026-04-01T01:00:00.000Z",
+          forkedFrom: {
+            threadId: ThreadId.make("thread-1"),
+            messageId: MessageId.make("msg-1"),
+            turnId: null,
+            sequence: 2,
+            forkedAt: "2026-04-01T01:00:00.000Z",
+          },
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.forkedFrom?.threadId).toBe("thread-1");
+        expect(result.thread.forkedFrom?.messageId).toBe("msg-1");
+        expect(result.thread.forkedFrom?.sequence).toBe(2);
       }
     });
   });

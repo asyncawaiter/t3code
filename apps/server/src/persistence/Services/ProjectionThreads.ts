@@ -9,6 +9,7 @@
 import {
   CommandId,
   IsoDateTime,
+  MessageId,
   ModelSelection,
   NonNegativeInt,
   ProjectId,
@@ -35,6 +36,12 @@ export const ProjectionThread = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  // Present only when this thread was created via "Fork in a new tab".
+  forkSourceThreadId: Schema.NullOr(ThreadId),
+  forkSourceMessageId: Schema.NullOr(MessageId),
+  forkSourceTurnId: Schema.NullOr(TurnId),
+  forkSourceSequence: Schema.NullOr(NonNegativeInt),
+  forkForkedAt: Schema.NullOr(IsoDateTime),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

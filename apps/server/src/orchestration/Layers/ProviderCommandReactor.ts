@@ -4,6 +4,7 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
@@ -12,7 +13,10 @@ import {
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
-import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import {
+  assistantCitationsToPlainText,
+  expandAssistantCitationsForProvider,
+} from "@t3tools/shared/assistantCitations";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -30,6 +34,11 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
+import {
+  ThreadForkContextRepository,
+  type ThreadForkContextEntry,
+} from "../../persistence/Services/ThreadForkContext.ts";
+import { buildForkContextInput, type ForkContextEntry } from "../forkContext.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
@@ -305,10 +314,47 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
   return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
 }
 
+/**
+ * ThreadForkContextEntry (persistence row shape) and ForkContextEntry (pure
+ * forkContext.ts shape) are structurally the same except `partial`: the
+ * persisted column is a plain optional boolean while the pure module only
+ * ever sets `partial: true`. curateForkEntries never writes `partial: false`,
+ * so this narrows without changing behavior.
+ */
+function toForkContextEntries(
+  rows: ReadonlyArray<ThreadForkContextEntry>,
+): ReadonlyArray<ForkContextEntry> {
+  return rows.map((row) =>
+    row.partial === true
+      ? { kind: row.kind, text: row.text, partial: true }
+      : { kind: row.kind, text: row.text },
+  );
+}
+
+/**
+ * Summary for the `fork.context-sent` activity appended after a forked
+ * thread's first turn sends its inherited context. Mirrors the three cases
+ * buildForkContextInput can produce: full omission, partial omission, and a
+ * clean fit.
+ */
+function buildForkContextActivitySummary(built: {
+  readonly includedCount: number;
+  readonly omittedCount: number;
+}): string {
+  if (built.includedCount === 0 && built.omittedCount > 0) {
+    return "Fork context was omitted to fit the input limit";
+  }
+  if (built.omittedCount > 0) {
+    return `Continued with ${built.includedCount} messages from the source chat, ${built.omittedCount} older messages omitted to fit the input limit`;
+  }
+  return `Continued with ${built.includedCount} messages from the source chat`;
+}
+
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const threadForkContextRepository = yield* ThreadForkContextRepository;
   const providerAuthService = yield* ProviderAuthService;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
@@ -1244,13 +1290,29 @@ const make = Effect.gen(function* () {
 
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
-    if (isFirstUserMessageTurn) {
+    // Set only when this turn's outgoing text was replaced with the
+    // forked-thread wrapper (inherited context + the real user text), so the
+    // fork row is deleted and the `fork.context-sent` activity is appended
+    // only after that replaced text is actually accepted by sendTurn below.
+    let forkContextConsumption:
+      | { readonly includedCount: number; readonly omittedCount: number }
+      | undefined;
+    let sendTurnMessageText = message.text;
+
+    // Needed by both the first-turn title/branch generation below and the
+    // fork-context injection below, so it is resolved once whenever either
+    // one might need it.
+    let generationCwd: string | undefined;
+    if (isFirstUserMessageTurn || thread.forkedFrom) {
       const project = yield* resolveProject(thread.projectId);
-      const generationCwd =
+      generationCwd =
         resolveThreadWorkspaceCwd({
           thread,
           projects: project ? [project] : [],
         }) ?? process.cwd();
+    }
+
+    if (isFirstUserMessageTurn) {
       const generationInput = {
         messageText: assistantCitationsToPlainText(message.text),
         ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
@@ -1267,15 +1329,65 @@ const make = Effect.gen(function* () {
       if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
         yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
-          cwd: generationCwd,
+          cwd: generationCwd!,
           ...generationInput,
         }).pipe(Effect.forkScoped);
       }
     }
 
+    // Gated only on the thread being a fork with a still-present context row:
+    // a first send that fails leaves the row in place, so the retry (on this
+    // same turn or a later one, first-user-message or not) still injects it.
+    // Once sendTurn below succeeds, the row is deleted and every later turn
+    // is naturally a no-op here.
+    if (thread.forkedFrom) {
+      const forkRowOption = yield* threadForkContextRepository
+        .get({ threadId: thread.id })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider command reactor failed to read fork context row", {
+              threadId: thread.id,
+              cause: Cause.pretty(cause),
+            }).pipe(Effect.as(Option.none())),
+          ),
+        );
+      if (Option.isSome(forkRowOption)) {
+        const forkRow = forkRowOption.value;
+        // Cheap shell lookup: only the title is needed here, so a full
+        // thread-detail read (messages, activities, plans) would be wasted
+        // work on every forked thread's first send.
+        const sourceThreadShell = yield* projectionSnapshotQuery
+          .getThreadShellById(forkRow.sourceThreadId)
+          .pipe(Effect.map(Option.getOrUndefined));
+        // The provider's own citation expansion (ProviderService.sendTurn)
+        // runs once on whatever `input` text it is given. Every entry
+        // curated into a fork context row (message text, tool summaries,
+        // plan markdown) is already citation-stripped to plain text at
+        // capture time (see forkContext.ts), and the user text below is
+        // separately pre-expanded. So that later provider-side expansion
+        // pass finds no `t3-citation://` markup left anywhere in this
+        // request and is a no-op for it.
+        const citationExpandedUserText = expandAssistantCitationsForProvider(message.text);
+        const built = buildForkContextInput({
+          entries: toForkContextEntries(forkRow.entries),
+          userText: citationExpandedUserText,
+          // Falls back to the child's own title when the source thread was
+          // deleted (no shell row) between the fork and this send.
+          sourceTitle: sourceThreadShell?.title ?? thread.title,
+          sourceCwd: generationCwd!,
+          limit: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+        });
+        sendTurnMessageText = built.text;
+        forkContextConsumption = {
+          includedCount: built.includedCount,
+          omittedCount: built.omittedCount,
+        };
+      }
+    }
+
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: message.text,
+      messageText: sendTurnMessageText,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
@@ -1293,7 +1405,41 @@ const make = Effect.gen(function* () {
 
     yield* providerService
       .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+      .pipe(
+        Effect.tap(() => {
+          if (!forkContextConsumption) {
+            return Effect.void;
+          }
+          const consumption = forkContextConsumption;
+          return Effect.gen(function* () {
+            yield* threadForkContextRepository.delete({ threadId: thread.id });
+            yield* orchestrationEngine.dispatch({
+              type: "thread.activity.append",
+              commandId: yield* serverCommandId("fork-context-sent"),
+              threadId: thread.id,
+              activity: {
+                id: yield* serverEventId(),
+                tone: "info",
+                kind: "fork.context-sent",
+                summary: buildForkContextActivitySummary(consumption),
+                payload: null,
+                turnId: null,
+                createdAt: event.payload.createdAt,
+              },
+              createdAt: event.payload.createdAt,
+            });
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                "provider command reactor failed to record fork context consumption",
+                { threadId: thread.id, cause: Cause.pretty(cause) },
+              ),
+            ),
+          );
+        }),
+        Effect.catchCause(recoverTurnStartFailure),
+        Effect.forkScoped,
+      );
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (

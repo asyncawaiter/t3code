@@ -1286,6 +1286,114 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("carries forkedFrom onto the thread shell and the full snapshot", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-1',
+          'Project 1',
+          '/tmp/project-1',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-05-01T00:00:00.000Z',
+          '2026-05-01T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          fork_source_thread_id,
+          fork_source_message_id,
+          fork_source_turn_id,
+          fork_source_sequence,
+          fork_forked_at,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-child',
+          'project-1',
+          'Forked thread',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          'thread-source',
+          'msg-source-1',
+          NULL,
+          9,
+          '2026-05-01T00:00:02.000Z',
+          NULL,
+          NULL,
+          0,
+          0,
+          0,
+          '2026-05-01T00:00:02.000Z',
+          '2026-05-01T00:00:02.000Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      const threadShell = yield* snapshotQuery.getThreadShellById(ThreadId.make("thread-child"));
+      assert.equal(threadShell._tag, "Some");
+      if (threadShell._tag === "Some") {
+        assert.deepEqual(threadShell.value.forkedFrom, {
+          threadId: ThreadId.make("thread-source"),
+          messageId: MessageId.make("msg-source-1"),
+          turnId: null,
+          sequence: 9,
+          forkedAt: "2026-05-01T00:00:02.000Z",
+        });
+      }
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      const thread = snapshot.threads.find((entry) => entry.id === "thread-child");
+      assert.deepEqual(thread?.forkedFrom, {
+        threadId: ThreadId.make("thread-source"),
+        messageId: MessageId.make("msg-source-1"),
+        turnId: null,
+        sequence: 9,
+        forkedAt: "2026-05-01T00:00:02.000Z",
+      });
+    }),
+  );
+
   it.effect("uses projection_threads.latest_turn_id for targeted thread latest turn queries", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

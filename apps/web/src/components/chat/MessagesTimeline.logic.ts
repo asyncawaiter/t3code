@@ -28,7 +28,12 @@ import {
   type WorkLogEntry,
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
-import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
+import {
+  type MessageId,
+  type OrchestrationLatestTurn,
+  type ThreadForkOrigin,
+  type TurnId,
+} from "@t3tools/contracts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
@@ -367,6 +372,12 @@ export type MessagesTimelineRow =
       kind: "thinking";
       id: string;
       createdAt: string | null;
+    }
+  | {
+      kind: "fork-seam";
+      id: string;
+      createdAt: string;
+      forkedFrom: ThreadForkOrigin;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -432,6 +443,38 @@ export function resolveAssistantMessageCopyState({
     text: hasText ? (visible ? renderCodexDirectivesForCopy(text) : text) : null,
     visible,
   };
+}
+
+/**
+ * Which assistant message "Fork in a new tab" should use while a turn is
+ * still running (the working row has no message row of its own): the latest
+ * assistant message in the running turn, falling back to the latest
+ * streaming assistant message. `null` means nothing to fork from yet, so the
+ * caller should disable the action.
+ */
+export function resolveRunningTurnForkMessageId(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+  latestTurnId: TurnId | null,
+): MessageId | null {
+  if (latestTurnId !== null) {
+    for (let index = timelineEntries.length - 1; index >= 0; index -= 1) {
+      const entry = timelineEntries[index]!;
+      if (
+        entry.kind === "message" &&
+        entry.message.role === "assistant" &&
+        entry.message.turnId === latestTurnId
+      ) {
+        return entry.message.id;
+      }
+    }
+  }
+  for (let index = timelineEntries.length - 1; index >= 0; index -= 1) {
+    const entry = timelineEntries[index]!;
+    if (entry.kind === "message" && entry.message.role === "assistant" && entry.message.streaming) {
+      return entry.message.id;
+    }
+  }
+  return null;
 }
 
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
@@ -1056,6 +1099,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "fork-seam") {
+      nextRows.push({
+        kind: "fork-seam",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        forkedFrom: timelineEntry.forkedFrom,
+      });
+      continue;
+    }
+
     const assistantTurnStillInProgress =
       timelineEntry.message.role === "assistant" &&
       unsettledTurnId !== null &&
@@ -1133,6 +1186,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   switch (a.kind) {
     case "working":
     case "thinking":
+      return a.createdAt === (b as typeof a).createdAt;
+
+    case "fork-seam":
       return a.createdAt === (b as typeof a).createdAt;
 
     case "assistant-meta": {

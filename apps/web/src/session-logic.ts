@@ -17,6 +17,7 @@ import {
   ProviderDriverKind,
   ProviderApprovalOption,
   ProviderRequestKind,
+  type ThreadForkOrigin,
   type ToolLifecycleItemType,
   type UserInputQuestion,
   type ThreadId,
@@ -190,6 +191,12 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "fork-seam";
+      createdAt: string;
+      forkedFrom: ThreadForkOrigin;
     };
 
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
@@ -1767,6 +1774,11 @@ export function deriveTimelineEntries(
   messages: ReadonlyArray<ChatMessage>,
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
+  forkedFrom?: ThreadForkOrigin | null,
+  // Older turns still pending a page load: the seam anchors the top of a
+  // forked thread's timeline, so it can only render once nothing older is
+  // left to load, or it would sit above turns that aren't actually first.
+  hasOlderTurns = false,
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -1786,9 +1798,22 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
+  const sorted = [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
+  if (!forkedFrom || hasOlderTurns) {
+    return sorted;
+  }
+  // Sorts first regardless of createdAt: the seam always anchors the top of
+  // a forked thread's timeline, even if a message's createdAt somehow sorts
+  // earlier than the fork's own timestamp.
+  const seam: TimelineEntry = {
+    id: `fork-seam:${forkedFrom.threadId}`,
+    kind: "fork-seam",
+    createdAt: forkedFrom.forkedAt,
+    forkedFrom,
+  };
+  return [seam, ...sorted];
 }
 
 export function inferCheckpointTurnCountByTurnId(

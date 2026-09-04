@@ -43,6 +43,14 @@ A single user-to-assistant work cycle inside a thread. It starts with user input
 
 A user-visible log item attached to a thread. In [the contracts][1], activities cover important non-message events like approvals, tool actions, and failures. They are projected into thread state in [projector.ts][4].
 
+#### Fork
+
+A thread created from a point in another thread's timeline. In [the contracts][1], `ThreadForkOrigin` records the source thread, the source assistant message, its turn, and the source sequence at capture. A forked thread shares its source's project, branch, and `worktreePath`; the source thread is untouched and keeps running. See [forking-a-chat.md][27].
+
+#### Fork context
+
+The bounded transcript of a source thread, captured through the fork boundary message, that a forked thread's first turn sends to the provider alongside the user's own message. Curated and packed in [forkContext.ts][28], captured and served by [ThreadForkService.ts][29], and injected on the first turn only by [ProviderCommandReactor][12]. The persisted user message is unaffected; only the provider input is extended.
+
 ### Orchestration
 
 Orchestration is the server-side domain layer that turns runtime activity into stable app state. The main entry point is [OrchestrationEngine.ts][7], with core logic in [decider.ts][8] and [projector.ts][4].
@@ -205,3 +213,6 @@ ships T3 Code already matching it.
 [24]: ./overview.md
 [25]: ../../apps/server/src/environmentTheme.ts
 [26]: ../user/environment-theme.md
+[27]: ../user/forking-a-chat.md
+[28]: ../../apps/server/src/orchestration/forkContext.ts
+[29]: ../../apps/server/src/orchestration/Layers/ThreadForkService.ts

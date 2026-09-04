@@ -19,6 +19,7 @@ import {
   EnvironmentId,
   EventId,
   MessageId,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProjectId,
   ThreadId,
   TurnId,
@@ -29,6 +30,7 @@ import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -42,6 +44,8 @@ import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { ThreadForkContextRepositoryLive } from "../../persistence/Layers/ThreadForkContext.ts";
+import { ThreadForkContextRepository } from "../../persistence/Services/ThreadForkContext.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -115,6 +119,7 @@ describe("ProviderCommandReactor", () => {
     | OrchestrationEngineService
     | ProviderCommandReactor
     | ProjectionSnapshotQuery
+    | ThreadForkContextRepository
     | SqlClient.SqlClient,
     unknown
   > | null = null;
@@ -463,6 +468,7 @@ describe("ProviderCommandReactor", () => {
         }),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(ThreadForkContextRepositoryLive),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
@@ -472,7 +478,17 @@ describe("ProviderCommandReactor", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
-    const runEffect = <A, E>(effect: Effect.Effect<A, E>) => runtime!.runPromise(effect);
+    const runEffect = <A, E>(
+      effect: Effect.Effect<
+        A,
+        E,
+        | OrchestrationEngineService
+        | ProviderCommandReactor
+        | ProjectionSnapshotQuery
+        | ThreadForkContextRepository
+        | SqlClient.SqlClient
+      >,
+    ) => runtime!.runPromise(effect);
 
     await Effect.runPromise(
       engine.dispatch({
@@ -3628,4 +3644,429 @@ describe("ProviderCommandReactor", () => {
       expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
     }),
   );
+
+  describe("forked thread first-turn context injection", () => {
+    async function seedForkedThread(
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      input: {
+        readonly childThreadId: string;
+        readonly entries: ReadonlyArray<{
+          readonly kind: "user" | "assistant" | "tool" | "plan";
+          readonly text: string;
+        }>;
+      },
+    ) {
+      const now = "2026-01-01T00:00:00.000Z";
+      const sourceAssistantMessageId = asMessageId("thread-1-source-assistant");
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.message.assistant.delta",
+          commandId: CommandId.make(`cmd-source-assistant-delta-${input.childThreadId}`),
+          threadId: ThreadId.make("thread-1"),
+          messageId: sourceAssistantMessageId,
+          delta: "The source thread's answer.",
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.make(`cmd-source-assistant-complete-${input.childThreadId}`),
+          threadId: ThreadId.make("thread-1"),
+          messageId: sourceAssistantMessageId,
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`cmd-fork-create-${input.childThreadId}`),
+          threadId: ThreadId.make(input.childThreadId),
+          projectId: asProjectId("project-1"),
+          title: "Forked thread",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          forkedFrom: {
+            threadId: ThreadId.make("thread-1"),
+            messageId: sourceAssistantMessageId,
+            turnId: null,
+            sequence: 1,
+            forkedAt: now,
+          },
+        }),
+      );
+      await harness.runEffect(
+        Effect.gen(function* () {
+          const repository = yield* ThreadForkContextRepository;
+          const capturedChars = input.entries.reduce((total, entry) => total + entry.text.length, 0);
+          yield* repository.upsert({
+            threadId: ThreadId.make(input.childThreadId),
+            sourceThreadId: ThreadId.make("thread-1"),
+            sourceMessageId: sourceAssistantMessageId,
+            sourceSequence: 1,
+            entries: input.entries,
+            capturedChars,
+            consumedAt: null,
+            createdAt: now,
+          });
+        }),
+      );
+      return { sourceAssistantMessageId };
+    }
+
+    effectIt.effect(
+      "sends the wrapped fork context on the first turn, marks the row consumed, and appends an activity",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* Effect.promise(() => createHarness());
+          yield* Effect.promise(() =>
+            seedForkedThread(harness, {
+              childThreadId: "thread-forked",
+              entries: [
+                { kind: "user", text: "What is the plan?" },
+                { kind: "assistant", text: "The source thread's answer." },
+              ],
+            }),
+          );
+          const now = "2026-01-01T00:00:00.000Z";
+
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-forked-first-turn"),
+            threadId: ThreadId.make("thread-forked"),
+            message: {
+              messageId: asMessageId("forked-user-1"),
+              role: "user",
+              text: "Keep going from where we left off.",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+
+          yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+          const sentInput = harness.sendTurn.mock.calls[0]?.[0] as { input?: string };
+          expect(sentInput.input).toContain("forked_conversation_context");
+          expect(sentInput.input).toContain("The source thread's answer.");
+          expect(sentInput.input).toContain("Keep going from where we left off.");
+          expect(sentInput.input).not.toBe("Keep going from where we left off.");
+
+          yield* Effect.promise(() => harness.drain());
+
+          // The delete + the activity append run inside the sendTurn call's
+          // forked scope (after sendTurn resolves), independent of the
+          // reactor's own drain queue, so poll rather than assume drain()
+          // already observed them.
+          const getForkContextRow = () =>
+            harness.runEffect(
+              Effect.gen(function* () {
+                const repository = yield* ThreadForkContextRepository;
+                return yield* repository.get({
+                  threadId: ThreadId.make("thread-forked"),
+                });
+              }),
+            );
+          yield* Effect.promise(() =>
+            waitFor(async () => Option.isNone(await getForkContextRow())),
+          );
+
+          const readModel = yield* Effect.promise(() => harness.readModel());
+          const forkedThread = readModel.threads.find(
+            (entry) => entry.id === ThreadId.make("thread-forked"),
+          );
+          expect(
+            forkedThread?.activities.some((activity) => activity.kind === "fork.context-sent"),
+          ).toBe(true);
+
+          // The source thread's own session/runtime state is untouched by
+          // the child's first-turn injection.
+          const sourceThread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+          expect(sourceThread?.session).toBeNull();
+        }),
+    );
+
+    effectIt.effect("sends the plain user text on the forked thread's second turn", () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        yield* Effect.promise(() =>
+          seedForkedThread(harness, {
+            childThreadId: "thread-forked-second",
+            entries: [{ kind: "assistant", text: "The source thread's answer." }],
+          }),
+        );
+        const now = "2026-01-01T00:00:00.000Z";
+
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-forked-second-turn-first"),
+          threadId: ThreadId.make("thread-forked-second"),
+          message: {
+            messageId: asMessageId("forked-second-user-1"),
+            role: "user",
+            text: "First forked turn.",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        });
+        yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+        yield* Effect.promise(() => harness.drain());
+
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-forked-second-turn-second"),
+          threadId: ThreadId.make("thread-forked-second"),
+          message: {
+            messageId: asMessageId("forked-second-user-2"),
+            role: "user",
+            text: "Second forked turn, no wrapper expected.",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        });
+        yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 2));
+
+        const secondCallInput = harness.sendTurn.mock.calls[1]?.[0] as { input?: string };
+        expect(secondCallInput.input).toBe("Second forked turn, no wrapper expected.");
+      }),
+    );
+
+    effectIt.effect("does not affect a non-forked thread's first turn", () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        const now = "2026-01-01T00:00:00.000Z";
+
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-non-forked-first-turn"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("non-forked-user-1"),
+            role: "user",
+            text: "Plain first turn, no fork.",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        });
+        yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+
+        const sentInput = harness.sendTurn.mock.calls[0]?.[0] as { input?: string };
+        expect(sentInput.input).toBe("Plain first turn, no fork.");
+      }),
+    );
+
+    effectIt.effect(
+      "bounds the assembled input to PROVIDER_SEND_TURN_MAX_INPUT_CHARS for a large source thread",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* Effect.promise(() => createHarness());
+          const longEntryText = "y".repeat(5_000);
+          yield* Effect.promise(() =>
+            seedForkedThread(harness, {
+              childThreadId: "thread-forked-large",
+              entries: Array.from({ length: 40 }, (_, index) => ({
+                kind: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+                text: `${longEntryText}-${index}`,
+              })),
+            }),
+          );
+          const now = "2026-01-01T00:00:00.000Z";
+
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-forked-large-turn"),
+            threadId: ThreadId.make("thread-forked-large"),
+            message: {
+              messageId: asMessageId("forked-large-user-1"),
+              role: "user",
+              text: "Continue with the large source thread.",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+          yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+
+          const sentInput = harness.sendTurn.mock.calls[0]?.[0] as { input?: string };
+          expect(sentInput.input).toBeDefined();
+          expect(sentInput.input!.length).toBeLessThanOrEqual(PROVIDER_SEND_TURN_MAX_INPUT_CHARS);
+          expect(sentInput.input).toContain("older entries were omitted to fit the input limit");
+        }),
+    );
+
+    effectIt.effect(
+      "leaves the fork context row unconsumed when the first send fails, and a retry still injects it",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* Effect.promise(() => createHarness());
+          yield* Effect.promise(() =>
+            seedForkedThread(harness, {
+              childThreadId: "thread-forked-retry",
+              entries: [{ kind: "assistant", text: "The source thread's answer." }],
+            }),
+          );
+          const now = "2026-01-01T00:00:00.000Z";
+
+          harness.sendTurn.mockImplementationOnce(
+            () =>
+              Effect.fail(
+                new ProviderAdapterRequestError({
+                  provider: "codex",
+                  method: "thread.turn.start",
+                  detail: "deterministic send failure",
+                }),
+              ) as never,
+          );
+
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-forked-retry-first"),
+            threadId: ThreadId.make("thread-forked-retry"),
+            message: {
+              messageId: asMessageId("forked-retry-user-1"),
+              role: "user",
+              text: "Keep going from where we left off.",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+
+          yield* Effect.promise(() =>
+            waitFor(async () => {
+              const readModel = await harness.readModel();
+              return (
+                readModel.threads.find((entry) => entry.id === ThreadId.make("thread-forked-retry"))
+                  ?.session?.status === "error"
+              );
+            }),
+          );
+          expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+          const failedInput = harness.sendTurn.mock.calls[0]?.[0] as { input?: string };
+          expect(failedInput.input).toContain("forked_conversation_context");
+
+          const rowAfterFailure = yield* Effect.promise(() =>
+            harness.runEffect(
+              Effect.gen(function* () {
+                const repository = yield* ThreadForkContextRepository;
+                return yield* repository.get({
+                  threadId: ThreadId.make("thread-forked-retry"),
+                });
+              }),
+            ),
+          );
+          expect(Option.isSome(rowAfterFailure)).toBe(true);
+
+          // Retry: the user resends. The row is still unconsumed, so
+          // injection is gated purely on that (not on this now being the
+          // thread's *second* user message).
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-forked-retry-second"),
+            threadId: ThreadId.make("thread-forked-retry"),
+            message: {
+              messageId: asMessageId("forked-retry-user-2"),
+              role: "user",
+              text: "Retry please.",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: "2026-01-01T00:00:01.000Z",
+          });
+
+          yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 2));
+          const retryInput = harness.sendTurn.mock.calls[1]?.[0] as { input?: string };
+          expect(retryInput.input).toContain("forked_conversation_context");
+          expect(retryInput.input).toContain("The source thread's answer.");
+
+          // delete runs inside the sendTurn call's forked scope after it
+          // resolves, independent of the reactor's own drain queue, so
+          // poll rather than assume it already landed.
+          const getRow = () =>
+            harness.runEffect(
+              Effect.gen(function* () {
+                const repository = yield* ThreadForkContextRepository;
+                return yield* repository.get({
+                  threadId: ThreadId.make("thread-forked-retry"),
+                });
+              }),
+            );
+          yield* Effect.promise(() => waitFor(async () => Option.isNone(await getRow())));
+        }),
+    );
+
+    effectIt.effect(
+      "still injects fork context when a second user message is already committed before the reactor catches up",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* Effect.promise(() => createHarness());
+          yield* Effect.promise(() =>
+            seedForkedThread(harness, {
+              childThreadId: "thread-forked-race",
+              entries: [{ kind: "assistant", text: "The source thread's answer." }],
+            }),
+          );
+          const now = "2026-01-01T00:00:00.000Z";
+
+          // Dispatch two turn-start commands back to back without waiting
+          // for the reactor to process either. Both `thread.message-sent`
+          // events commit (decider work) before the reactor's
+          // processTurnStartRequested for turn 1 gets scheduled, so by the
+          // time it reads the thread it already sees two user messages
+          // (isFirstUserMessageTurn would be false for both).
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-forked-race-first"),
+            threadId: ThreadId.make("thread-forked-race"),
+            message: {
+              messageId: asMessageId("forked-race-user-1"),
+              role: "user",
+              text: "First message.",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-forked-race-second"),
+            threadId: ThreadId.make("thread-forked-race"),
+            message: {
+              messageId: asMessageId("forked-race-user-2"),
+              role: "user",
+              text: "Second message, sent before the reactor caught up.",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+
+          yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length >= 1));
+          yield* Effect.promise(() => harness.drain());
+
+          const calls = harness.sendTurn.mock.calls as Array<[{ input?: string }]>;
+          expect(
+            calls.some(([callInput]) => callInput.input?.includes("forked_conversation_context")),
+          ).toBe(true);
+        }),
+    );
+  });
 });

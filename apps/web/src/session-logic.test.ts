@@ -22,6 +22,7 @@ import {
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
+  workLogEntryIsToolLike,
 } from "./session-logic";
 
 let nextActivityId = 0;
@@ -897,6 +898,23 @@ describe("deriveWorkLogEntries", () => {
     expect(deriveActivePlanState(activities, TurnId.make("turn-1"))?.steps).toMatchObject([
       { step: "Verify the composer", status: "completed" },
     ]);
+  });
+
+  it("renders fork.context-sent as a plain info row, not a tool row", () => {
+    const activities = [
+      makeActivity({
+        id: "fork-context-sent",
+        kind: "fork.context-sent",
+        summary: "Sent the source chat's context",
+        tone: "info",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ tone: "info", sourceActivityKind: "fork.context-sent" });
+    expect(workLogEntryIsToolLike(entries[0]!)).toBe(false);
   });
 
   it("omits tool started entries and keeps completed entries", () => {
@@ -2046,6 +2064,82 @@ describe("deriveTimelineEntries", () => {
         implementationThreadId: null,
       },
     });
+  });
+
+  it("puts the fork seam first when forkedFrom is present, even if its timestamp sorts later", () => {
+    const forkedFrom = {
+      threadId: ThreadId.make("source-thread"),
+      messageId: MessageId.make("source-message"),
+      turnId: TurnId.make("source-turn"),
+      sequence: 3,
+      forkedAt: "2026-03-01T00:00:00.000Z",
+    };
+
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("message-1"),
+          role: "user",
+          text: "continue",
+          createdAt: "2026-02-01T00:00:00.000Z",
+          turnId: null,
+          updatedAt: "2026-02-01T00:00:00.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [],
+      forkedFrom,
+    );
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["fork-seam", "message"]);
+    expect(entries[0]).toMatchObject({ kind: "fork-seam", forkedFrom });
+  });
+
+  it("omits the fork seam while older turns are still unloaded", () => {
+    const forkedFrom = {
+      threadId: ThreadId.make("source-thread"),
+      messageId: MessageId.make("source-message"),
+      turnId: TurnId.make("source-turn"),
+      sequence: 3,
+      forkedAt: "2026-03-01T00:00:00.000Z",
+    };
+    const messages = [
+      {
+        id: MessageId.make("message-1"),
+        role: "user" as const,
+        text: "continue",
+        createdAt: "2026-02-01T00:00:00.000Z",
+        turnId: null,
+        updatedAt: "2026-02-01T00:00:00.000Z",
+        streaming: false,
+      },
+    ];
+
+    const windowed = deriveTimelineEntries(messages, [], [], forkedFrom, true);
+    expect(windowed.map((entry) => entry.kind)).toEqual(["message"]);
+
+    const fullyLoaded = deriveTimelineEntries(messages, [], [], forkedFrom, false);
+    expect(fullyLoaded.map((entry) => entry.kind)).toEqual(["fork-seam", "message"]);
+  });
+
+  it("omits the fork seam when forkedFrom is absent or null", () => {
+    const messages = [
+      {
+        id: MessageId.make("message-1"),
+        role: "user" as const,
+        text: "hi",
+        createdAt: "2026-02-01T00:00:00.000Z",
+        turnId: null,
+        updatedAt: "2026-02-01T00:00:00.000Z",
+        streaming: false,
+      },
+    ];
+
+    expect(deriveTimelineEntries(messages, [], []).map((entry) => entry.kind)).toEqual(["message"]);
+    expect(deriveTimelineEntries(messages, [], [], null).map((entry) => entry.kind)).toEqual([
+      "message",
+    ]);
   });
 });
 

@@ -72,6 +72,8 @@ import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
+import { assistantMessageIdFromLocation } from "../lib/assistantMessageNavigation";
+import type { AssistantMessageScrollTarget } from "./chat/useAssistantCitationTarget";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -274,6 +276,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import {
   requestOlderThreadTurns,
@@ -388,6 +391,7 @@ import {
   startNewThreadForProject,
   codexArtifactTemplatePromptToAppend,
   toolGroupConsumesUpwardNavigation,
+  waitForForkedThreadShell,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
@@ -1342,6 +1346,7 @@ function ChatViewContent(props: ChatViewProps) {
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
+  const forkThread = useAtomCommand(orchestrationEnvironment.forkThread, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -1442,6 +1447,16 @@ function ChatViewContent(props: ChatViewProps) {
       ? { citation, key: citationLocation.key ?? citationLocation.href }
       : null;
   }, [citationLocation.href, citationLocation.key, environmentId, threadId]);
+  // The fork seam links to a bare message id (no quote to anchor a citation
+  // highlight), so it decodes a smaller sibling hash and just scrolls.
+  // `key` mirrors `citationRequest`: without it, clicking the same seam link
+  // twice in a row (same href) would not re-scroll on the second click.
+  const forkSeamMessageTarget = useMemo<AssistantMessageScrollTarget | null>(() => {
+    const messageId = assistantMessageIdFromLocation(citationLocation.href);
+    return messageId
+      ? { messageId, key: citationLocation.key ?? citationLocation.href }
+      : null;
+  }, [citationLocation.href, citationLocation.key]);
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -1600,6 +1615,7 @@ function ChatViewContent(props: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
+  const forkInFlightRef = useRef(false);
   const feedbackUploadsInFlightRef = useRef(new Set<string>());
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
@@ -2875,8 +2891,21 @@ function ChatViewContent(props: ChatViewProps) {
   ]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        activeThread?.forkedFrom ?? null,
+        routeKind === "server" && threadHasOlderTurns(routeThreadState),
+      ),
+    [
+      activeThread?.forkedFrom,
+      activeThread?.proposedPlans,
+      routeKind,
+      routeThreadState,
+      timelineMessages,
+      workLogEntries,
+    ],
   );
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
@@ -7198,6 +7227,88 @@ function ChatViewContent(props: ChatViewProps) {
     composerRef,
   ]);
 
+  // "Fork in a new tab" from an assistant message. Unlike implement-in-new-
+  // thread, forking a running source thread is allowed: the child inherits
+  // context server-side and never touches the source's live turn.
+  const onForkFromMessage = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeThread || !isServerThread || forkInFlightRef.current) {
+        return;
+      }
+      forkInFlightRef.current = true;
+
+      const createdAt = new Date().toISOString();
+      const nextThreadId = newThreadId();
+      const forkResult = await forkThread({
+        environmentId,
+        input: {
+          threadId: nextThreadId,
+          sourceThreadId: activeThread.id,
+          sourceMessageId: messageId,
+          title: activeThread.title,
+          modelSelection: activeThread.modelSelection,
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          createdAt,
+        },
+      });
+      const forkRpcFailure = forkResult._tag === "Failure";
+      let failure: AtomCommandResult<unknown, unknown> | null = forkRpcFailure ? forkResult : null;
+
+      if (failure === null) {
+        const shellResult = await settlePromise(() =>
+          waitForForkedThreadShell(scopeThreadRef(activeThread.environmentId, nextThreadId)),
+        );
+        failure = shellResult._tag === "Failure" ? shellResult : null;
+      }
+
+      if (failure === null) {
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: "/$environmentId/$threadId",
+            params: {
+              environmentId: activeThread.environmentId,
+              threadId: nextThreadId,
+            },
+          }),
+        );
+        failure = navigateResult._tag === "Failure" ? navigateResult : null;
+      }
+
+      if (failure !== null) {
+        if (!forkRpcFailure) {
+          const cleanupResult = await deleteThread({
+            environmentId,
+            input: {
+              threadId: nextThreadId,
+            },
+          });
+          if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
+            console.warn(
+              "Failed to clean up forked thread after start failure.",
+              squashAtomCommandFailure(cleanupResult),
+            );
+          }
+        }
+        if (!isAtomCommandInterrupted(failure)) {
+          const error = squashAtomCommandFailure(failure);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not fork this chat",
+              description:
+                error instanceof Error
+                  ? error.message
+                  : "An error occurred while creating the forked thread.",
+            }),
+          );
+        }
+      }
+      forkInFlightRef.current = false;
+    },
+    [activeThread, deleteThread, environmentId, forkThread, isServerThread, navigate],
+  );
+
   const getModelDisabledReason = useCallback(
     (instanceId: ProviderInstanceId, model: string): string | null => {
       if (!activeThread) {
@@ -7671,6 +7782,8 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
+                onForkFromMessage={onForkFromMessage}
+                messageScrollTarget={forkSeamMessageTarget}
                 onUseArtifactTemplate={useArtifactTemplate}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}

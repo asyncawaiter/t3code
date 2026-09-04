@@ -572,6 +572,95 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
   }),
 );
 
+it.effect("decodes thread.created payloads without forkedFrom", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadCreatedPayload({
+      threadId: "thread-1",
+      projectId: "project-1",
+      title: "Thread title",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.forkedFrom, undefined);
+  }),
+);
+
+it.effect("decodes thread.created payloads with forkedFrom", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadCreatedPayload({
+      threadId: "thread-2",
+      projectId: "project-1",
+      title: "Forked thread",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      forkedFrom: {
+        threadId: "thread-1",
+        messageId: "msg-1",
+        turnId: "turn-1",
+        sequence: 3,
+        forkedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    assert.strictEqual(parsed.forkedFrom?.threadId, "thread-1");
+    assert.strictEqual(parsed.forkedFrom?.messageId, "msg-1");
+    assert.strictEqual(parsed.forkedFrom?.sequence, 3);
+  }),
+);
+
+it.effect("decodes OrchestrationThread and OrchestrationThreadShell with forkedFrom", () =>
+  Effect.gen(function* () {
+    const common = {
+      id: "thread-2",
+      projectId: "project-1",
+      title: "Forked thread",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      archivedAt: null,
+      session: null,
+      forkedFrom: {
+        threadId: "thread-1",
+        messageId: "msg-1",
+        turnId: null,
+        sequence: 5,
+        forkedAt: "2026-01-01T00:00:00.000Z",
+      },
+    };
+    const thread = yield* decodeOrchestrationThread({
+      ...common,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    });
+    const shell = yield* decodeOrchestrationThreadShell({
+      ...common,
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    });
+
+    assert.strictEqual(thread.forkedFrom?.threadId, "thread-1");
+    assert.strictEqual(thread.forkedFrom?.turnId, null);
+    assert.strictEqual(shell.forkedFrom?.messageId, "msg-1");
+  }),
+);
+
 it.effect("decodes thread archived and unarchived events", () =>
   Effect.gen(function* () {
     const archived = yield* decodeOrchestrationEvent({

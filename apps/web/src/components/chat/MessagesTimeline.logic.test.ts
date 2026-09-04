@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MessageId, TurnId } from "@t3tools/contracts";
+import { MessageId, ThreadId, TurnId } from "@t3tools/contracts";
 import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
@@ -7,6 +7,7 @@ import {
   liveWorkEntryLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveRunningTurnForkMessageId,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
   shouldPreserveAssistantLineBreaks,
@@ -2446,5 +2447,117 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(reordered).not.toBe(initial);
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
+  });
+});
+
+describe("fork seam row", () => {
+  const forkedFrom = {
+    threadId: ThreadId.make("source-thread"),
+    messageId: MessageId.make("source-message"),
+    turnId: TurnId.make("source-turn"),
+    sequence: 5,
+    forkedAt: "2026-03-01T00:00:00.000Z",
+  };
+
+  it("carries the fork-seam timeline entry into a fork-seam row", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "fork-seam:source-thread",
+          kind: "fork-seam",
+          createdAt: forkedFrom.forkedAt,
+          forkedFrom,
+        },
+        {
+          id: "user-1-entry",
+          kind: "message",
+          createdAt: "2026-03-01T00:00:01Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "continue",
+            turnId: null,
+            createdAt: "2026-03-01T00:00:01Z",
+            updatedAt: "2026-03-01T00:00:01Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows[0]).toMatchObject({ kind: "fork-seam", forkedFrom });
+    expect(rows[1]).toMatchObject({ kind: "message" });
+  });
+});
+
+describe("resolveRunningTurnForkMessageId", () => {
+  it("picks the latest assistant message in the running turn", () => {
+    const messageId = resolveRunningTurnForkMessageId(
+      [
+        {
+          id: "assistant-old",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "assistant-old" as never,
+            role: "assistant",
+            text: "old",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-new",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:05Z",
+          message: {
+            id: "assistant-new" as never,
+            role: "assistant",
+            text: "new",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:05Z",
+            updatedAt: "2026-01-01T00:00:05Z",
+            streaming: true,
+          },
+        },
+      ],
+      "turn-1" as never,
+    );
+
+    expect(messageId).toBe("assistant-new");
+  });
+
+  it("falls back to the latest streaming assistant message when the turn id is unknown", () => {
+    const messageId = resolveRunningTurnForkMessageId(
+      [
+        {
+          id: "assistant-streaming",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "assistant-streaming" as never,
+            role: "assistant",
+            text: "streaming",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            streaming: true,
+          },
+        },
+      ],
+      "turn-unrelated" as never,
+    );
+
+    expect(messageId).toBe("assistant-streaming");
+  });
+
+  it("returns null when there is no assistant message to fork from yet", () => {
+    expect(resolveRunningTurnForkMessageId([], "turn-1" as never)).toBeNull();
   });
 });

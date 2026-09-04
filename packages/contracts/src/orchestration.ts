@@ -30,6 +30,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
+  forkThread: "orchestration.forkThread",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -482,6 +483,15 @@ export const ThreadLinkedPullRequest = Schema.Struct({
 });
 export type ThreadLinkedPullRequest = typeof ThreadLinkedPullRequest.Type;
 
+export const ThreadForkOrigin = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  turnId: Schema.NullOr(TurnId),
+  sequence: NonNegativeInt,
+  forkedAt: IsoDateTime,
+});
+export type ThreadForkOrigin = typeof ThreadForkOrigin.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -532,6 +542,9 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  // Present only when this thread was created via "Fork in a new tab".
+  // Optional so payloads/servers predating forking still decode.
+  forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -612,6 +625,9 @@ export const OrchestrationThreadShell = Schema.Struct({
       }),
     ),
   ),
+  // Present only when this thread was created via "Fork in a new tab".
+  // Optional so payloads/servers predating forking still decode.
+  forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -800,6 +816,8 @@ const ThreadCreateCommand = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
+  // Present only when this thread is being created via "Fork in a new tab".
+  forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
 });
 
 const ThreadDeleteCommand = Schema.Struct({
@@ -1270,6 +1288,8 @@ export const ThreadCreatedPayload = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  // Present only when this thread was created via "Fork in a new tab".
+  forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
 });
 
 export const ThreadDeletedPayload = Schema.Struct({
@@ -1739,6 +1759,25 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
 
+export const OrchestrationForkThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  sourceThreadId: ThreadId,
+  sourceMessageId: MessageId,
+  title: TrimmedNonEmptyString,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  createdAt: IsoDateTime,
+});
+export type OrchestrationForkThreadInput = typeof OrchestrationForkThreadInput.Type;
+
+export const OrchestrationForkThreadResult = Schema.Struct({
+  threadId: ThreadId,
+  inheritedEntryCount: NonNegativeInt,
+  omittedEntryCount: NonNegativeInt,
+});
+export type OrchestrationForkThreadResult = typeof OrchestrationForkThreadResult.Type;
+
 export const OrchestrationThreadSearchSource = Schema.Literals(["user", "assistant"]);
 export type OrchestrationThreadSearchSource = typeof OrchestrationThreadSearchSource.Type;
 
@@ -1833,6 +1872,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationSearchThreadsInput,
     output: OrchestrationSearchThreadsResult,
   },
+  forkThread: {
+    input: OrchestrationForkThreadInput,
+    output: OrchestrationForkThreadResult,
+  },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
     output: OrchestrationShellSnapshot,
@@ -1883,6 +1926,19 @@ export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass
 export class OrchestrationSearchThreadsError extends Schema.TaggedErrorClass<OrchestrationSearchThreadsError>()(
   "OrchestrationSearchThreadsError",
   {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class OrchestrationForkThreadError extends Schema.TaggedErrorClass<OrchestrationForkThreadError>()(
+  "OrchestrationForkThreadError",
+  {
+    reason: Schema.Literals([
+      "source-not-found",
+      "source-message-not-found",
+      "source-message-not-assistant",
+    ]),
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
   },

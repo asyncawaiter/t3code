@@ -8,10 +8,10 @@ import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { HeaderHeightContext } from "@react-navigation/elements";
+import { MessageId } from "@t3tools/contracts";
 import type {
   ApprovalRequestId,
   EnvironmentId,
-  MessageId,
   ModelSelection,
   OrchestrationThreadShell,
   ProviderApprovalDecision,
@@ -148,6 +148,8 @@ export interface ThreadDetailScreenProps {
   ) => void;
   readonly onSubmitUserInput: () => Promise<unknown>;
   readonly showContent?: boolean;
+  /** From the route's `anchorMessageId` query param (e.g. a fork seam link). */
+  readonly initialAnchorMessageId?: string | null;
 }
 
 function latestStreamingAssistantMessage(
@@ -298,6 +300,21 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     ? 0
     : Math.max(insets.bottom, 12);
   const contentPresentationKind = props.contentPresentation.kind;
+  // A fork seam link (or any deep link) can arrive with a target message id
+  // before that message's turn is loaded. Consume it once content is ready,
+  // and only once per requested id so later scrolling isn't fought.
+  const consumedInitialAnchorRef = useRef<string | null>(null);
+  useEffect(() => {
+    const requested = props.initialAnchorMessageId?.trim() || null;
+    if (
+      requested !== null &&
+      contentPresentationKind === "ready" &&
+      consumedInitialAnchorRef.current !== requested
+    ) {
+      consumedInitialAnchorRef.current = requested;
+      setAnchorMessageId(MessageId.make(requested));
+    }
+  }, [contentPresentationKind, props.initialAnchorMessageId]);
   // The raw sync status enters "synchronizing" on every full fetch, cached or
   // not. Whether messages are already on screen decides the pill label: no
   // data yet → "Loading messages", cached data reconciling → "Syncing".

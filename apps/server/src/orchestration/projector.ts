@@ -317,6 +317,7 @@ export function projectEvent(
             activities: [],
             checkpoints: [],
             session: null,
+            ...(payload.forkedFrom !== undefined ? { forkedFrom: payload.forkedFrom } : {}),
           },
           event.type,
           "thread",

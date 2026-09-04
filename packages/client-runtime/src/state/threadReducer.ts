@@ -110,6 +110,9 @@ export function applyThreadDetailEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          ...(event.payload.forkedFrom !== undefined
+            ? { forkedFrom: event.payload.forkedFrom }
+            : {}),
         },
       };
 

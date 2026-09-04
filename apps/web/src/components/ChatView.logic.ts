@@ -38,8 +38,9 @@ import {
 } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
+import type { Atom } from "effect/unstable/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { environmentThreadDetails } from "../state/threads";
+import { environmentThreadDetails, environmentThreadShells } from "../state/threads";
 import {
   filterTerminalContextsWithText,
   stripInlineTerminalContextPlaceholders,
@@ -826,15 +827,16 @@ export function getStartedThreadModelChangeBlockReason(input: {
   };
 }
 
-export async function waitForStartedServerThread(
-  threadRef: ScopedThreadRef,
-  timeoutMs = 1_000,
+/** Shared poll-then-subscribe wait: resolves once `isReady(atom value)` is
+ * true, or `timeoutMs` elapses with no such value observed. */
+async function waitForAtomCondition<T>(
+  atom: Atom.Atom<T>,
+  isReady: (value: T) => boolean,
+  timeoutMs: number,
 ): Promise<boolean> {
-  const threadAtom = environmentThreadDetails.detailAtom(threadRef);
-  const getThread = () => appAtomRegistry.get(threadAtom);
-  const thread = getThread();
+  const get = () => appAtomRegistry.get(atom);
 
-  if (threadHasStarted(thread)) {
+  if (isReady(get())) {
     return true;
   }
 
@@ -853,14 +855,14 @@ export async function waitForStartedServerThread(
       resolve(result);
     };
 
-    const unsubscribe = appAtomRegistry.subscribe(threadAtom, (thread) => {
-      if (!threadHasStarted(thread)) {
+    const unsubscribe = appAtomRegistry.subscribe(atom, (value) => {
+      if (!isReady(value)) {
         return;
       }
       finish(true);
     });
 
-    if (threadHasStarted(getThread())) {
+    if (isReady(get())) {
       finish(true);
       return;
     }
@@ -869,6 +871,34 @@ export async function waitForStartedServerThread(
       finish(false);
     }, timeoutMs);
   });
+}
+
+export function waitForStartedServerThread(
+  threadRef: ScopedThreadRef,
+  timeoutMs = 1_000,
+): Promise<boolean> {
+  return waitForAtomCondition(
+    environmentThreadDetails.detailAtom(threadRef),
+    threadHasStarted,
+    timeoutMs,
+  );
+}
+
+/**
+ * A forked thread has no turn (no send happens until the user acts), so
+ * `threadHasStarted`'s "has a turn/message/session" check never fires. Wait
+ * for the shell to appear in the store instead — that's the signal
+ * `thread.create` landed and the child is navigable.
+ */
+export function waitForForkedThreadShell(
+  threadRef: ScopedThreadRef,
+  timeoutMs = 1_000,
+): Promise<boolean> {
+  return waitForAtomCondition(
+    environmentThreadShells.threadShellAtom(threadRef),
+    (shell) => shell !== null,
+    timeoutMs,
+  );
 }
 
 export interface LocalDispatchSnapshot {

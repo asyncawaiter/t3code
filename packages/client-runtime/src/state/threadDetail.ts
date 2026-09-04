@@ -64,6 +64,7 @@ export function mergeEnvironmentThread(
     pinnedAt: shell.pinnedAt,
     pinOrderKey: shell.pinOrderKey,
     session: shell.session,
+    ...(shell.forkedFrom !== undefined ? { forkedFrom: shell.forkedFrom } : {}),
   };
 }
 

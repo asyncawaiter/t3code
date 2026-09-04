@@ -53,7 +53,9 @@ import {
   useComposerDraft,
 } from "./use-composer-drafts";
 import { setPendingConnectionError } from "../state/use-remote-environment-registry";
-import { useSelectedThreadDetail } from "../state/use-thread-detail";
+import { useSelectedThreadDetailState } from "../state/use-thread-detail";
+import { threadHasOlderTurns } from "@t3tools/client-runtime/state/threads";
+import * as Option from "effect/Option";
 import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
@@ -104,7 +106,8 @@ export function useThreadDraftForThread(input: {
 
 export function useThreadComposerState() {
   const { selectedThread: selectedThreadShell, selectedEnvironmentRuntime } = useThreadSelection();
-  const selectedThreadDetail = useSelectedThreadDetail();
+  const selectedThreadDetailState = useSelectedThreadDetailState();
+  const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
   const [feedbackSubmissionsByThreadKey, setFeedbackSubmissionsByThreadKey] = useState<
@@ -138,8 +141,14 @@ export function useThreadComposerState() {
           ? []
           : [codexFeedbackMessage(submission), codexFeedbackMessage(submission, "assistant")],
       ),
+      hasOlderTurns: threadHasOlderTurns(selectedThreadDetailState),
     });
-  }, [feedbackSubmissionsByThreadKey, selectedThreadDetail, selectedThreadKey]);
+  }, [
+    feedbackSubmissionsByThreadKey,
+    selectedThreadDetail,
+    selectedThreadDetailState,
+    selectedThreadKey,
+  ]);
 
   const selectedDraft = selectedThreadKey ? composerDrafts[selectedThreadKey] : null;
   const draftMessage = selectedDraft?.text ?? "";

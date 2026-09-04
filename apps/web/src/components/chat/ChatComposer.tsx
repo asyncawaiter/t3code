@@ -12,6 +12,7 @@ import type {
   ScopedThreadRef,
   ServerProvider,
   ThreadId,
+  UsageProviderKind,
 } from "@t3tools/contracts";
 import {
   ProviderDriverKind,
@@ -186,6 +187,7 @@ import {
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { resolveContextWindowModelDisplayName } from "./ContextWindowMeter.logic";
+import { UsageLimitsMeter } from "./UsageLimitsMeter";
 import {
   attachVideoThumbnail,
   buildExpandedImagePreview,
@@ -1012,6 +1014,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compact: boolean;
   activeContextWindow: ContextWindowSnapshot | null;
   activeThreadModelDisplayName: string | null;
+  usageLimitsEnvironmentId: EnvironmentId;
+  usageLimitsInstanceId: ProviderInstanceId | null;
+  usageLimitsProvider: UsageProviderKind | null;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -1040,6 +1045,15 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 }) {
   return (
     <>
+      {props.showSecondaryStatus &&
+      props.usageLimitsInstanceId !== null &&
+      props.usageLimitsProvider !== null ? (
+        <UsageLimitsMeter
+          environmentId={props.usageLimitsEnvironmentId}
+          instanceId={props.usageLimitsInstanceId}
+          provider={props.usageLimitsProvider}
+        />
+      ) : null}
       {props.showSecondaryStatus && props.activeContextWindow ? (
         <ContextWindowMeter
           usage={props.activeContextWindow}
@@ -1575,6 +1589,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // disabled.
   const selectedProvider: ProviderDriverKind =
     selectedProviderEntry?.driverKind ?? requestedDriverKind;
+  const usageLimitsProvider: UsageProviderKind | null =
+    selectedProviderEntry?.driverKind === "codex"
+      ? "codex"
+      : selectedProviderEntry?.driverKind === "claudeAgent"
+        ? "claude"
+        : null;
 
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadRef: composerDraftTarget,
@@ -5392,6 +5412,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       settings.contextWindowMeterEnabled ? activeContextWindow : null
                     }
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
+                    usageLimitsEnvironmentId={environmentId}
+                    usageLimitsInstanceId={selectedProviderEntry?.instanceId ?? null}
+                    usageLimitsProvider={usageLimitsProvider}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     showPlanFollowUpPrompt={
