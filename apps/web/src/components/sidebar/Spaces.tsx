@@ -1,3 +1,5 @@
+import { useComposerDraftStore, composerDraftHasUserContent } from "../../composerDraftStore";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { SpaceLaunch } from "./SpaceLaunch";
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { OUTSIDE_SPACES } from "./Spaces.logic";
@@ -182,6 +184,7 @@ export function SpaceToolbar({
 }
 
 export function SpaceTile({
+  offerSetup = false,
   profile,
   space,
   count,
@@ -193,6 +196,7 @@ export function SpaceTile({
   onLaunch,
   disabled,
 }: {
+  offerSetup?: boolean;
   profile: Profile;
   space: ProfileSpace;
   count: number;
@@ -207,7 +211,21 @@ export function SpaceTile({
   ) => Promise<void>;
   disabled: boolean;
 }) {
-  const [launchOpen, setLaunchOpen] = useState<"preview" | "settings" | null>(null);
+  const draftCount = useComposerDraftStore(
+    (store) =>
+      Object.entries(store.draftThreadsByThreadKey).filter(
+        ([key, draft]) =>
+          !draft.promotedTo &&
+          composerDraftHasUserContent(store.draftsByThreadKey[key]) &&
+          space.threads.some(
+            (item) =>
+              item.threadKey ===
+                scopedThreadKey(scopeThreadRef(draft.environmentId, draft.threadId)) &&
+              item.projectKey === `${draft.environmentId}:${draft.projectId}`,
+          ),
+      ).length,
+  );
+  const [launchOpen, setLaunchOpen] = useState(offerSetup);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -337,7 +355,11 @@ export function SpaceTile({
                   />
                 ) : null}
                 <span className="whitespace-nowrap">
-                  {count} {count === 1 ? "thread" : "threads"}
+                  {count > 0 || draftCount === 0
+                    ? `${count} ${count === 1 ? "thread" : "threads"}`
+                    : ""}
+                  {count > 0 && draftCount > 0 ? " · " : ""}
+                  {draftCount > 0 ? `${draftCount} ${draftCount === 1 ? "draft" : "drafts"}` : ""}
                 </span>
                 {attention ? (
                   <span className="whitespace-nowrap text-inherit">Needs you</span>
@@ -351,9 +373,8 @@ export function SpaceTile({
               disabled={disabled}
               onChange={onChange}
               onLaunch={onLaunch}
-              open={launchOpen !== null}
-              startInSettings={launchOpen === "settings"}
-              onOpenChange={(open) => setLaunchOpen(open ? "preview" : null)}
+              open={launchOpen}
+              onOpenChange={setLaunchOpen}
             />
             <Menu open={menuOpen} onOpenChange={setMenuOpen}>
               <MenuTrigger
@@ -375,9 +396,6 @@ export function SpaceTile({
                 <MoreHorizontalIcon className="size-3.5" />
               </MenuTrigger>
               <MenuPopup align="end" className="w-40">
-                <MenuItem className="min-h-7 text-xs" onClick={() => setLaunchOpen("settings")}>
-                  <PlusIcon className="size-3" /> New-chat defaults
-                </MenuItem>
                 <MenuItem className="min-h-7 text-xs" onClick={() => setRenaming(true)}>
                   <PencilIcon className="size-3" />
                   Rename

@@ -111,8 +111,11 @@ Use the plus on a Space tile to preview where a new chat will run. The compact
 menu shows the device and folder. Click that destination to open a fresh draft
 in the Space; no message is sent automatically.
 
-Choose a device and one of the profile's project folders the first time. The
-settings button lets you change or reset these defaults. Optional model and
+Choose any connected device, then search saved projects or browse its folders. The
+folder does not need to be an existing project. **Save & open chat** saves the shortcut
+and opens its first draft. Creating a space offers this setup immediately; dismiss it
+to keep an empty space without a default location. The settings button lets you change
+or reset these defaults. Optional model and
 workspace choices override the project's defaults for future chats only.
 Existing chats keep their original device, folder, model, and workspace.
 
@@ -120,6 +123,21 @@ A Space can contain chats from any project in its parent profile, regardless of
 its new-chat defaults. An unavailable device or folder blocks launching until
 it is available again or you choose another destination.
 
-Profile swipes require a brief pause in deliberate motion between switches.
-Faint trailing momentum does not prevent the next swipe. Clicking a profile
-remains immediate.
+### Choosing where a chat starts
+
+The sidebar pencil and the New thread shortcut open the same compact chooser, even
+with one project. It starts with your current device and folder. Press Enter to open,
+or change the location, profile or space first. A selected space is preselected;
+**Outside spaces** keeps the chat directly under its profile. Shift-click keeps the
+shortcut for creating in the current project.
+
+The device selector includes devices without saved projects. Browse folders with a
+path such as `~/Documents/`, drill into subfolders, then choose **Use folder**.
+An existing checkout is reused. Moving a checkout from another profile asks for
+confirmation because its existing chats move with it.
+
+Select the project name in an unsent draft, or its sidebar **Move draft** button,
+to change its location and space. The same composer keeps its text and attachments.
+After a reload, files held only by the original device must be attached again before
+a move to another device; T3 keeps the original draft intact until then.
+Space tiles count unsent drafts with content separately from threads.

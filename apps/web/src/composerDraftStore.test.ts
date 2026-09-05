@@ -1169,6 +1169,30 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(store.getComposerDraft(draftId)?.prompt).toBe("keep this prompt");
   });
 
+  it("keeps text, multiple images and local file bytes when moving an unsent draft across devices", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setPrompt(draftId, "keep this prompt");
+    const images = [
+      makeImage({ id: "first", previewUrl: "blob:first" }),
+      makeImage({ id: "second", name: "second.png", previewUrl: "blob:second" }),
+    ];
+    const file = makeFile("document");
+    store.addImages(draftId, images);
+    store.addFiles(draftId, [file]);
+    store.setLogicalProjectDraftThreadId(
+      scopedProjectKey(remoteProjectRef),
+      remoteProjectRef,
+      draftId,
+      { threadId },
+    );
+    const moved = store.getComposerDraft(draftId);
+    expect(moved?.prompt).toBe("keep this prompt");
+    expect(moved?.images).toEqual(images);
+    expect(moved?.files[0]?.file).toBe(file.file);
+    expect(store.getDraftSession(draftId)?.environmentId).toBe(remoteProjectRef.environmentId);
+  });
+
   it("rotates a failed bootstrap thread id without losing its draft", () => {
     const store = useComposerDraftStore.getState();
     const retryThreadId = ThreadId.make("thread-retry");

@@ -1,3 +1,9 @@
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { useSaveProfiles } from "./useChatCreation";
+import { draftMatchesChatLocation } from "../lib/chatCreation";
+import { revealChatLocation } from "../chatCreationStore";
+import { ALL_PROFILE_ID, moveThreadsToSpace, spaceForThread } from "@t3tools/contracts";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import {
   scopedProjectKey,
@@ -63,7 +69,7 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
   };
 }
 
-export function useNewThreadHandler() {
+function useCreateDraft() {
   // New-thread defaults are a user preference, and the settings UI only ever
   // edits the primary environment's settings.json. Reading the target
   // environment's own settings here would silently reset remote projects to
@@ -87,6 +93,7 @@ export function useNewThreadHandler() {
         startFromOrigin?: boolean;
         replace?: boolean;
         forceNew?: boolean;
+        spaceId?: string | null;
         useProjectDefaults?: boolean;
         modelSelection?: ModelSelection;
       },
@@ -95,6 +102,9 @@ export function useNewThreadHandler() {
       // up again and finding whichever draft it happens to hold.
     ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
       const projects = readProjects();
+      const profiles = appAtomRegistry.get(primaryServerSettingsAtom).profiles;
+      const matchesLocation = (draft: DraftThreadState) =>
+        draftMatchesChatLocation(draft, projectRef, options?.spaceId ?? null, profiles);
       const {
         getComposerDraft,
         getDraftSessionByLogicalProjectKey,
@@ -200,6 +210,7 @@ export function useNewThreadHandler() {
       // drafts rather than deleting them.
       const emptyStoredDraftThread =
         reusableStoredDraftThread &&
+        matchesLocation(reusableStoredDraftThread) &&
         !composerDraftHasUserContent(getComposerDraft(reusableStoredDraftThread.draftId))
           ? reusableStoredDraftThread
           : null;
@@ -338,6 +349,7 @@ export function useNewThreadHandler() {
         latestActiveDraftThread &&
         currentRouteTarget?.kind === "draft" &&
         latestActiveDraftThread.logicalProjectKey === logicalProjectKey &&
+        matchesLocation(latestActiveDraftThread) &&
         latestActiveDraftThread.promotedTo == null &&
         // Same content rule as above: a new-thread request while viewing an
         // invested draft mints a fresh one instead of repurposing it.
@@ -377,6 +389,8 @@ export function useNewThreadHandler() {
         if (
           !options?.forceNew &&
           racedDraft &&
+          matchesLocation(racedDraft) &&
+          !composerDraftHasUserContent(getComposerDraft(racedDraft.draftId)) &&
           // Only a draft REGISTERED during the await counts as a raced
           // winner. An invested draft this invocation deliberately declined
           // to reuse is still mapped at this point — reusing it here would
@@ -437,6 +451,80 @@ export function useNewThreadHandler() {
       })();
     },
     [getCurrentRouteTarget, primaryServerSettings, projectGroupingSettings, router],
+  );
+}
+
+export function useNewThreadHandler() {
+  const createDraft = useCreateDraft();
+  const saveProfiles = useSaveProfiles();
+  return useCallback(
+    async (projectRef: ScopedProjectRef, options?: Parameters<typeof createDraft>[1]) => {
+      const profiles = appAtomRegistry.get(primaryServerSettingsAtom).profiles;
+      const projectKey = scopedProjectKey(projectRef);
+      const profile = profiles.find((item) => item.projectKeys.includes(projectKey));
+      const ui = useUiStateStore.getState();
+      const selectedId =
+        ui.spaceSelection?.profileId === profile?.id ? ui.spaceSelection?.filter : null;
+      const spaceId =
+        options?.spaceId !== undefined
+          ? options.spaceId
+          : (profile?.spaces?.find((space) => space.id === selectedId)?.id ?? null);
+      if (spaceId && !profile?.spaces?.some((space) => space.id === spaceId))
+        throw new Error("This space no longer exists. Choose another space.");
+      const previousDrafts = Object.entries(
+        useComposerDraftStore.getState().draftThreadsByThreadKey,
+      );
+      const opened = await createDraft(projectRef, { ...options, spaceId });
+      if (!opened) return null;
+      const threadKey = scopedThreadKey(scopeThreadRef(projectRef.environmentId, opened.threadId));
+      const remaining = useComposerDraftStore.getState().draftThreadsByThreadKey;
+      const removed = new Set(
+        previousDrafts
+          .filter(
+            ([key, draft]) =>
+              !remaining[key] &&
+              !readThreadShell(scopeThreadRef(draft.environmentId, draft.threadId)),
+          )
+          .map(([, draft]) => scopedThreadKey(scopeThreadRef(draft.environmentId, draft.threadId))),
+      );
+      if (
+        profile &&
+        (spaceId ||
+          spaceForThread(profile, threadKey, projectKey) ||
+          profile.spaces?.some((space) =>
+            space.threads.some((thread) => removed.has(thread.threadKey)),
+          ))
+      ) {
+        await saveProfiles((current) => {
+          const latest = current.find((item) => item.id === profile.id);
+          if (
+            !latest ||
+            !latest.projectKeys.includes(projectKey) ||
+            (spaceId && !latest.spaces?.some((space) => space.id === spaceId))
+          )
+            throw new Error("Profile or space changed. Choose the chat location again.");
+          const placed = moveThreadsToSpace(
+            {
+              ...latest,
+              spaces: latest.spaces?.map((space) => ({
+                ...space,
+                threads: space.threads.filter((item) => !removed.has(item.threadKey)),
+              })),
+            },
+            [{ threadKey, projectKey }],
+            spaceId,
+          );
+          return current.map((item) => (item.id === profile.id ? placed : item));
+        });
+      }
+      const visibleProfileId =
+        ui.activeProfileId === ALL_PROFILE_ID || ui.activeProfileId === null
+          ? ALL_PROFILE_ID
+          : (profile?.id ?? ALL_PROFILE_ID);
+      revealChatLocation(visibleProfileId, spaceId);
+      return opened;
+    },
+    [createDraft, saveProfiles],
   );
 }
 

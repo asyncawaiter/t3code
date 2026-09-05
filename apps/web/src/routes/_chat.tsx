@@ -1,13 +1,10 @@
+import { ChatCreationDialog } from "../components/ChatCreationDialog";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
-import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
-import { usePrimaryEnvironmentId } from "../state/environments";
-import { selectProjectGroupingSettings } from "../logicalProject";
-import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -26,19 +23,6 @@ function ChatRouteGlobalShortcuts() {
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
   const { newThreadContext, profileProjects: projects, routeThreadRef } = useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const legacySidebarEnabled = useLegacySidebarEnabled();
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const projectGroupCount = useMemo(
-    () =>
-      buildSidebarProjectSnapshots({
-        projects,
-        settings: projectGroupingSettings,
-        primaryEnvironmentId,
-        resolveEnvironmentLabel: () => null,
-      }).length,
-    [primaryEnvironmentId, projectGroupingSettings, projects],
-  );
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
@@ -78,7 +62,7 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         if (projects.length === 0) {
-          openCommandPalette({ open: "add-project" });
+          openCommandPalette({ open: "new-thread-in" });
           return;
         }
         void startNewThreadFromContext(newThreadContext);
@@ -88,18 +72,7 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        if (projects.length === 0) {
-          openCommandPalette({ open: "add-project" });
-          return;
-        }
-        // The default sidebar routes creation through the command palette
-        // whenever there is a real choice to make; the legacy sidebar (and
-        // single-project setups) keep the immediate contextual create.
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
-          openCommandPalette({ open: "new-thread-in" });
-          return;
-        }
-        void startNewThreadFromContext(newThreadContext);
+        openCommandPalette({ open: "new-thread-in" });
         return;
       }
 
@@ -156,11 +129,9 @@ function ChatRouteGlobalShortcuts() {
     clearSelection,
     keybindings,
     previewOpen,
-    projectGroupCount,
     projects.length,
     routeThreadRef,
     selectedThreadKeysSize,
-    legacySidebarEnabled,
     terminalOpen,
   ]);
 
@@ -171,6 +142,7 @@ function ChatRouteLayout() {
   return (
     <>
       <ChatRouteGlobalShortcuts />
+      <ChatCreationDialog />
       <Outlet />
     </>
   );

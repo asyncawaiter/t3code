@@ -31,6 +31,7 @@ export interface PersistedUiState {
 }
 
 export interface UiProjectState {
+  spaceSelection?: { profileId: string; filter: string | null } | undefined;
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
   activeProfileId: string | null;
@@ -319,6 +320,7 @@ export function setActiveProfileId(state: UiState, id: string | null): UiState {
   return {
     ...state,
     activeProfileId: id,
+    spaceSelection: undefined,
   };
 }
 

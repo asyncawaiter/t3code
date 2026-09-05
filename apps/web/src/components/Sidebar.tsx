@@ -1,3 +1,4 @@
+import { openChatCreation } from "../chatCreationStore";
 import type { DraftThreadState } from "../composerDraftStore";
 import { ThreadSpaceDialog } from "./sidebar/ThreadSpaceDialog";
 import {
@@ -187,7 +188,6 @@ import {
   resolveAdjacentThreadId,
   resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
-  shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
@@ -627,6 +627,20 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
               {props.projectTitle}
             </span>
             <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
+              <button
+                type="button"
+                aria-label="Move draft"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openChatCreation({
+                    draftId,
+                    projectRef: scopeProjectRef(session.environmentId, session.projectId),
+                  });
+                }}
+                className="inline-flex rounded p-1 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <TagsIcon className="size-3" />
+              </button>
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -1905,6 +1919,7 @@ export default function Sidebar() {
   const allProjectsLabel =
     activeProfile.id === ALL_PROFILE_ID ? "All projects" : `Projects in ${activeProfile.name}`;
   const threads = useThreadShells();
+  const [newSpaceSetupId, setNewSpaceSetupId] = useState<string | null>(null);
   const [deletedSpace, setDeletedSpace] = useState<{
     profileId: string;
     space: ProfileSpace;
@@ -1955,20 +1970,14 @@ export default function Sidebar() {
   );
   const spaceIndex = useMemo(() => indexProfileSpaces(rawProfiles), [rawProfiles]);
   const defaultSpaceFilter = activeProfile.id === ALL_PROFILE_ID ? null : OUTSIDE_SPACES;
-  const [spaceSelection, setSpaceSelection] = useState<{
-    profileId: string;
-    filter: string | null;
-  }>({ profileId: activeProfile.id, filter: defaultSpaceFilter });
-  if (spaceSelection.profileId !== activeProfile.id) {
-    setSpaceSelection({ profileId: activeProfile.id, filter: defaultSpaceFilter });
-  }
+  const spaceSelection = useUiStateStore((state) => state.spaceSelection);
   const spaceFilter = resolveSidebarSpaceFilter(
     activeProfile,
-    spaceSelection.profileId === activeProfile.id ? spaceSelection.filter : defaultSpaceFilter,
+    spaceSelection?.profileId === activeProfile.id ? spaceSelection.filter : defaultSpaceFilter,
   );
   const setSelectedSpaceId = useCallback(
     (filter: string | null) => {
-      setSpaceSelection({ profileId: activeProfile.id, filter });
+      useUiStateStore.setState({ spaceSelection: { profileId: activeProfile.id, filter } });
     },
     [activeProfile.id],
   );
@@ -2221,6 +2230,11 @@ export default function Sidebar() {
   // Project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
   const [projectScopeKey, setProjectScopeKey] = useState<string | null>(null);
+  useEffect(() => {
+    const reveal = () => setProjectScopeKey(null);
+    window.addEventListener("t3:chat-location-changed", reveal);
+    return () => window.removeEventListener("t3:chat-location-changed", reveal);
+  }, []);
   // {value, label} items let Base UI drive the combobox selection contract
   // while the popup search filters the same collection.
   const projectScopeItems = useMemo(
@@ -3820,20 +3834,10 @@ export default function Sidebar() {
     autoAnimate(node, { duration: 150, easing: "ease-out" });
   }, []);
 
-  // New thread defaults to the project you're in (active thread's project,
-  // falling back to the top project) — same resolution the command palette
-  // uses. The command palette already offers a "New thread in..." submenu
-  // for multi-project setups.
+  // Default creation shows its destination; Shift keeps the contextual shortcut.
   const handleNewThreadClick = useCallback(
     (event?: ReactMouseEvent) => {
-      if (visibleProjects.length === 0) {
-        openAddProjectCommandPalette();
-        return;
-      }
-      // One project: nothing to pick, create immediately. Shift+click creates
-      // directly in the current project even with several projects, skipping
-      // the palette picker.
-      if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
+      if (event?.shiftKey && visibleProjects.length > 0) {
         if (isMobile) setOpenMobile(false);
         void startNewThreadFromContext(newThreadContext);
         return;
@@ -3841,14 +3845,7 @@ export default function Sidebar() {
       if (isMobile) setOpenMobile(false);
       openCommandPalette({ open: "new-thread-in" });
     },
-    [
-      isMobile,
-      newThreadContext,
-      openAddProjectCommandPalette,
-      projectGroups.length,
-      setOpenMobile,
-      visibleProjects.length,
-    ],
+    [isMobile, newThreadContext, setOpenMobile, visibleProjects.length],
   );
 
   // The button mirrors chat.new: in multi-project setups both route through
@@ -4474,15 +4471,13 @@ export default function Sidebar() {
                       </li>
                     );
                   };
-                  // Draft block above everything, then the pinned block:
-                  // full cards above the inbox, closed by a thin divider (the
-                  // pin glyphs carry the meaning, so no header text). Both
-                  // vanish entirely at count 0.
+                  // Profile pins stay above spaces. Drafts follow the project
+                  // filter with the rest of the selected space's chats.
                   // Pinned rows render in the one shared pinned order; only
                   // reorder-capable rows register as sortable (legacy-server
                   // pins render in place as plain rows).
                   const rootPins = orderedPinnedThreads.filter((thread) => !threadSpace(thread));
-                  const items: ReactNode[] = [
+                  const draftBlock = (
                     <SidebarDraftBlock
                       key="draft-sessions"
                       projectDisplayNameByKey={projectDisplayNameByKey}
@@ -4525,7 +4520,9 @@ export default function Sidebar() {
                           );
                       }}
                       onNavigateToDraft={navigateToDraft}
-                    />,
+                    />
+                  );
+                  const items: ReactNode[] = [
                     rootPins.length > 0 ? (
                       <li key="pinned-dnd" className="list-none">
                         <DndContext
@@ -4585,6 +4582,7 @@ export default function Sidebar() {
                         aria-label={`Spaces in ${activeProfile.name}`}
                       >
                         <SpaceToolbar
+                          onCreated={setNewSpaceSetupId}
                           key={activeProfile.id}
                           profile={activeProfile}
                           onChange={changeSpaces}
@@ -4596,6 +4594,7 @@ export default function Sidebar() {
                           <ul aria-label="Spaces" className="mt-1 grid grid-cols-2 gap-1.5">
                             {activeProfile.spaces.map((space) => (
                               <SpaceTile
+                                offerSetup={newSpaceSetupId === space.id}
                                 key={space.id}
                                 profile={activeProfile}
                                 space={space}
@@ -4625,69 +4624,17 @@ export default function Sidebar() {
                                 onChange={changeSpaces}
                                 onMove={moveSpaceThreads}
                                 onLaunch={async (projectRef, defaults) => {
-                                  const before = useComposerDraftStore.getState();
-                                  const emptyDraftKeys = Object.entries(
-                                    before.draftThreadsByThreadKey,
-                                  )
-                                    .filter(
-                                      ([id, draft]) =>
-                                        draft.promotedTo == null &&
-                                        !composerDraftHasUserContent(before.draftsByThreadKey[id]),
-                                    )
-                                    .map(([, draft]) =>
-                                      scopedThreadKey(
-                                        scopeThreadRef(draft.environmentId, draft.threadId),
-                                      ),
-                                    );
                                   const opened = await handleNewThreadRef.current(projectRef, {
                                     forceNew: true,
+                                    spaceId: space.id,
                                     useProjectDefaults: true,
                                     ...(defaults.modelSelection
                                       ? { modelSelection: defaults.modelSelection }
                                       : {}),
                                     ...(defaults.envMode ? { envMode: defaults.envMode } : {}),
                                   });
-                                  if (!opened) throw new Error("Could not create a draft.");
-                                  const current = latestProfilesRef.current.find(
-                                    (item) => item.id === activeProfile.id,
-                                  );
-                                  if (!current?.spaces?.some((item) => item.id === space.id)) {
-                                    throw new Error(
-                                      "This space was removed while opening the chat. The draft is still available.",
-                                    );
-                                  }
-                                  const remaining = new Set(
-                                    useComposerDraftStore.getState().listDraftThreadKeys(),
-                                  );
-                                  const removed = new Set(
-                                    emptyDraftKeys.filter((key) => !remaining.has(key)),
-                                  );
-                                  changeSpaces(
-                                    moveThreadsToSpace(
-                                      {
-                                        ...current,
-                                        spaces: current.spaces?.map((item) => ({
-                                          ...item,
-                                          threads: item.threads.filter(
-                                            (thread) => !removed.has(thread.threadKey),
-                                          ),
-                                        })),
-                                      },
-                                      [
-                                        {
-                                          threadKey: scopedThreadKey(
-                                            scopeThreadRef(
-                                              projectRef.environmentId,
-                                              opened.threadId,
-                                            ),
-                                          ),
-                                          projectKey: scopedProjectKey(projectRef),
-                                        },
-                                      ],
-                                      space.id,
-                                    ),
-                                  );
-                                  setSelectedSpaceId(space.id);
+                                  if (!opened)
+                                    throw new Error("Could not open the draft. Try again.");
                                   setProjectScopeKey(null);
                                 }}
                                 disabled={!primarySettingsLoaded}
@@ -4704,6 +4651,7 @@ export default function Sidebar() {
                         {sidebarProjectFilter}
                       </li>,
                     );
+                  items.push(draftBlock);
                   const inSpace = (thread: EnvironmentThreadShell) =>
                     matchesSidebarSpace(threadSpace(thread)?.id, spaceFilter);
                   const spacePins = orderedPinnedThreads.filter(

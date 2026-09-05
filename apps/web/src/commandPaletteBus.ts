@@ -1,3 +1,4 @@
+import { openChatCreation, useChatCreationStore } from "./chatCreationStore";
 // Tiny event bus allowing components to programmatically open the command palette
 // without owning its React state.
 const COMMAND_PALETTE_OPEN_EVENT = "t3code:open-command-palette";
@@ -7,6 +8,10 @@ export interface CommandPaletteOpenDetail {
 }
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {
+  if (detail?.open === "new-thread-in") {
+    openChatCreation();
+    return;
+  }
   window.dispatchEvent(
     new CustomEvent(COMMAND_PALETTE_OPEN_EVENT, detail ? { detail } : undefined),
   );
@@ -25,6 +30,8 @@ export function onOpenCommandPalette(
 /** Read at event time so consumers do not subscribe to transient dialog state. */
 export function isCommandPaletteOpen(): boolean {
   return (
-    typeof document !== "undefined" && document.querySelector("[data-command-palette]") !== null
+    typeof document !== "undefined" &&
+    (document.querySelector("[data-command-palette]") !== null ||
+      useChatCreationStore.getState().request !== null)
   );
 }

@@ -1,3 +1,9 @@
+import { ProjectLocationPicker } from "../ProjectLocationPicker";
+import {
+  useResolveChatProject,
+  useSaveProfiles,
+  type ChatLocation,
+} from "../../hooks/useChatCreation";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
@@ -91,7 +97,6 @@ export function SpaceLaunch({
   onLaunch,
   open,
   onOpenChange,
-  startInSettings,
 }: {
   profile: Profile;
   space: ProfileSpace;
@@ -100,14 +105,27 @@ export function SpaceLaunch({
   onChange: (profile: Profile) => void;
   onLaunch: (project: ScopedProjectRef, defaults: Defaults) => Promise<void>;
   open: boolean;
-  startInSettings: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const projects = useProjects();
   const { environments } = useEnvironments();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Defaults | undefined>(space.newChatDefaults);
-  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const defaultProject = projects.find(
+    (project) =>
+      scopedProjectKey(scopeProjectRef(project.environmentId, project.id)) ===
+      space.newChatDefaults?.projectKey,
+  );
+  const initialLocation = (): ChatLocation | null =>
+    defaultProject
+      ? {
+          environmentId: defaultProject.environmentId,
+          workspaceRoot: space.newChatDefaults!.workspaceRoot,
+        }
+      : null;
+  const [location, setLocation] = useState<ChatLocation | null>(initialLocation);
+  const resolveProject = useResolveChatProject();
+  const saveProfiles = useSaveProfiles();
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const [wasOpen, setWasOpen] = useState(false);
@@ -115,8 +133,8 @@ export function SpaceLaunch({
     setWasOpen(open);
     if (open) {
       setDraft(space.newChatDefaults);
-      setDeviceId(null);
-      setEditing(startInSettings || !space.newChatDefaults);
+      setLocation(initialLocation());
+      setEditing(!space.newChatDefaults);
     }
   }
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +151,6 @@ export function SpaceLaunch({
   const environment = environments.find(
     (environment) => environment.environmentId === project?.environmentId,
   );
-  const chosenDevice = deviceId ?? project?.environmentId ?? null;
   const configuredModel = value?.modelSelection ?? project?.defaultModelSelection;
   const modelProvider = deriveProviderInstanceEntries(
     environment?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS,
@@ -157,7 +174,7 @@ export function SpaceLaunch({
     providerAvailable;
   const configure = () => {
     setDraft(space.newChatDefaults);
-    setDeviceId(project?.environmentId ?? null);
+    setLocation(initialLocation());
     setEditing(true);
     setError(null);
   };
@@ -217,118 +234,51 @@ export function SpaceLaunch({
         )}
         {editing ? (
           <div className="space-y-3">
-            <label className="block space-y-1 text-[11px] text-muted-foreground">
-              <span>Device</span>
-              <Select
-                value={chosenDevice}
-                onValueChange={(id) => {
-                  if (id !== null) {
-                    setDeviceId(id);
-                    setDraft(undefined);
-                  }
-                }}
-              >
-                <SelectTrigger size="sm" className="w-full" aria-label="Space default device">
-                  <SelectValue placeholder="Choose device">
-                    {environments.find((env) => env.environmentId === chosenDevice)?.label ??
-                      "Choose device"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {environments
-                    .filter((env) => eligible.some((p) => p.environmentId === env.environmentId))
-                    .map((env) => (
-                      <SelectItem key={env.environmentId} value={env.environmentId}>
-                        {env.label}
-                        {env.connection.phase !== "connected" ? " (offline)" : ""}
-                      </SelectItem>
-                    ))}
-                </SelectPopup>
-              </Select>
-            </label>
-            <label className="block space-y-1 text-[11px] text-muted-foreground">
-              <span>Project folder</span>
-              <Select
-                value={value?.projectKey ?? null}
-                onValueChange={(key) => {
-                  const next = eligible.find(
-                    (p) => scopedProjectKey(scopeProjectRef(p.environmentId, p.id)) === key,
-                  );
-                  if (next)
-                    setDraft({
-                      projectKey: key!,
-                      workspaceRoot: next.workspaceRoot,
-                      deviceLabel:
-                        environments.find((env) => env.environmentId === next.environmentId)
-                          ?.label ?? "Device",
-                    });
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full"
-                  aria-label="Space default folder"
-                  disabled={!chosenDevice}
-                >
-                  <SelectValue placeholder="Choose folder">
-                    {project?.title ?? "Choose folder"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup className="max-w-96">
-                  {eligible
-                    .filter((p) => p.environmentId === chosenDevice)
-                    .map((p) => (
-                      <SelectItem
-                        key={p.id}
-                        value={scopedProjectKey(scopeProjectRef(p.environmentId, p.id))}
-                      >
-                        <span className="flex min-w-0 flex-col">
-                          <span>{p.title}</span>
-                          <span className="break-all text-[10px] text-muted-foreground">
-                            {p.workspaceRoot}
-                          </span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                </SelectPopup>
-              </Select>
-            </label>
-            {value && (
-              <p className="break-all font-mono text-[11px] text-muted-foreground">
-                {value.workspaceRoot}
-              </p>
-            )}
-            {!eligible.length && (
-              <p className="text-xs text-muted-foreground">
-                Add a project to {profile.name} to choose its folder here.
-              </p>
-            )}
-            {project && value && (
+            <ProjectLocationPicker
+              value={location}
+              disabled={busy}
+              onChange={(next) => {
+                setLocation(next);
+                if (next?.environmentId !== location?.environmentId) setDraft(undefined);
+              }}
+            />
+            {location && (
               <details className="text-xs">
                 <summary className="cursor-pointer text-muted-foreground">More defaults</summary>
                 <div className="mt-3 space-y-3">
                   <LaunchModel
-                    environmentId={project.environmentId}
-                    selection={value.modelSelection}
-                    onChange={(modelSelection) => setDraft({ ...value, modelSelection })}
+                    environmentId={location.environmentId}
+                    selection={draft?.modelSelection}
+                    onChange={(modelSelection) =>
+                      setDraft({
+                        projectKey: "",
+                        workspaceRoot: location.workspaceRoot,
+                        deviceLabel: "",
+                        ...draft,
+                        modelSelection,
+                      })
+                    }
                   />
                   <label className="block space-y-1">
                     <span>Workspace</span>
                     <Select
-                      value={value.envMode ?? "default"}
+                      value={draft?.envMode ?? "default"}
                       onValueChange={(mode) => {
                         if (mode)
                           setDraft({
-                            ...value,
+                            projectKey: "",
+                            workspaceRoot: location.workspaceRoot,
+                            deviceLabel: "",
+                            ...draft,
                             envMode: mode === "local" || mode === "worktree" ? mode : undefined,
                           });
                       }}
                     >
                       <SelectTrigger size="sm" className="w-full" aria-label="Space workspace mode">
                         <SelectValue>
-                          {value.envMode === "local"
+                          {draft?.envMode === "local"
                             ? "Current checkout"
-                            : value.envMode === "worktree"
+                            : draft?.envMode === "worktree"
                               ? "New worktree"
                               : "Use project default"}
                         </SelectValue>
@@ -371,19 +321,55 @@ export function SpaceLaunch({
               </Button>
               <Button
                 size="xs"
-                disabled={!value || !project}
-                onClick={() => {
-                  if (!value || !project) return;
-                  onChange({
-                    ...profile,
-                    spaces: profile.spaces?.map((item) =>
-                      item.id === space.id ? { ...item, newChatDefaults: value } : item,
-                    ),
-                  });
-                  setEditing(false);
+                disabled={!location || busy}
+                onClick={async () => {
+                  if (!location || pending.current) return;
+                  pending.current = true;
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    const resolved = await resolveProject(location, profile.id);
+                    const defaults: Defaults = {
+                      projectKey: scopedProjectKey(resolved.projectRef),
+                      workspaceRoot: resolved.workspaceRoot,
+                      deviceLabel: resolved.deviceLabel,
+                      ...(draft?.modelSelection ? { modelSelection: draft.modelSelection } : {}),
+                      ...(draft?.envMode ? { envMode: draft.envMode } : {}),
+                    };
+                    await saveProfiles((profiles) => {
+                      if (!profiles.some((item) => item.id === profile.id))
+                        throw new Error("This profile was deleted.");
+                      return profiles.map((item) => {
+                        if (item.id !== profile.id) return item;
+                        if (!item.spaces?.some((candidate) => candidate.id === space.id))
+                          throw new Error("This space was deleted.");
+                        return {
+                          ...item,
+                          spaces: item.spaces.map((candidate) =>
+                            candidate.id === space.id
+                              ? { ...candidate, newChatDefaults: defaults }
+                              : candidate,
+                          ),
+                        };
+                      });
+                    });
+                    if (!space.newChatDefaults) {
+                      await onLaunch(resolved.projectRef, defaults);
+                      onOpenChange(false);
+                    } else setEditing(false);
+                  } catch (cause) {
+                    setError(
+                      cause instanceof Error
+                        ? cause.message
+                        : "Could not save this location. Try again.",
+                    );
+                  } finally {
+                    pending.current = false;
+                    setBusy(false);
+                  }
                 }}
               >
-                Save defaults
+                {busy ? "Opening..." : space.newChatDefaults ? "Save defaults" : "Save & open chat"}
               </Button>
             </div>
           </div>
