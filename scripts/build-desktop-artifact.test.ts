@@ -1624,6 +1624,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         (config.dmg as Record<string, unknown>).background,
         "dmg/dmg-background-nightly.png",
       );
+      assert.equal((config.mac as Record<string, unknown>).identity, "-");
+      assert.equal((config.mac as Record<string, unknown>).hardenedRuntime, false);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
