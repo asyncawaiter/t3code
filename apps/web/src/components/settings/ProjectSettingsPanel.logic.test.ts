@@ -27,6 +27,17 @@ describe("moveProjectToProfile", () => {
   const work: Profile = { id: "work", name: "Work", color: "blue", projectKeys: ["env:a"] };
   const home: Profile = { id: "home", name: "Home", color: "green", projectKeys: ["env:b"] };
 
+  it("moves all selected checkouts across environments and removes previous memberships", () => {
+    expect(moveProjectToProfile([work, home], ["env:a", "remote:a", "env:a"], "home")).toEqual([
+      { ...work, projectKeys: [] },
+      { ...home, projectKeys: ["env:b", "env:a", "remote:a"] },
+    ]);
+  });
+
+  it("preserves assignments when a target profile no longer exists", () => {
+    expect(moveProjectToProfile([work, home], "env:a", "removed")).toEqual([work, home]);
+  });
+
   it("moves a project from one profile to another", () => {
     expect(moveProjectToProfile([work, home], "env:a", "home")).toEqual([
       { ...work, projectKeys: [] },

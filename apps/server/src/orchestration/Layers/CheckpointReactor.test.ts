@@ -9,6 +9,9 @@ import {
   ProviderRuntimeEvent,
   ProviderSession,
   ProviderInstanceId,
+  OrchestrationDispatchCommandError,
+  type ChatAttachment,
+  type ThreadMessageEdit,
 } from "@t3tools/contracts";
 import {
   CommandId,
@@ -24,6 +27,7 @@ import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as PubSub from "effect/PubSub";
@@ -62,6 +66,12 @@ import { ProviderValidationError } from "../../provider/Errors.ts";
 import { ServerConfig } from "../../config.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
+import { dispatchAndWaitForMessageEdit } from "../awaitMessageEdit.ts";
+import {
+  createAttachmentId,
+  createPendingAttachmentId,
+  resolveAttachmentPath,
+} from "../../attachmentStore.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
@@ -87,8 +97,8 @@ function createProviderServiceHarness(
 ) {
   const now = "2026-01-01T00:00:00.000Z";
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
-  const rollbackConversation = vi.fn(
-    (_input: { readonly threadId: ThreadId; readonly numTurns: number }) => Effect.void,
+  const rollbackConversation = vi.fn<ProviderServiceShape["rollbackConversation"]>(
+    () => Effect.void,
   );
   const assertConversationRollbackSupported = vi.fn<
     ProviderServiceShape["assertConversationRollbackSupported"]
@@ -260,6 +270,7 @@ describe("CheckpointReactor", () => {
     | OrchestrationEngineService
     | CheckpointReactor
     | CheckpointStore.CheckpointStore
+    | ServerConfig
     | ProjectionSnapshotQuery,
     unknown
   > | null = null;
@@ -369,6 +380,7 @@ describe("CheckpointReactor", () => {
     const checkpointStore = await runtime.runPromise(
       Effect.service(CheckpointStore.CheckpointStore),
     );
+    const config = await runtime.runPromise(Effect.service(ServerConfig));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(reactor.drain);
@@ -459,8 +471,287 @@ describe("CheckpointReactor", () => {
       provider,
       cwd,
       drain,
+      attachmentsDir: config.attachmentsDir,
     };
   }
+
+  const seedEditableMessages = Effect.fn("seedEditableMessages")(function* (
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    attachments: ChatAttachment[] = [],
+  ) {
+    const threadId = ThreadId.make("thread-1");
+    for (const index of [1, 2]) {
+      const createdAt = `2026-01-01T00:0${index}:00.000Z`;
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make(`edit-user-${index}`),
+        threadId,
+        message: {
+          messageId: MessageId.make(`edit-user-${index}`),
+          role: "user",
+          text: `Prompt ${index}`,
+          attachments: index === 2 ? attachments : [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        createdAt,
+      });
+      yield* harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make(`edit-diff-${index}`),
+        threadId,
+        turnId: asTurnId(`edit-turn-${index}`),
+        completedAt: createdAt,
+        checkpointRef: checkpointRefForThreadTurn(threadId, index),
+        status: "ready",
+        files: [],
+        checkpointTurnCount: index,
+        createdAt,
+      });
+    }
+    yield* Effect.promise(() => harness.drain());
+  });
+
+  function applyEdit(
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    edit: ThreadMessageEdit,
+    id = "test-edit",
+  ) {
+    const command = {
+      type: "thread.checkpoint.revert" as const,
+      commandId: CommandId.make(id),
+      threadId: ThreadId.make("thread-1"),
+      turnCount: 1,
+      edit,
+      createdAt: "2026-01-01T00:03:00.000Z",
+    };
+    return dispatchAndWaitForMessageEdit(command, () =>
+      harness.engine
+        .dispatch(command)
+        .pipe(
+          Effect.mapError(
+            (error) => new OrchestrationDispatchCommandError({ message: error.message }),
+          ),
+        ),
+    ).pipe(Effect.provideService(OrchestrationEngineService, harness.engine));
+  }
+
+  for (const restoreFiles of [false, true])
+    effectIt.effect(
+      `edits the latest prompt with all attachments, restoreFiles=${restoreFiles}`,
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* Effect.promise(() => createHarness());
+          const originals: ChatAttachment[] = ["first.png", "second.png", "notes.txt"].map(
+            (name) => {
+              const attachment = {
+                type: name.endsWith("png") ? "image" : "file",
+                id: createAttachmentId("thread-1", name.split(".").at(-1))!,
+                name,
+                mimeType: name.endsWith("png") ? "image/png" : "text/plain",
+                sizeBytes: 3,
+              };
+              NodeFS.mkdirSync(harness.attachmentsDir, { recursive: true });
+              NodeFS.writeFileSync(
+                resolveAttachmentPath({ attachmentsDir: harness.attachmentsDir, attachment })!,
+                "abc",
+              );
+              return attachment;
+            },
+          );
+          yield* seedEditableMessages(harness, originals);
+          const attachments = originals.map((original) => {
+            const pending = {
+              ...original,
+              id: createPendingAttachmentId(original.name.split(".").at(-1)),
+            };
+            NodeFS.copyFileSync(
+              resolveAttachmentPath({
+                attachmentsDir: harness.attachmentsDir,
+                attachment: original,
+              })!,
+              resolveAttachmentPath({
+                attachmentsDir: harness.attachmentsDir,
+                attachment: pending,
+              })!,
+            );
+            return pending;
+          });
+          yield* applyEdit(harness, {
+            sourceMessageId: MessageId.make("edit-user-2"),
+            restoreFiles,
+            replacement: {
+              messageId: MessageId.make("edited-message"),
+              text: "Corrected prompt",
+              attachments,
+            },
+          });
+          const thread = (yield* Effect.promise(() => harness.readModel())).threads[0]!;
+          expect(thread.messages.map((message) => message.text)).toEqual([
+            "Prompt 1",
+            "Corrected prompt",
+          ]);
+          expect(thread.messages.at(-1)?.attachments?.map((attachment) => attachment.name)).toEqual(
+            originals.map((attachment) => attachment.name),
+          );
+          for (const attachment of thread.messages.at(-1)!.attachments!)
+            expect(
+              NodeFS.readFileSync(
+                resolveAttachmentPath({ attachmentsDir: harness.attachmentsDir, attachment })!,
+                "utf8",
+              ),
+            ).toBe("abc");
+          expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe(
+            restoreFiles ? "v2\n" : "v3\n",
+          );
+          expect(harness.provider.rollbackConversation).toHaveBeenCalledExactlyOnceWith({
+            threadId: ThreadId.make("thread-1"),
+            numTurns: 1,
+          });
+          // Retrying the same request waits for its recorded result without another rollback.
+          yield* applyEdit(harness, {
+            sourceMessageId: MessageId.make("edit-user-2"),
+            restoreFiles,
+          });
+          expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1);
+        }),
+    );
+
+  effectIt.effect("rewinds without sending and preserves all earlier history", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      yield* seedEditableMessages(harness);
+      yield* applyEdit(harness, {
+        sourceMessageId: MessageId.make("edit-user-2"),
+        restoreFiles: false,
+      });
+      const thread = (yield* Effect.promise(() => harness.readModel())).threads[0]!;
+      expect(thread.messages.map((message) => message.id)).toEqual(["edit-user-1"]);
+      expect(thread.latestTurn?.turnId).toBe("edit-turn-1");
+      expect(thread.checkpoints.map((checkpoint) => checkpoint.turnId)).toEqual(["edit-turn-1"]);
+      expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v3\n");
+    }),
+  );
+
+  effectIt.effect(
+    "rejects stale edits and missing uploads before changing files or provider history",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        yield* seedEditableMessages(harness);
+        expect(
+          yield* Effect.flip(
+            applyEdit(harness, {
+              sourceMessageId: MessageId.make("edit-user-1"),
+              restoreFiles: true,
+            }),
+          ).pipe(Effect.map((error) => error.message)),
+        ).toContain("newer message");
+        expect(
+          yield* Effect.flip(
+            applyEdit(
+              harness,
+              {
+                sourceMessageId: MessageId.make("edit-user-2"),
+                restoreFiles: true,
+                replacement: {
+                  messageId: MessageId.make("edited-message"),
+                  text: "Changed",
+                  attachments: [
+                    {
+                      type: "image",
+                      id: createPendingAttachmentId("png"),
+                      name: "missing.png",
+                      mimeType: "image/png",
+                      sizeBytes: 3,
+                    },
+                  ],
+                },
+              },
+              "missing-upload-edit",
+            ),
+          ).pipe(Effect.map((error) => error.message)),
+        ).toContain("attachment not found");
+        expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
+        expect(
+          (yield* Effect.promise(() => harness.readModel())).threads[0]?.messages,
+        ).toHaveLength(2);
+        expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v3\n");
+      }),
+  );
+
+  effectIt.effect("restores files and the Git index when provider rollback fails", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      yield* seedEditableMessages(harness);
+      runGit(harness.cwd, ["add", "README.md"]);
+      NodeFS.writeFileSync(NodePath.join(harness.cwd, "README.md"), "unsaved manual work\n");
+      NodeFS.writeFileSync(NodePath.join(harness.cwd, "untracked.txt"), "keep me");
+      const before = runGit(harness.cwd, ["diff", "--cached"]);
+      harness.provider.rollbackConversation.mockImplementationOnce(() =>
+        Effect.fail(
+          new ProviderValidationError({
+            operation: "test.rollback",
+            issue: "Provider unavailable",
+          }),
+        ),
+      );
+      expect(
+        yield* Effect.flip(
+          applyEdit(harness, {
+            sourceMessageId: MessageId.make("edit-user-2"),
+            restoreFiles: true,
+          }),
+        ).pipe(Effect.map((error) => error.message)),
+      ).toContain("files and staging state were restored");
+      expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe(
+        "unsaved manual work\n",
+      );
+      expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "untracked.txt"), "utf8")).toBe(
+        "keep me",
+      );
+      expect(runGit(harness.cwd, ["diff", "--cached"])).toBe(before);
+      expect((yield* Effect.promise(() => harness.readModel())).threads[0]?.messages).toHaveLength(
+        2,
+      );
+    }),
+  );
+
+  effectIt.effect("reserves the thread while rewind is in progress", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      yield* seedEditableMessages(harness);
+      const entered = yield* Deferred.make<void>();
+      const finish = yield* Deferred.make<void>();
+      harness.provider.rollbackConversation.mockImplementationOnce(() =>
+        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(finish))),
+      );
+      const edit = yield* applyEdit(harness, {
+        sourceMessageId: MessageId.make("edit-user-2"),
+        restoreFiles: false,
+      }).pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      expect(
+        yield* Effect.flip(
+          harness.engine.dispatch({
+            type: "thread.archive",
+            commandId: CommandId.make("archive-during-edit"),
+            threadId: ThreadId.make("thread-1"),
+          }),
+        ).pipe(Effect.map((error) => error.message)),
+      ).toContain("being rewound");
+      yield* Deferred.succeed(finish, undefined);
+      yield* Fiber.join(edit);
+      yield* harness.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.make("archive-after-edit"),
+        threadId: ThreadId.make("thread-1"),
+      });
+      expect(
+        (yield* Effect.promise(() => harness.readModel())).threads[0]?.archivedAt,
+      ).not.toBeNull();
+    }),
+  );
 
   it("captures pre-turn baseline on turn.started and post-turn checkpoint on turn.completed", async () => {
     const harness = await createHarness({ seedFilesystemCheckpoints: false });

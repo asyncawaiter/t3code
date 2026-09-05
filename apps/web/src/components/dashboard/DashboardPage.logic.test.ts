@@ -1,8 +1,13 @@
+import { ThreadId, EnvironmentId } from "@t3tools/contracts";
+import { indexProfileSpaces } from "@t3tools/contracts";
+import { filterDashboardSpace } from "./DashboardPage.logic";
 import type { OrchestrationThreadShell } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import type { DashboardBoard } from "@t3tools/client-runtime/state/dashboard";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
+  filterDashboardGit,
+  deriveDashboardScope,
   dropSeenDoneEntries,
   filterBoardByEnvironment,
   filterEntriesByEnvironment,
@@ -236,4 +241,113 @@ describe("groupEntriesByProject", () => {
   it("returns no groups for an empty entry list", () => {
     expect(groupEntriesByProject([])).toEqual([]);
   });
+});
+
+describe("dashboard filter scope", () => {
+  it("cascades device and provider choices without mixing same-id projects across devices", () => {
+    const projects = ["env-1", "env-2"].map((environmentId) => ({
+      environmentId,
+      id: "project-1",
+      title: "Repo",
+      workspaceRoot: `/repos/${environmentId}`,
+    })) as import("@t3tools/client-runtime/state/models").EnvironmentProject[];
+    const threads = projects.map((project) =>
+      shell({
+        environmentId: project.environmentId,
+        modelSelection: {
+          instanceId: "agent",
+          model: "test",
+        } as EnvironmentThreadShell["modelSelection"],
+      }),
+    );
+    const providers = new Map(
+      projects.map((project, index) => [
+        project.environmentId,
+        new Map([
+          [
+            "agent",
+            {
+              driverKind: index === 0 ? "claudeAgent" : "codex",
+              displayName: index === 0 ? "Claude" : "Codex",
+            } as import("../../providerInstances").ProviderInstanceEntry,
+          ],
+        ]),
+      ]),
+    );
+    const local = deriveDashboardScope(
+      projects,
+      threads,
+      providers,
+      projects[0]!.environmentId,
+      "all",
+      "all",
+      "",
+    );
+    expect(local.projectOptions).toEqual([projects[0]]);
+    expect(local.providerOptions.map(([key]) => key)).toEqual(["claudeAgent"]);
+    expect(local.matchingShells).toEqual([threads[0]]);
+    const codex = deriveDashboardScope(projects, threads, providers, null, "codex", "all", "");
+    expect(codex.projectOptions).toEqual([projects[1]]);
+    expect(codex.matchingShells).toEqual([threads[1]]);
+    const switched = deriveDashboardScope(
+      projects,
+      threads,
+      providers,
+      projects[1]!.environmentId,
+      "claudeAgent",
+      "env-1:project-1",
+      "env-2",
+    );
+    expect(switched.effectiveProviderFilter).toBe("all");
+    expect(switched.effectiveProjectFilter).toBe("all");
+    expect(switched.matchingShells).toEqual([threads[1]]);
+  });
+});
+
+it("combines branch and linked-PR filters without treating an unknown link as a PR", () => {
+  const linked = shell({
+    branch: "feature/Login",
+    linkedPullRequest: { number: 20 } as NonNullable<EnvironmentThreadShell["linkedPullRequest"]>,
+  });
+  const plain = shell({ branch: "main", linkedPullRequest: null });
+  expect(filterDashboardGit([linked, plain], " LOGIN ", "linked")).toEqual([linked]);
+  expect(filterDashboardGit([linked, plain], "", "none")).toEqual([plain]);
+  expect(filterDashboardGit([linked, plain], "main", "linked")).toEqual([]);
+});
+
+it("space scope includes archived threads, isolates devices, and handles root placement", () => {
+  const first = shell();
+  const archived = shell({ id: ThreadId.make("archived"), archivedAt: "2026-09-04T12:00:00.000Z" });
+  const otherDevice = shell({ environmentId: EnvironmentId.make("env-2") });
+  const index = indexProfileSpaces([
+    {
+      id: "work",
+      name: "Work",
+      color: "blue",
+      projectKeys: ["env-1:project-1", "env-2:project-1"],
+      spaces: [
+        {
+          id: "build",
+          name: "Build",
+          threads: [
+            { threadKey: "env-1:thread-1", projectKey: "env-1:project-1" },
+            { threadKey: "env-1:archived", projectKey: "env-1:project-1" },
+          ],
+        },
+      ],
+    },
+  ]);
+  expect(filterDashboardSpace([first, archived, otherDevice], index, "work:build")).toEqual([
+    first,
+    archived,
+  ]);
+  expect(filterDashboardSpace([first, archived, otherDevice], index, "root")).toEqual([
+    otherDevice,
+  ]);
+  expect(filterDashboardSpace([first, archived, otherDevice], index, "all")).toEqual([
+    first,
+    archived,
+    otherDevice,
+  ]);
+  expect(filterDashboardSpace([first], new Map(), "root")).toEqual([first]);
 });

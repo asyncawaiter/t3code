@@ -5,7 +5,6 @@ import { useEffect, useMemo } from "react";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
-import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
@@ -25,12 +24,10 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
-    useHandleNewThread();
+  const { newThreadContext, profileProjects: projects, routeThreadRef } = useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupCount = useMemo(
     () =>
@@ -80,18 +77,21 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
+        if (projects.length === 0) {
+          openCommandPalette({ open: "add-project" });
+          return;
+        }
+        void startNewThreadFromContext(newThreadContext);
         return;
       }
 
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
+        if (projects.length === 0) {
+          openCommandPalette({ open: "add-project" });
+          return;
+        }
         // The default sidebar routes creation through the command palette
         // whenever there is a real choice to make; the legacy sidebar (and
         // single-project setups) keep the immediate contextual create.
@@ -99,12 +99,7 @@ function ChatRouteGlobalShortcuts() {
           openCommandPalette({ open: "new-thread-in" });
           return;
         }
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
+        void startNewThreadFromContext(newThreadContext);
         return;
       }
 
@@ -157,14 +152,12 @@ function ChatRouteGlobalShortcuts() {
       window.removeEventListener("keydown", onWindowKeyDown);
     };
   }, [
-    activeDraftThread,
-    activeThread,
+    newThreadContext,
     clearSelection,
-    handleNewThread,
     keybindings,
-    defaultProjectRef,
     previewOpen,
     projectGroupCount,
+    projects.length,
     routeThreadRef,
     selectedThreadKeysSize,
     legacySidebarEnabled,

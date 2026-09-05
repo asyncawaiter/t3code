@@ -203,6 +203,29 @@ leaving the screen, or an audio interruption discards the new recording and keep
 and attachments. T3 Code deletes the local audio file after transcription or cancellation. It sends
 only the normal message text when you submit the draft.
 
+## Edit your latest message
+
+On web and desktop, use the pencil on your latest user message after the agent and its
+background work have stopped. Codex and Claude support editing. Images and file attachments
+are recovered into the editor and stay attached unless you remove them. If an attachment
+cannot be recovered, sending is blocked so it cannot silently disappear.
+
+Choose **Keep current files** to rewind only the conversation, or **Restore files** to also
+restore the workspace checkpoint before that message. Restoring files can replace newer
+manual edits as well as agent changes. This choice requires an available Git checkpoint;
+it does not undo external actions such as pushes, deployments, or database changes.
+
+**Save & resend** replaces the latest prompt and its response and starts the edited prompt.
+**Rewind only** removes that exchange and returns your edited prompt and attachments to the
+composer. An existing composer draft is preserved; clear it first to use **Rewind only**.
+Cancel leaves the conversation unchanged.
+
+Editing is unavailable for archived chats, messages sent as steering during another turn,
+and providers other than Codex and Claude. Claude instances with a separate configuration
+directory do not support editing yet. The mobile client does not have this editor yet.
+If a connection fails while applying an edit, check the conversation before retrying; use
+**Keep as draft** to retain your edited prompt when the composer is empty.
+
 ## Commands and skills
 
 Type `/` to open the command menu. Type `$` to find and add a skill. Skill rows show their source,

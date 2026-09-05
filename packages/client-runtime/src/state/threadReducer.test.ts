@@ -9,6 +9,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  resolveLatestMessageRewind,
 } from "@t3tools/contracts";
 import type { OrchestrationThread } from "@t3tools/contracts";
 
@@ -1197,6 +1198,74 @@ describe("applyThreadDetailEvent", () => {
   });
 
   describe("thread.reverted", () => {
+    it("rewinds by message boundary without dropping older messages that have no checkpoints", () => {
+      const messages: OrchestrationThread["messages"] = [1, 2, 3, 4].map((index) => ({
+        id: MessageId.make(`message-${index}`),
+        role: index % 2 ? "user" : "assistant",
+        text: String(index),
+        turnId: TurnId.make(index <= 2 ? "earlier" : "latest"),
+        streaming: false,
+        createdAt: `2026-04-01T0${index}:00:00.000Z`,
+        updatedAt: `2026-04-01T0${index}:00:00.000Z`,
+      }));
+      const thread: OrchestrationThread = {
+        ...baseThread,
+        messages,
+        latestTurn: {
+          turnId: TurnId.make("latest"),
+          state: "completed",
+          requestedAt: messages[2]!.createdAt,
+          startedAt: messages[2]!.createdAt,
+          completedAt: messages[3]!.createdAt,
+          assistantMessageId: messages[3]!.id,
+        },
+      };
+      expect(resolveLatestMessageRewind(thread, messages[2]!.id)).toMatchObject({
+        sourceMessageId: messages[2]!.id,
+        canRestoreFiles: false,
+      });
+      expect(resolveLatestMessageRewind(thread, messages[0]!.id)).toHaveProperty("error");
+      expect(
+        resolveLatestMessageRewind(
+          { ...thread, latestTurn: { ...thread.latestTurn!, state: "running" } },
+          messages[2]!.id,
+        ),
+      ).toHaveProperty("error");
+      const steered = {
+        ...thread,
+        messages: [
+          ...messages.slice(0, 3),
+          { ...messages[2]!, id: MessageId.make("steering") },
+          messages[3]!,
+        ],
+      };
+      expect(resolveLatestMessageRewind(steered, MessageId.make("steering"))).toHaveProperty(
+        "error",
+      );
+      const event = {
+        ...baseEventFields,
+        sequence: 20,
+        occurredAt: "2026-04-01T05:00:00.000Z",
+        aggregateKind: "thread" as const,
+        aggregateId: thread.id,
+        type: "thread.reverted" as const,
+        payload: {
+          threadId: thread.id,
+          turnCount: 0,
+          sourceMessageId: messages[2]!.id,
+          removedTurnId: TurnId.make("latest"),
+        },
+      };
+      const result = applyThreadDetailEvent(thread, event);
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.messages).toEqual(messages.slice(0, 2));
+        const replay = applyThreadDetailEvent(result.thread, event);
+        if (replay.kind === "updated")
+          expect(replay.thread.messages).toEqual(result.thread.messages);
+      }
+    });
+
     it("filters entities to retained turns", () => {
       const threadWithData: OrchestrationThread = {
         ...baseThread,

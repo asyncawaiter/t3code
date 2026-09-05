@@ -1,6 +1,11 @@
 import { type OrchestrationThreadShell, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
-import { buildDashboard, classifyDashboardThread, isEscalated } from "./dashboard.ts";
+import {
+  dashboardHistory,
+  buildDashboard,
+  classifyDashboardThread,
+  isEscalated,
+} from "./dashboard.ts";
 
 const NOW = "2026-09-04T12:00:00.000Z";
 
@@ -162,9 +167,39 @@ describe("classifyDashboardThread", () => {
       classifyDashboardThread(shell({ latestTurn: turn("2026-09-02T00:00:00.000Z") }), NOW),
     ).toBeNull();
     expect(
-      classifyDashboardThread(shell({ latestTurn: turn("2026-09-04T01:00:00.000Z", "error") }), NOW)
-        ?.reason,
-    ).toBe("failed");
+      classifyDashboardThread(
+        shell({ latestTurn: turn("2026-09-04T01:00:00.000Z", "error") }),
+        NOW,
+      ),
+    ).toMatchObject({ lane: "needs-you", reason: "failed" });
+    expect(
+      classifyDashboardThread(
+        shell({ latestTurn: turn("2026-09-04T01:00:00.000Z", "interrupted") }),
+        NOW,
+      ),
+    ).toMatchObject({ lane: "needs-you", reason: "interrupted" });
+  });
+
+  it("keeps snoozed, settled and archived work out of active results but available in their own views", () => {
+    const completed = shell({
+      latestTurn: { state: "completed", completedAt: "2026-09-01T11:00:00.000Z" } as never,
+    });
+    for (const [visibility, overrides] of [
+      ["snoozed", { snoozedUntil: "2026-09-05T12:00:00.000Z" }],
+      ["settled", { settledOverride: "settled" }],
+      ["archived", { archivedAt: NOW }],
+    ] as const) {
+      const hidden = { ...completed, ...overrides };
+      expect(classifyDashboardThread(hidden, NOW)).toBeNull();
+      expect(dashboardHistory([hidden], NOW, visibility)).toEqual([hidden]);
+      const idle = { ...hidden, latestTurn: null, session: null };
+      expect(dashboardHistory([idle], NOW, visibility)).toEqual([idle]);
+      expect(dashboardHistory([completed], NOW, visibility)).toEqual([]);
+    }
+    expect(
+      classifyDashboardThread(shell({ settledOverride: "settled", hasPendingApprovals: true }), NOW)
+        ?.lane,
+    ).toBe("needs-you");
   });
 
   it("never shows archived threads", () => {
@@ -196,5 +231,24 @@ describe("buildDashboard", () => {
     expect(board.counts).toEqual({ "needs-you": 2, running: 1, monitoring: 0, done: 0 });
     expect(isEscalated(board.lanes["needs-you"][0]!, NOW)).toBe(true);
     expect(isEscalated(board.lanes["needs-you"][1]!, NOW)).toBe(false);
+  });
+});
+
+describe("dashboardHistory", () => {
+  it("sorts snoozed chats by return time and excludes expired snoozes and archives", () => {
+    const early = shell({ id: ThreadId.make("early"), snoozedUntil: "2026-09-04T13:00:00.000Z" });
+    const later = shell({ id: ThreadId.make("later"), snoozedUntil: "2026-09-05T13:00:00.000Z" });
+    expect(
+      dashboardHistory(
+        [later, early, shell({ snoozedUntil: NOW }), { ...early, archivedAt: NOW }],
+        NOW,
+        "snoozed",
+      ),
+    ).toEqual([early, later]);
+    const old = shell({ settledOverride: "settled", settledAt: "2026-08-01T00:00:00.000Z" });
+    const recent = shell({ settledOverride: "settled", settledAt: NOW });
+    expect(dashboardHistory([old, recent, { ...recent, archivedAt: NOW }], NOW, "settled")).toEqual(
+      [recent, old],
+    );
   });
 });

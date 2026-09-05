@@ -9,25 +9,41 @@ export function projectGroupTitleNeedsUpdate(
 }
 
 /**
- * Move a project to `targetProfileId`, dropping it from every other profile
- * first. `null` (or the synthesized "All" id, which is never stored) just
- * unassigns the project.
+ * Move one checkout or a set of known checkouts to a profile, removing their
+ * previous memberships. Null or All unassigns them; a missing target preserves them.
  */
 export function moveProjectToProfile(
   profiles: ReadonlyArray<Profile>,
-  projectKey: string,
+  projectKey: string | ReadonlyArray<string>,
   targetProfileId: string | null,
 ): ReadonlyArray<Profile> {
+  if (
+    targetProfileId !== null &&
+    targetProfileId !== ALL_PROFILE_ID &&
+    !profiles.some((profile) => profile.id === targetProfileId)
+  )
+    return profiles;
+  const projectKeys = new Set(typeof projectKey === "string" ? [projectKey] : projectKey);
   const withoutProject = profiles.map((profile) => ({
     ...profile,
-    projectKeys: profile.projectKeys.filter((key) => key !== projectKey),
+    projectKeys: profile.projectKeys.filter((key) => !projectKeys.has(key)),
+    ...(profile.spaces
+      ? {
+          spaces: profile.spaces.map((space) => ({
+            ...space,
+            threads: space.threads.filter(
+              (thread) => profile.id === targetProfileId || !projectKeys.has(thread.projectKey),
+            ),
+          })),
+        }
+      : {}),
   }));
   if (targetProfileId === null || targetProfileId === ALL_PROFILE_ID) {
     return withoutProject;
   }
   return withoutProject.map((profile) =>
     profile.id === targetProfileId
-      ? { ...profile, projectKeys: [...profile.projectKeys, projectKey] }
+      ? { ...profile, projectKeys: [...profile.projectKeys, ...projectKeys] }
       : profile,
   );
 }

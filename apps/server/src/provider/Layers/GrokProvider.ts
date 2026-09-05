@@ -41,6 +41,7 @@ import { sessionModelStateFromInitialize } from "../acp/AcpRuntimeModel.ts";
 import { discoverGrokSkills } from "../Drivers/GrokSkills.ts";
 
 const GROK_PRESENTATION = {
+  supportsConversationRollback: false,
   displayName: "Grok",
   badgeLabel: "Early Access",
   showInteractionModeToggle: false,

@@ -43,7 +43,11 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import { MENU_ACTION_CHANNEL, WINDOW_FULLSCREEN_STATE_CHANNEL } from "../ipc/channels.ts";
+import {
+  MENU_ACTION_CHANNEL,
+  SCROLL_GESTURE_CHANNEL,
+  WINDOW_FULLSCREEN_STATE_CHANNEL,
+} from "../ipc/channels.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 import * as PreviewManager from "../preview/Manager.ts";
@@ -484,6 +488,36 @@ describe("DesktopWindow", () => {
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["t3code-dev://app/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("forwards scroll boundaries without sending every wheel update to the renderer", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const gestureInput = fakeWindow.webContentsListeners.get("input-event");
+        assert.isDefined(gestureInput);
+        fakeWindow.send.mockClear();
+        gestureInput?.({}, { type: "gestureScrollBegin" });
+        gestureInput?.({}, { type: "gestureScrollUpdate" });
+        gestureInput?.({}, { type: "mouseWheel" });
+        gestureInput?.({}, { type: "gestureScrollEnd" });
+        assert.deepEqual(fakeWindow.send.mock.calls, [
+          [SCROLL_GESTURE_CHANNEL, "begin"],
+          [SCROLL_GESTURE_CHANNEL, "end"],
+        ]);
       }).pipe(Effect.provide(layer));
     }),
   );

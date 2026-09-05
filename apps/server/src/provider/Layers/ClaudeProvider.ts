@@ -44,6 +44,7 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
 });
 
 const CLAUDE_PRESENTATION = {
+  supportsMessageEditing: true,
   displayName: "Claude",
   showInteractionModeToggle: true,
 } as const;

@@ -1,3 +1,20 @@
+import type { DraftThreadState } from "../composerDraftStore";
+import { ThreadSpaceDialog } from "./sidebar/ThreadSpaceDialog";
+import {
+  commonSpaceProfile,
+  matchesSidebarSpace,
+  resolveSidebarSpaceFilter,
+  OUTSIDE_SPACES,
+} from "./sidebar/Spaces.logic";
+import { buildDashboard } from "@t3tools/client-runtime/state/dashboard";
+import {
+  spaceForThread,
+  indexProfileSpaces,
+  moveThreadsToSpace,
+  type Profile,
+  type ProfileSpace,
+} from "@t3tools/contracts";
+import { SpaceToolbar, SpaceTile, SPACE_THREAD_DRAG } from "./sidebar/Spaces";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -36,11 +53,13 @@ import {
   findProfile,
   isProjectInProfile,
   nextProfileId,
+  profileForProject,
   resolveEnvironmentMachineKind,
   resolveProfiles,
   type EnvironmentMachineKind,
   type ProjectIconOverride,
   type ScopedThreadRef,
+  type ScopedProjectRef,
   type ThreadId,
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
@@ -54,12 +73,12 @@ import {
   CircleDashedIcon,
   ClockIcon,
   FolderIcon,
-  FolderPlusIcon,
   GitBranchIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
+  TagsIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -69,13 +88,13 @@ import {
   memo,
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useReducer,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type WheelEvent as ReactWheelEvent,
   type ReactNode,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
@@ -104,7 +123,11 @@ import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
-import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
+import {
+  deriveLogicalProjectKey,
+  getProjectOrderKey,
+  selectProjectGroupingSettings,
+} from "../logicalProject";
 import {
   buildSidebarProjectSnapshots,
   type SidebarProjectSnapshot,
@@ -115,7 +138,13 @@ import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings, usePrimarySettings } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  usePrimarySettingsLoaded,
+  useUpdatePrimarySettings,
+} from "../hooks/useSettings";
+import { moveProjectToProfile } from "./settings/ProjectSettingsPanel.logic";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -135,8 +164,13 @@ import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat"
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { ProfileStrip } from "./sidebar/ProfileStrip";
-import { INITIAL_PROFILE_SWIPE_STATE, reduceProfileSwipe } from "./sidebar/profileSwipe";
+import { ProfileDot, ProfileStrip } from "./sidebar/ProfileStrip";
+import {
+  INITIAL_PROFILE_SWIPE_STATE,
+  INITIAL_NATIVE_PROFILE_SWIPE_STATE,
+  reduceProfileSwipe,
+  reduceNativeProfileSwipe,
+} from "./sidebar/profileSwipe";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
@@ -208,7 +242,15 @@ import {
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
-import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
+import {
+  Popover,
+  PopoverClose,
+  PopoverDescription,
+  PopoverPopup,
+  PopoverTitle,
+  PopoverTrigger,
+} from "./ui/popover";
+import { Checkbox } from "./ui/checkbox";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
@@ -559,7 +601,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         tabIndex={0}
         data-testid="sidebar-draft-row"
         className={cn(
-          "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left text-sidebar-foreground outline-none select-none",
+          "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-lg border border-sidebar-border/60 text-left text-sidebar-foreground outline-none select-none focus-visible:ring-2 focus-visible:ring-ring",
           props.isActive
             ? "bg-sidebar-row-active"
             : "bg-amber-400/[0.04] hover:bg-amber-400/[0.08]",
@@ -567,8 +609,8 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         onClick={handleActivate}
         onKeyDown={handleKeyDown}
       >
-        <div className="relative z-10 px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
-          <div className="flex h-5 min-w-0 items-center gap-1.5">
+        <div className="relative z-10 px-2.5 py-1.5">
+          <div className="flex h-4.5 min-w-0 items-center gap-1.5">
             <SquarePenIcon
               aria-hidden
               className="size-3 shrink-0 text-amber-600 dark:text-amber-300/80"
@@ -626,6 +668,8 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   projectIconByKey: ReadonlyMap<string, ProjectIconOverride | null | undefined>;
   scopedProjectKeys: ReadonlySet<string> | null;
   routeDraftId: string | null;
+  matchesSpace: (session: DraftThreadState) => boolean;
+  onDiscard: (session: DraftThreadState) => void;
   onNavigateToDraft: (draftId: DraftId) => void;
 }) {
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
@@ -661,7 +705,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     // new-thread surfaces mint fresh drafts and leave invested ones behind
     // unmapped, so the mapping only knows about the latest per project.
     for (const [draftKey, session] of Object.entries(draftThreadsByThreadKey)) {
-      if (session.promotedTo != null) {
+      if (session.promotedTo != null || !props.matchesSpace(session)) {
         continue;
       }
       if (
@@ -693,16 +737,19 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     frozenActive,
     props.routeDraftId,
     props.scopedProjectKeys,
+    props.matchesSpace,
   ]);
   const handleDiscard = useCallback(
     (draftId: DraftId) => {
       // The /draft/$draftId route redirects home on its own when the draft
       // it renders disappears, so discarding the open draft needs no
       // special-casing here.
+      const session = useComposerDraftStore.getState().getDraftSession(draftId);
       releaseComposerDraftUploads(draftId);
       clearDraftThread(draftId);
+      if (session) props.onDiscard(session);
     },
-    [clearDraftThread],
+    [clearDraftThread, props.onDiscard],
   );
   if (drafts.length === 0) {
     return null;
@@ -781,6 +828,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   isRenaming: boolean;
   renamingTitle: string;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
+  onOrganize: (threadRef: ScopedThreadRef) => void;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onSnooze: (threadRef: ScopedThreadRef, preset: SnoozePreset) => void;
@@ -1156,14 +1204,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [onThreadActivate, openPrLink, openPullRequestsInRightPanel, pr, props.isActive, threadRef],
   );
 
-  // All sidebar rows share one surface model. Live threads used to look
-  // like elevated cards while settled threads were plain rows, leaving neither
-  // a useful hierarchy nor a reliable hover cue. Status now lives in the row
-  // content; surface is reserved for interaction (hover, multi-select, route).
+  // A quiet boundary keeps adjacent threads distinct even without hover.
   const rowSurfaceClassName = cn(
-    "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none",
+    "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-lg border text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring",
+    variant === "card"
+      ? "border-sidebar-border/60 bg-sidebar-control-surface/25"
+      : "border-transparent border-b-sidebar-border/35",
     props.isActive
-      ? "bg-sidebar-row-active text-sidebar-foreground"
+      ? "border-sidebar-accent-foreground/25 bg-sidebar-row-active text-sidebar-foreground"
       : isSelected
         ? "bg-sidebar-row-selected text-sidebar-foreground"
         : shouldRecede
@@ -1254,6 +1302,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <TerminalIcon className={cn("size-3.5", terminalStatus.pulse && "animate-status-pulse")} />
     </span>
   ) : null;
+  const organizeButton = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`Move ${thread.title} to space`}
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onOrganize(threadRef);
+            }}
+          />
+        }
+      >
+        <TagsIcon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup>Move to space</TooltipPopup>
+    </Tooltip>
+  );
   const pinIndicator = props.isPinned ? (
     props.pinningSupported ? (
       <Tooltip>
@@ -1333,6 +1402,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
             {prBadge}
+            {organizeButton}
             <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
               <span
                 className={cn(
@@ -1445,7 +1515,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_74px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1466,8 +1536,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
-            <div className="flex h-5 min-w-0 items-center gap-1.5">
+          <div className="relative z-10 px-2.5 py-1.5">
+            <div className="flex h-4.5 min-w-0 items-center gap-1.5">
               <ProjectFavicon
                 environmentId={thread.environmentId}
                 cwd={props.projectCwd ?? ""}
@@ -1596,7 +1666,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
+            <div className="mt-0.5 flex min-w-0 leading-5">
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
@@ -1604,18 +1674,31 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </span>
               ) : null}
             </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-secondary-label text-[11px] leading-4">
+              <span className="inline-flex max-w-[40%] min-w-0 items-center gap-1">
+                <EnvironmentMachineIcon
+                  aria-hidden
+                  kind={props.environmentMachine}
+                  className="size-3 shrink-0"
+                />
+                <span className="truncate">
+                  {props.environmentLabel ?? (isRemote ? "Remote" : "This machine")}
+                </span>
+              </span>
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
               {thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
-                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
+                  <span className="min-w-0 flex-1 truncate border-l border-sidebar-border/70 pl-1.5 whitespace-nowrap">
+                    {thread.branch}
+                  </span>
                 </>
               ) : (
                 <span className="flex-1" />
               )}
+              {organizeButton}
               {terminalStatusIcon}
               {prBadge}
               {diff ? (
@@ -1628,15 +1711,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 aria-hidden
                 className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
               >
-                {isRemote ? (
-                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <EnvironmentMachineIcon
-                      aria-hidden
-                      kind={props.environmentMachine}
-                      className="size-3.5"
-                    />
-                  </span>
-                ) : null}
                 {driverKind ? (
                   <span className="inline-flex shrink-0 items-center">
                     <ProviderInstanceIcon
@@ -1796,6 +1870,10 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const rawProfiles = usePrimarySettings((s) => s.profiles);
+  const primarySettingsLoaded = usePrimarySettingsLoaded();
+  const updatePrimarySettings = useUpdatePrimarySettings();
+  const latestProfilesRef = useRef(rawProfiles);
+  latestProfilesRef.current = rawProfiles;
   const resolvedProfiles = useMemo(() => resolveProfiles(rawProfiles), [rawProfiles]);
   const activeProfileId = useUiStateStore((store) => store.activeProfileId);
   const setActiveProfileId = useUiStateStore((store) => store.setActiveProfileId);
@@ -1824,7 +1902,91 @@ export default function Sidebar() {
     [activeProfile, profileProjectKeys, projects],
   );
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const allProjectsLabel =
+    activeProfile.id === ALL_PROFILE_ID ? "All projects" : `Projects in ${activeProfile.name}`;
   const threads = useThreadShells();
+  const [deletedSpace, setDeletedSpace] = useState<{
+    profileId: string;
+    space: ProfileSpace;
+    index: number;
+  } | null>(null);
+  const changeSpaces = useCallback(
+    (profile: Profile) => {
+      if (!primarySettingsLoaded || profile.id === ALL_PROFILE_ID) return;
+      const previous = latestProfilesRef.current.find((item) => item.id === profile.id);
+      const removed = previous?.spaces?.find(
+        (space) => !profile.spaces?.some((item) => item.id === space.id),
+      );
+      if (removed)
+        setDeletedSpace({
+          profileId: profile.id,
+          space: removed,
+          index: previous!.spaces!.indexOf(removed),
+        });
+      updatePrimarySettings({
+        profiles: latestProfilesRef.current.map((item) =>
+          item.id === profile.id ? profile : item,
+        ),
+      });
+    },
+    [primarySettingsLoaded, updatePrimarySettings],
+  );
+  const moveSpaceThreads = useCallback(
+    (keys: string[], spaceId: string | null, profileId = activeProfile.id) => {
+      const profile = rawProfiles.find((item) => item.id === profileId);
+      if (!profile) return;
+      const selected = new Set(keys);
+      changeSpaces(
+        moveThreadsToSpace(
+          profile,
+          threads
+            .filter((thread) =>
+              selected.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+            )
+            .map((thread) => ({
+              threadKey: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+              projectKey: scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+            })),
+          spaceId,
+        ),
+      );
+    },
+    [activeProfile.id, rawProfiles, threads, changeSpaces],
+  );
+  const spaceIndex = useMemo(() => indexProfileSpaces(rawProfiles), [rawProfiles]);
+  const defaultSpaceFilter = activeProfile.id === ALL_PROFILE_ID ? null : OUTSIDE_SPACES;
+  const [spaceSelection, setSpaceSelection] = useState<{
+    profileId: string;
+    filter: string | null;
+  }>({ profileId: activeProfile.id, filter: defaultSpaceFilter });
+  if (spaceSelection.profileId !== activeProfile.id) {
+    setSpaceSelection({ profileId: activeProfile.id, filter: defaultSpaceFilter });
+  }
+  const spaceFilter = resolveSidebarSpaceFilter(
+    activeProfile,
+    spaceSelection.profileId === activeProfile.id ? spaceSelection.filter : defaultSpaceFilter,
+  );
+  const setSelectedSpaceId = useCallback(
+    (filter: string | null) => {
+      setSpaceSelection({ profileId: activeProfile.id, filter });
+    },
+    [activeProfile.id],
+  );
+  const selectedSpace = activeProfile.spaces?.find((space) => space.id === spaceFilter) ?? null;
+  const [spaceAssignmentKeys, setSpaceAssignmentKeys] = useState<string[] | null>(null);
+  const openThreadSpaces = useCallback(
+    (threadRef: ScopedThreadRef) => setSpaceAssignmentKeys([scopedThreadKey(threadRef)]),
+    [],
+  );
+  const threadSpace = (thread: EnvironmentThreadShell) => {
+    const assignment = spaceIndex.get(
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    );
+    return assignment?.projectKey === `${thread.environmentId}:${thread.projectId}`
+      ? assignment.space
+      : undefined;
+  };
+
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1902,7 +2064,7 @@ export default function Sidebar() {
       );
     },
   });
-  const newThreadContext = useHandleNewThread();
+  const { newThreadContext, handleNewThread } = useHandleNewThread();
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: "add-project" }),
     [],
@@ -2063,13 +2225,13 @@ export default function Sidebar() {
   // while the popup search filters the same collection.
   const projectScopeItems = useMemo(
     () => [
-      { value: "all", label: "All projects" },
+      { value: "all", label: allProjectsLabel },
       ...projectGroups.map((project) => ({
         value: project.projectKey,
         label: project.displayName,
       })),
     ],
-    [projectGroups],
+    [allProjectsLabel, projectGroups],
   );
   const projectGroupByScopeKey = useMemo(
     () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
@@ -2154,6 +2316,14 @@ export default function Sidebar() {
       ) {
         continue;
       }
+      if (
+        !matchesSidebarSpace(
+          spaceIndex.get(scopedThreadKey(scopeThreadRef(session.environmentId, session.threadId)))
+            ?.space.id,
+          spaceFilter,
+        )
+      )
+        continue;
       count += 1;
     }
     return count;
@@ -2184,6 +2354,39 @@ export default function Sidebar() {
       openProjectSettings(projectGroup);
     },
     [openProjectSettings],
+  );
+  const [profileAssignment, setProfileAssignment] = useState<{
+    projectRef: ScopedProjectRef;
+    position: { x: number; y: number };
+  } | null>(null);
+  const [assignAllCheckouts, setAssignAllCheckouts] = useState(false);
+  const assignmentProject = profileAssignment
+    ? projects.find(
+        (project) =>
+          project.environmentId === profileAssignment.projectRef.environmentId &&
+          project.id === profileAssignment.projectRef.projectId,
+      )
+    : undefined;
+  const assignmentCheckouts = useMemo(
+    () =>
+      assignmentProject
+        ? projects.filter(
+            (project) =>
+              deriveLogicalProjectKey(project) === deriveLogicalProjectKey(assignmentProject),
+          )
+        : [],
+    [assignmentProject, projects],
+  );
+  const assignmentKeys = (
+    assignAllCheckouts ? assignmentCheckouts : assignmentProject ? [assignmentProject] : []
+  ).map((project) => scopedProjectKey(scopeProjectRef(project.environmentId, project.id)));
+  const openProjectProfileMenu = useCallback(
+    (projectRef: ScopedProjectRef, position: { x: number; y: number }) => {
+      if (!primarySettingsLoaded) return;
+      setAssignAllCheckouts(false);
+      setProfileAssignment({ projectRef, position });
+    },
+    [primarySettingsLoaded],
   );
 
   // Settled threads stay in the live shell stream (settled ≠ archived), so
@@ -2262,6 +2465,15 @@ export default function Sidebar() {
     };
   }, [nowMinute, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
 
+  const spaceAttention = useMemo(
+    () =>
+      new Set(
+        buildDashboard([...pinnedThreads, ...activeThreads], snoozeNow).lanes["needs-you"].map(
+          (entry) => scopedThreadKey(scopeThreadRef(entry.shell.environmentId, entry.shell.id)),
+        ),
+      ),
+    [pinnedThreads, activeThreads, snoozeNow],
+  );
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
@@ -2386,8 +2598,28 @@ export default function Sidebar() {
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () =>
+      [
+        ...pinnedThreads,
+        ...activeThreads,
+        ...visibleSnoozedThreads,
+        ...(spaceFilter !== null && settledShelfExpanded ? settledThreads : renderedSettledThreads),
+      ].filter((thread) => {
+        const space = spaceIndex.get(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        )?.space;
+        return matchesSidebarSpace(space?.id, spaceFilter) || (thread.pinnedAt != null && !space);
+      }),
+    [
+      pinnedThreads,
+      activeThreads,
+      visibleSnoozedThreads,
+      renderedSettledThreads,
+      spaceFilter,
+      spaceIndex,
+      settledShelfExpanded,
+      settledThreads,
+    ],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -2419,8 +2651,8 @@ export default function Sidebar() {
   threadByKeyRef.current = threadByKey;
   // handleNewThread is inherently unstable (depends on the projects list);
   // a ref keeps it out of attemptSettle's dependency array.
-  const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
-  handleNewThreadRef.current = newThreadContext.handleNewThread;
+  const handleNewThreadRef = useRef(handleNewThread);
+  handleNewThreadRef.current = handleNewThread;
   const settledThreadKeys = useMemo(
     () =>
       new Set(
@@ -2999,6 +3231,11 @@ export default function Sidebar() {
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
+            {
+              id: "bulk-space",
+              label: `Move to space (${count})...`,
+              disabled: !primarySettingsLoaded,
+            },
             { id: "settle", label: `Settle (${count})` },
             ...(canSnoozeSelection
               ? [
@@ -3020,6 +3257,11 @@ export default function Sidebar() {
         ),
       );
       if (clicked._tag === "Failure") return;
+      if (clicked.value === "bulk-space") {
+        setSpaceAssignmentKeys(threadKeys);
+        return;
+      }
+
       if (clicked.value?.startsWith("snooze:")) {
         const preset = snoozePresets.find(
           (candidate) => `snooze:${candidate.id}` === clicked.value,
@@ -3167,6 +3409,7 @@ export default function Sidebar() {
       removeFromSelection(threadKeys);
     },
     [
+      primarySettingsLoaded,
       attemptSettle,
       attemptSnooze,
       clearSelection,
@@ -3216,31 +3459,69 @@ export default function Sidebar() {
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
+        const ownerProfile = commonSpaceProfile(rawProfiles, [
+          `${thread.environmentId}:${thread.projectId}`,
+        ]);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            buildThreadActionMenuItems({
-              branch: thread.branch ?? null,
-              isPinned,
-              isSettled,
-              isSnoozed,
-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle,
-              isRunning:
-                thread.session?.status === "running" && thread.session.activeTurnId != null,
-              supports: {
-                settlement: supportsSettlement,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: supportsTitleRegeneration,
+            [
+              ...buildThreadActionMenuItems({
+                branch: thread.branch ?? null,
+                isPinned,
+                isSettled,
+                isSnoozed,
+                canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+                isRegeneratingTitle,
+                isRunning:
+                  thread.session?.status === "running" && thread.session.activeTurnId != null,
+                supports: {
+                  settlement: supportsSettlement,
+                  snooze: supportsSnooze,
+                  pinning: supportsPinning,
+                  titleRegeneration: supportsTitleRegeneration,
+                },
+                snoozePresets,
+              }),
+              { id: "move-space", label: "Move to space...", disabled: !primarySettingsLoaded },
+              ...(ownerProfile
+                ? [
+                    {
+                      id: "pin-space",
+                      label: "Pin to",
+                      disabled: !primarySettingsLoaded || !supportsPinning,
+                      children: [
+                        { id: "space-pin:root", label: `${ownerProfile.name} / Outside spaces` },
+                        ...(ownerProfile.spaces ?? []).map((space) => ({
+                          id: `space-pin:${space.id}`,
+                          label: `${ownerProfile.name} / ${space.name}`,
+                        })),
+                      ],
+                    },
+                  ]
+                : []),
+              {
+                id: "move-project-profile",
+                label: "Move project to profile",
+                icon: "tags",
+                disabled: !primarySettingsLoaded || rawProfiles.length === 0,
               },
-              snoozePresets,
-            }),
+            ],
             position,
           ),
         );
         if (clicked._tag === "Failure") return;
+        if (clicked.value?.startsWith("space:") || clicked.value?.startsWith("space-pin:")) {
+          const destination = clicked.value.slice(clicked.value.indexOf(":") + 1);
+          moveSpaceThreads(
+            [threadKey],
+            destination === "root" ? null : destination,
+            ownerProfile?.id,
+          );
+          if (clicked.value.startsWith("space-pin:") && !isPinned) attemptPin(threadRef);
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset = snoozePresets.find(
             (candidate) => `snooze:${candidate.id}` === clicked.value,
@@ -3249,6 +3530,17 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
+          case "move-space": {
+            setSpaceAssignmentKeys([threadKey]);
+            return;
+          }
+          case "move-project-profile": {
+            await openProjectProfileMenu(
+              scopeProjectRef(thread.environmentId, thread.projectId),
+              position,
+            );
+            return;
+          }
           case "project-settings": {
             const projectGroup = projectGroupsRef.current.find((group) =>
               group.memberProjectRefs.some(
@@ -3418,6 +3710,10 @@ export default function Sidebar() {
       copyThreadIdToClipboard,
       deleteThread,
       handleMultiSelectContextMenu,
+      moveSpaceThreads,
+      openProjectProfileMenu,
+      primarySettingsLoaded,
+      rawProfiles,
       markThreadUnread,
       openProjectSettings,
       projectCwdByKey,
@@ -3471,7 +3767,11 @@ export default function Sidebar() {
         if (resolvedProfiles.length > 1) {
           event.preventDefault();
           event.stopPropagation();
-          const nextId = nextProfileId(resolvedProfiles, activeProfileId ?? ALL_PROFILE_ID, profileDirection);
+          const nextId = nextProfileId(
+            resolvedProfiles,
+            activeProfileId ?? ALL_PROFILE_ID,
+            profileDirection,
+          );
           setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
         }
         return;
@@ -3526,23 +3826,29 @@ export default function Sidebar() {
   // for multi-project setups.
   const handleNewThreadClick = useCallback(
     (event?: ReactMouseEvent) => {
+      if (visibleProjects.length === 0) {
+        openAddProjectCommandPalette();
+        return;
+      }
       // One project: nothing to pick, create immediately. Shift+click creates
       // directly in the current project even with several projects, skipping
       // the palette picker.
       if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
         if (isMobile) setOpenMobile(false);
-        void startNewThreadFromContext({
-          activeDraftThread: newThreadContext.activeDraftThread,
-          activeThread: newThreadContext.activeThread ?? undefined,
-          defaultProjectRef: newThreadContext.defaultProjectRef,
-          handleNewThread: newThreadContext.handleNewThread,
-        });
+        void startNewThreadFromContext(newThreadContext);
         return;
       }
       if (isMobile) setOpenMobile(false);
       openCommandPalette({ open: "new-thread-in" });
     },
-    [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
+    [
+      isMobile,
+      newThreadContext,
+      openAddProjectCommandPalette,
+      projectGroups.length,
+      setOpenMobile,
+      visibleProjects.length,
+    ],
   );
 
   // The button mirrors chat.new: in multi-project setups both route through
@@ -3558,29 +3864,73 @@ export default function Sidebar() {
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
 
-  // Trackpad swipe between profiles. State lives in a ref (not React state)
-  // because a gesture is many wheel events per frame and none of them need
-  // to trigger a render themselves. Only firing does, via setActiveProfileId.
-  const profileSwipeStateRef = useRef(INITIAL_PROFILE_SWIPE_STATE);
-  const handleSidebarWheel = useCallback(
-    (event: ReactWheelEvent<HTMLDivElement>) => {
-      if (resolvedProfiles.length <= 1) return;
-      // deltaMode reports whether delta values are pixels (0), lines (1), or
-      // pages (2); the reducer's thresholds assume pixels, so scale line/page
-      // deltas up before feeding them in.
-      const deltaScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
-      const { state, fire } = reduceProfileSwipe(profileSwipeStateRef.current, {
-        deltaX: event.deltaX * deltaScale,
-        deltaY: event.deltaY * deltaScale,
+  const sidebarSwipeRef = useRef<HTMLDivElement>(null);
+  const onScrollGesture =
+    typeof window === "undefined" ? undefined : window.desktopBridge?.onScrollGesture;
+  const canSwipeProfiles = resolvedProfiles.length > 1;
+  const switchProfileFromSwipe = useEffectEvent((direction: "next" | "previous") => {
+    if (resolvedProfiles.length <= 1) return;
+    const ui = useUiStateStore.getState();
+    const nextId = nextProfileId(resolvedProfiles, ui.activeProfileId ?? ALL_PROFILE_ID, direction);
+    ui.setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
+  });
+  useEffect(() => {
+    const node = sidebarSwipeRef.current;
+    if (!node || !canSwipeProfiles) return;
+
+    if (onScrollGesture) {
+      let state = INITIAL_NATIVE_PROFILE_SWIPE_STATE;
+      let lastWheelInside = false;
+      let startedInside = false;
+      const reset = () => {
+        state = INITIAL_NATIVE_PROFILE_SWIPE_STATE;
+        lastWheelInside = startedInside = false;
+      };
+      const onWheel = (event: WheelEvent) => {
+        lastWheelInside =
+          event.target instanceof Node && node.contains(event.target) && !event.ctrlKey;
+        if (!lastWheelInside || !startedInside) return;
+        const result = reduceNativeProfileSwipe(state, {
+          type: "wheel",
+          deltaX: event.deltaX,
+          deltaY: event.deltaY,
+        });
+        state = result.state;
+        if (result.fire) switchProfileFromSwipe(result.fire);
+      };
+      const unsubscribe = onScrollGesture((phase) => {
+        // Chromium sends begin after the first wheel event. Latch its origin
+        // so a gesture started in the chat cannot switch profiles on entering the sidebar.
+        startedInside = phase === "begin" && lastWheelInside;
+        state = reduceNativeProfileSwipe(state, { type: phase }).state;
+      });
+      // Cancelling wheel events suppresses Chromium's gesture boundaries.
+      // CSS contains horizontal overflow; vertical scrolling stays native.
+      window.addEventListener("wheel", onWheel, { capture: true, passive: true });
+      window.addEventListener("blur", reset);
+      return () => {
+        unsubscribe();
+        window.removeEventListener("wheel", onWheel, { capture: true });
+        window.removeEventListener("blur", reset);
+      };
+    }
+
+    let state = INITIAL_PROFILE_SWIPE_STATE;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return;
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) event.preventDefault();
+      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
+      const result = reduceProfileSwipe(state, {
+        deltaX: event.deltaX * scale,
+        deltaY: event.deltaY * scale,
         timestamp: event.timeStamp,
       });
-      profileSwipeStateRef.current = state;
-      if (fire === null) return;
-      const nextId = nextProfileId(resolvedProfiles, activeProfileId ?? ALL_PROFILE_ID, fire);
-      setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
-    },
-    [activeProfileId, resolvedProfiles, setActiveProfileId],
-  );
+      state = result.state;
+      if (result.fire) switchProfileFromSwipe(result.fire);
+    };
+    node.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    return () => node.removeEventListener("wheel", onWheel, { capture: true });
+  }, [onScrollGesture, canSwipeProfiles]);
 
   // One-shot slide when the active profile changes, played imperatively so
   // switching profiles doesn't remount (and lose scroll position, DOM focus,
@@ -3602,8 +3952,171 @@ export default function Sidebar() {
     );
   }, [activeProfile.id]);
 
+  const sidebarProjectFilter =
+    projectGroups.length > 0 ? (
+      <div className="mx-1 mt-1 flex items-center gap-1 rounded-lg bg-sidebar-foreground/5 px-1">
+        <Combobox
+          items={projectScopeItems}
+          filteredItems={filteredProjectScopeItems}
+          autoHighlight
+          itemToStringLabel={(item) => item.label}
+          isItemEqualToValue={(a, b) => a.value === b.value}
+          open={projectScopeMenuState.open}
+          onOpenChange={(open) => {
+            dispatchProjectScopeMenu({ type: "open-changed", open });
+          }}
+          value={selectedProjectScopeItem}
+          onValueChange={(item) => {
+            if (!item) return;
+            setProjectScopeKey(item.value === "all" ? null : item.value);
+          }}
+        >
+          <ComboboxTrigger
+            render={
+              <SidebarMenuButton
+                aria-label="Filter threads by project"
+                className="h-8 min-w-0 flex-1 gap-1.5 px-1.5 text-[11px] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+              />
+            }
+          >
+            <span className="text-[10px] text-sidebar-muted-foreground">Project</span>
+            <span className="min-w-0 flex-1 truncate">
+              {scopedProjectGroup?.displayName ?? "All projects"}
+            </span>
+            <ChevronDownIcon className="size-3 shrink-0 text-sidebar-muted-foreground" />
+          </ComboboxTrigger>
+          <ComboboxPopup align="start" className="w-(--anchor-width) min-w-0 overflow-hidden">
+            <div className="shrink-0 px-3 pt-2.5">
+              <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
+                <SearchIcon
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
+                />
+                <ComboboxInput
+                  aria-label="Search projects"
+                  className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
+                  inputClassName="rounded-none bg-transparent text-sm"
+                  placeholder="Search projects..."
+                  showTrigger={false}
+                  size="sm"
+                  unstyled
+                  value={projectScopeMenuState.query}
+                  onChange={(event) =>
+                    dispatchProjectScopeMenu({
+                      type: "query-changed",
+                      query: event.target.value,
+                    })
+                  }
+                />
+              </div>
+            </div>
+            <ComboboxEmpty>No matching projects.</ComboboxEmpty>
+            <ComboboxList>
+              {(item: (typeof projectScopeItems)[number]) => {
+                const project = projectGroupByScopeKey.get(item.value) ?? null;
+                return (
+                  <ComboboxItem
+                    key={item.value}
+                    hideIndicator
+                    value={item}
+                    className="h-8 min-h-8 py-0 font-medium"
+                    contentClassName="flex min-w-0 items-center gap-2"
+                  >
+                    {project ? (
+                      <ProjectFavicon
+                        environmentId={project.environmentId}
+                        cwd={project.workspaceRoot}
+                        projectName={project.displayName}
+                        faviconPath={project.faviconPath}
+                        projectIcon={project.projectIcon}
+                        className="size-4 shrink-0"
+                      />
+                    ) : (
+                      <FolderIcon className="size-4 shrink-0" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+                    {project && rawProfiles.length > 0 ? (
+                      <Button
+                        size="xs"
+                        variant="ghost-muted"
+                        disabled={!primarySettingsLoaded}
+                        aria-label={`Move ${project.displayName} to profile`}
+                        title="Move project to profile"
+                        className="h-6 max-w-24 gap-1 px-1 text-[11px]"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          dispatchProjectScopeMenu({ type: "project-settings-opened" });
+                          void openProjectProfileMenu(
+                            scopeProjectRef(project.environmentId, project.id),
+                            { x: rect.left, y: rect.bottom },
+                          );
+                        }}
+                      >
+                        <TagsIcon className="size-3 shrink-0" />
+                        <span className="truncate">
+                          {profileForProject(
+                            rawProfiles,
+                            scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
+                          )?.name ?? "Assign"}
+                        </span>
+                      </Button>
+                    ) : null}
+                    {project ? (
+                      <Button
+                        size="icon-xs"
+                        variant="ghost-muted"
+                        aria-label={`Project settings for ${project.displayName}`}
+                        title={`Project settings for ${project.displayName}`}
+                        className="ml-auto size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          void handleProjectSettings(event, project);
+                        }}
+                      >
+                        <SettingsIcon className="size-3.5" />
+                      </Button>
+                    ) : null}
+                  </ComboboxItem>
+                );
+              }}
+            </ComboboxList>
+          </ComboboxPopup>
+        </Combobox>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <SidebarMenuButton
+                size="icon"
+                className="relative size-7 shrink-0 text-sidebar-muted-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                onClick={openAddProjectCommandPalette}
+                type="button"
+                aria-label="New project"
+              />
+            }
+          >
+            <PlusIcon className="size-3.5" />
+            <span
+              className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
+              aria-hidden="true"
+            />
+          </TooltipTrigger>
+          <TooltipPopup side="right">New project</TooltipPopup>
+        </Tooltip>
+      </div>
+    ) : null;
+
   return (
-    <>
+    <div
+      ref={sidebarSwipeRef}
+      className={cn(
+        "flex min-h-0 w-full flex-1 flex-col",
+        onScrollGesture &&
+          "overflow-x-hidden overscroll-x-none [&_[data-slot=scroll-area-viewport]]:overscroll-x-none [&_[data-slot=profile-strip]_[role=group]]:overflow-x-hidden",
+      )}
+    >
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
         className="gap-0"
@@ -3625,8 +4138,14 @@ export default function Sidebar() {
                     setActiveSearchResultIndex(0);
                   }}
                   onKeyDown={handleThreadSearchKeyDown}
-                  placeholder="Search"
-                  aria-label="Search threads"
+                  placeholder={
+                    scopedProjectGroup
+                      ? `Search ${scopedProjectGroup.displayName}`
+                      : activeProfile.id === ALL_PROFILE_ID
+                        ? "Search all threads"
+                        : `Search ${activeProfile.name}`
+                  }
+                  aria-label={`Search thread titles in ${scopedProjectGroup?.displayName ?? activeProfile.name}`}
                   role="combobox"
                   aria-autocomplete="list"
                   aria-expanded={isSearchingThreads && threadSearchResults.length > 0}
@@ -3667,7 +4186,6 @@ export default function Sidebar() {
                         type="button"
                         className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={handleNewThreadClick}
-                        disabled={projects.length === 0}
                         aria-label="New thread"
                       />
                     }
@@ -3705,155 +4223,19 @@ export default function Sidebar() {
             <ProfileStrip
               profiles={resolvedProfiles}
               activeProfileId={activeProfileId}
+              onThreadDrop={
+                activeProfile.id !== ALL_PROFILE_ID
+                  ? (keys) => moveSpaceThreads(keys, null)
+                  : undefined
+              }
               onSelect={(id) => setActiveProfileId(id === ALL_PROFILE_ID ? null : id)}
             />
-            {projectGroups.length > 0 ? (
-              <div className="flex items-center gap-1">
-                <Combobox
-                  items={projectScopeItems}
-                  filteredItems={filteredProjectScopeItems}
-                  autoHighlight
-                  itemToStringLabel={(item) => item.label}
-                  isItemEqualToValue={(a, b) => a.value === b.value}
-                  open={projectScopeMenuState.open}
-                  onOpenChange={(open) => {
-                    dispatchProjectScopeMenu({ type: "open-changed", open });
-                  }}
-                  value={selectedProjectScopeItem}
-                  onValueChange={(item) => {
-                    if (!item) return;
-                    setProjectScopeKey(item.value === "all" ? null : item.value);
-                  }}
-                >
-                  <ComboboxTrigger
-                    render={
-                      <SidebarMenuButton
-                        aria-label="Filter threads by project"
-                        className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                      />
-                    }
-                  >
-                    {scopedProjectGroup ? (
-                      <span className="flex shrink-0">
-                        <ProjectFavicon
-                          environmentId={scopedProjectGroup.environmentId}
-                          cwd={scopedProjectGroup.workspaceRoot}
-                          projectName={scopedProjectGroup.displayName}
-                          faviconPath={scopedProjectGroup.faviconPath}
-                          projectIcon={scopedProjectGroup.projectIcon}
-                          className="size-4"
-                        />
-                      </span>
-                    ) : (
-                      <FolderIcon className="size-4 shrink-0" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate">
-                      {scopedProjectGroup?.displayName ?? "All projects"}
-                    </span>
-                    <ChevronDownIcon className="-mr-px size-4 shrink-0" />
-                  </ComboboxTrigger>
-                  <ComboboxPopup
-                    align="start"
-                    className="w-(--anchor-width) min-w-0 overflow-hidden"
-                  >
-                    <div className="shrink-0 px-3 pt-2.5">
-                      <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
-                        <SearchIcon
-                          aria-hidden="true"
-                          className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
-                        />
-                        <ComboboxInput
-                          aria-label="Search projects"
-                          className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
-                          inputClassName="rounded-none bg-transparent text-sm"
-                          placeholder="Search projects..."
-                          showTrigger={false}
-                          size="sm"
-                          unstyled
-                          value={projectScopeMenuState.query}
-                          onChange={(event) =>
-                            dispatchProjectScopeMenu({
-                              type: "query-changed",
-                              query: event.target.value,
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-                    <ComboboxEmpty>No matching projects.</ComboboxEmpty>
-                    <ComboboxList>
-                      {(item: (typeof projectScopeItems)[number]) => {
-                        const project = projectGroupByScopeKey.get(item.value) ?? null;
-                        return (
-                          <ComboboxItem
-                            key={item.value}
-                            hideIndicator
-                            value={item}
-                            className="h-8 min-h-8 py-0 font-medium"
-                            contentClassName="flex min-w-0 items-center gap-2"
-                          >
-                            {project ? (
-                              <ProjectFavicon
-                                environmentId={project.environmentId}
-                                cwd={project.workspaceRoot}
-                                projectName={project.displayName}
-                                faviconPath={project.faviconPath}
-                                projectIcon={project.projectIcon}
-                                className="size-4 shrink-0"
-                              />
-                            ) : (
-                              <FolderIcon className="size-4 shrink-0" />
-                            )}
-                            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
-                            {project ? (
-                              <Button
-                                size="icon-xs"
-                                variant="ghost-muted"
-                                aria-label={`Project settings for ${project.displayName}`}
-                                title={`Project settings for ${project.displayName}`}
-                                className="ml-auto size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                                onPointerDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
-                                  void handleProjectSettings(event, project);
-                                }}
-                              >
-                                <SettingsIcon className="size-3.5" />
-                              </Button>
-                            ) : null}
-                          </ComboboxItem>
-                        );
-                      }}
-                    </ComboboxList>
-                  </ComboboxPopup>
-                </Combobox>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={openAddProjectCommandPalette}
-                        type="button"
-                        aria-label="New project"
-                      />
-                    }
-                  >
-                    <FolderPlusIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">New project</TooltipPopup>
-                </Tooltip>
-              </div>
-            ) : null}
+            {isSearchingThreads ? sidebarProjectFilter : null}
           </SidebarGroup>
         }
       >
         <SidebarGroup
           ref={profileListRef}
-          onWheel={handleSidebarWheel}
           className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0"
         >
           {isSearchingThreads ? (
@@ -3891,9 +4273,14 @@ export default function Sidebar() {
                           null
                         }
                         projectTitle={
-                          projectDisplayNameByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
+                          [
+                            projectDisplayNameByKey.get(
+                              `${thread.environmentId}:${thread.projectId}`,
+                            ),
+                            threadSpace(thread)?.name,
+                          ]
+                            .filter(Boolean)
+                            .join(" / ") || null
                         }
                         environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
                         environmentMachine={
@@ -3918,9 +4305,35 @@ export default function Sidebar() {
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                No threads found
+                No matching thread titles in {scopedProjectGroup?.displayName ?? activeProfile.name}
               </p>
             )
+          ) : null}
+          {deletedSpace?.profileId === activeProfile.id ? (
+            <div className="flex items-center justify-between px-3 py-1 text-xs text-muted-foreground">
+              Space removed
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => {
+                  const spaces = [...(activeProfile.spaces ?? [])];
+                  if (!spaces.some((space) => space.id === deletedSpace.space.id)) {
+                    spaces.splice(Math.min(deletedSpace.index, spaces.length), 0, {
+                      ...deletedSpace.space,
+                      threads: deletedSpace.space.threads.filter(
+                        (thread) =>
+                          activeProfile.projectKeys.includes(thread.projectKey) &&
+                          !spaceForThread(activeProfile, thread.threadKey, thread.projectKey),
+                      ),
+                    });
+                    changeSpaces({ ...activeProfile, spaces });
+                  }
+                  setDeletedSpace(null);
+                }}
+              >
+                Undo
+              </Button>
+            </div>
           ) : null}
           {!isSearchingThreads ? (
             <TooltipProvider
@@ -3945,7 +4358,7 @@ export default function Sidebar() {
                     // not from the sidebar second-guessing what still matters.
                     const isCard = section === "active" || section === "pinned";
                     const rowVariant = isCard ? "card" : "slim";
-                    return (
+                    const row = (
                       <SidebarThreadRow
                         // Keyed per variant on purpose: when a thread settles,
                         // the card fades out in place and the slim row fades
@@ -4031,6 +4444,7 @@ export default function Sidebar() {
                         isRenaming={renamingThreadKey === threadKey}
                         renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
                         onContextMenu={handleThreadContextMenu}
+                        onOrganize={openThreadSpaces}
                         onSettle={attemptSettle}
                         onUnsettle={attemptUnsettle}
                         onSnooze={attemptSnooze}
@@ -4041,6 +4455,24 @@ export default function Sidebar() {
                         onChangeRequestSnapshot={setThreadChangeRequestSnapshot}
                       />
                     );
+                    if (activeProfile.id === ALL_PROFILE_ID) return row;
+                    return (
+                      <li
+                        key={`${threadKey}:${rowVariant}`}
+                        className="list-none"
+                        draggable
+                        onDragStart={(event) => {
+                          const selected = useThreadSelectionStore.getState().selectedThreadKeys;
+                          event.dataTransfer.setData(
+                            SPACE_THREAD_DRAG,
+                            JSON.stringify(selected.has(threadKey) ? [...selected] : [threadKey]),
+                          );
+                          event.dataTransfer.effectAllowed = "move";
+                        }}
+                      >
+                        <ul>{row}</ul>
+                      </li>
+                    );
                   };
                   // Draft block above everything, then the pinned block:
                   // full cards above the inbox, closed by a thin divider (the
@@ -4049,6 +4481,7 @@ export default function Sidebar() {
                   // Pinned rows render in the one shared pinned order; only
                   // reorder-capable rows register as sortable (legacy-server
                   // pins render in place as plain rows).
+                  const rootPins = orderedPinnedThreads.filter((thread) => !threadSpace(thread));
                   const items: ReactNode[] = [
                     <SidebarDraftBlock
                       key="draft-sessions"
@@ -4057,10 +4490,43 @@ export default function Sidebar() {
                       projectFaviconPathByKey={projectFaviconPathByKey}
                       projectIconByKey={projectIconByKey}
                       scopedProjectKeys={scopedProjectKeys}
+                      matchesSpace={(session) =>
+                        matchesSidebarSpace(
+                          spaceIndex.get(
+                            scopedThreadKey(
+                              scopeThreadRef(session.environmentId, session.threadId),
+                            ),
+                          )?.space.id,
+                          spaceFilter,
+                        )
+                      }
                       routeDraftId={routeDraftIdForRows}
+                      onDiscard={(session) => {
+                        const key = scopedThreadKey(
+                          scopeThreadRef(session.environmentId, session.threadId),
+                        );
+                        const owner = latestProfilesRef.current.find((profile) =>
+                          profile.spaces?.some((space) =>
+                            space.threads.some((thread) => thread.threadKey === key),
+                          ),
+                        );
+                        if (owner)
+                          changeSpaces(
+                            moveThreadsToSpace(
+                              owner,
+                              [
+                                {
+                                  threadKey: key,
+                                  projectKey: `${session.environmentId}:${session.projectId}`,
+                                },
+                              ],
+                              null,
+                            ),
+                          );
+                      }}
                       onNavigateToDraft={navigateToDraft}
                     />,
-                    pinnedThreads.length > 0 ? (
+                    rootPins.length > 0 ? (
                       <li key="pinned-dnd" className="list-none">
                         <DndContext
                           sensors={pinnedDndSensors}
@@ -4069,7 +4535,7 @@ export default function Sidebar() {
                           onDragEnd={handlePinnedDragEnd}
                         >
                           <SortableContext
-                            items={orderedPinnedThreads
+                            items={rootPins
                               .map((thread) =>
                                 scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
                               )
@@ -4081,7 +4547,7 @@ export default function Sidebar() {
                               aria-label="Pinned threads"
                               className="flex flex-col gap-px"
                             >
-                              {orderedPinnedThreads.map((thread) => {
+                              {rootPins.map((thread) => {
                                 const threadKey = scopedThreadKey(
                                   scopeThreadRef(thread.environmentId, thread.id),
                                 );
@@ -4100,7 +4566,7 @@ export default function Sidebar() {
                       </li>
                     ) : null,
                   ];
-                  if (pinnedThreads.length > 0) {
+                  if (rootPins.length > 0) {
                     items.push(
                       <li
                         key="pinned-divider"
@@ -4110,15 +4576,226 @@ export default function Sidebar() {
                       />,
                     );
                   }
-                  for (const thread of activeThreads) {
-                    items.push(renderThreadRow(thread, "active"));
+                  if (activeProfile.id !== ALL_PROFILE_ID) {
+                    items.push(
+                      <li
+                        key="spaces"
+                        className="mx-1 mb-2 list-none rounded-2xl bg-sidebar-foreground/[0.025] p-1.5"
+                        role="group"
+                        aria-label={`Spaces in ${activeProfile.name}`}
+                      >
+                        <SpaceToolbar
+                          key={activeProfile.id}
+                          profile={activeProfile}
+                          onChange={changeSpaces}
+                          selectedSpaceId={spaceFilter}
+                          onFilterChange={setSelectedSpaceId}
+                          disabled={!primarySettingsLoaded}
+                        />
+                        {activeProfile.spaces?.length ? (
+                          <ul aria-label="Spaces" className="mt-1 grid grid-cols-2 gap-1.5">
+                            {activeProfile.spaces.map((space) => (
+                              <SpaceTile
+                                key={space.id}
+                                profile={activeProfile}
+                                space={space}
+                                count={
+                                  [
+                                    ...pinnedThreads,
+                                    ...activeThreads,
+                                    ...snoozedThreads,
+                                    ...settledThreads,
+                                  ].filter((thread) => threadSpace(thread)?.id === space.id).length
+                                }
+                                attention={threads.some(
+                                  (thread) =>
+                                    threadSpace(thread)?.id === space.id &&
+                                    spaceAttention.has(
+                                      scopedThreadKey(
+                                        scopeThreadRef(thread.environmentId, thread.id),
+                                      ),
+                                    ),
+                                )}
+                                selected={selectedSpace?.id === space.id}
+                                onSelect={() =>
+                                  setSelectedSpaceId(
+                                    selectedSpace?.id === space.id ? OUTSIDE_SPACES : space.id,
+                                  )
+                                }
+                                onChange={changeSpaces}
+                                onMove={moveSpaceThreads}
+                                onLaunch={async (projectRef, defaults) => {
+                                  const before = useComposerDraftStore.getState();
+                                  const emptyDraftKeys = Object.entries(
+                                    before.draftThreadsByThreadKey,
+                                  )
+                                    .filter(
+                                      ([id, draft]) =>
+                                        draft.promotedTo == null &&
+                                        !composerDraftHasUserContent(before.draftsByThreadKey[id]),
+                                    )
+                                    .map(([, draft]) =>
+                                      scopedThreadKey(
+                                        scopeThreadRef(draft.environmentId, draft.threadId),
+                                      ),
+                                    );
+                                  const opened = await handleNewThreadRef.current(projectRef, {
+                                    forceNew: true,
+                                    useProjectDefaults: true,
+                                    ...(defaults.modelSelection
+                                      ? { modelSelection: defaults.modelSelection }
+                                      : {}),
+                                    ...(defaults.envMode ? { envMode: defaults.envMode } : {}),
+                                  });
+                                  if (!opened) throw new Error("Could not create a draft.");
+                                  const current = latestProfilesRef.current.find(
+                                    (item) => item.id === activeProfile.id,
+                                  );
+                                  if (!current?.spaces?.some((item) => item.id === space.id)) {
+                                    throw new Error(
+                                      "This space was removed while opening the chat. The draft is still available.",
+                                    );
+                                  }
+                                  const remaining = new Set(
+                                    useComposerDraftStore.getState().listDraftThreadKeys(),
+                                  );
+                                  const removed = new Set(
+                                    emptyDraftKeys.filter((key) => !remaining.has(key)),
+                                  );
+                                  changeSpaces(
+                                    moveThreadsToSpace(
+                                      {
+                                        ...current,
+                                        spaces: current.spaces?.map((item) => ({
+                                          ...item,
+                                          threads: item.threads.filter(
+                                            (thread) => !removed.has(thread.threadKey),
+                                          ),
+                                        })),
+                                      },
+                                      [
+                                        {
+                                          threadKey: scopedThreadKey(
+                                            scopeThreadRef(
+                                              projectRef.environmentId,
+                                              opened.threadId,
+                                            ),
+                                          ),
+                                          projectKey: scopedProjectKey(projectRef),
+                                        },
+                                      ],
+                                      space.id,
+                                    ),
+                                  );
+                                  setSelectedSpaceId(space.id);
+                                  setProjectScopeKey(null);
+                                }}
+                                disabled={!primarySettingsLoaded}
+                              />
+                            ))}
+                          </ul>
+                        ) : null}
+                      </li>,
+                    );
                   }
+                  if (sidebarProjectFilter)
+                    items.push(
+                      <li key="project-filter" className="mb-2 list-none">
+                        {sidebarProjectFilter}
+                      </li>,
+                    );
+                  const inSpace = (thread: EnvironmentThreadShell) =>
+                    matchesSidebarSpace(threadSpace(thread)?.id, spaceFilter);
+                  const spacePins = orderedPinnedThreads.filter(
+                    (thread) => threadSpace(thread) && inSpace(thread),
+                  );
+                  if (spacePins.length)
+                    items.push(
+                      <li key="space-pins" className="list-none">
+                        <DndContext
+                          sensors={pinnedDndSensors}
+                          collisionDetection={closestCenter}
+                          modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                          onDragEnd={handlePinnedDragEnd}
+                        >
+                          <SortableContext
+                            items={spacePins
+                              .map((thread) =>
+                                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                              )
+                              .filter((key) => reorderablePinnedKeys.has(key))}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            <ul>
+                              {spacePins.map((thread) => {
+                                const key = scopedThreadKey(
+                                  scopeThreadRef(thread.environmentId, thread.id),
+                                );
+                                return reorderablePinnedKeys.has(key) ? (
+                                  <SortablePinnedThreadRow key={key} id={key}>
+                                    {(bag) => renderThreadRow(thread, "pinned", bag)}
+                                  </SortablePinnedThreadRow>
+                                ) : (
+                                  renderThreadRow(thread, "pinned")
+                                );
+                              })}
+                            </ul>
+                          </SortableContext>
+                        </DndContext>
+                      </li>,
+                    );
+                  for (const thread of activeThreads.filter(inSpace))
+                    items.push(renderThreadRow(thread, "active"));
+                  if (
+                    spaceFilter !== null &&
+                    visibleProjects.length > 0 &&
+                    visibleDraftSessionCount === 0 &&
+                    !(
+                      routeDraftThread &&
+                      scopedProjectKeys?.has(
+                        `${routeDraftThread.environmentId}:${routeDraftThread.projectId}`,
+                      ) !== false &&
+                      matchesSidebarSpace(
+                        spaceIndex.get(
+                          scopedThreadKey(
+                            scopeThreadRef(
+                              routeDraftThread.environmentId,
+                              routeDraftThread.threadId,
+                            ),
+                          ),
+                        )?.space.id,
+                        spaceFilter,
+                      )
+                    ) &&
+                    ![
+                      ...pinnedThreads,
+                      ...activeThreads,
+                      ...snoozedThreads,
+                      ...settledThreads,
+                    ].some(inSpace)
+                  )
+                    items.push(
+                      <li
+                        key="empty-space"
+                        className="px-3 py-3 text-xs leading-relaxed text-sidebar-muted-foreground"
+                      >
+                        <p>No chats in this view.</p>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="mt-1 px-0"
+                          onClick={() => setSelectedSpaceId(null)}
+                        >
+                          Show all threads
+                        </Button>
+                      </li>,
+                    );
                   // Snoozed shelf: between the inbox and Settled — out of the
                   // way, never gone. The header always renders while anything
                   // is snoozed (the count is the whole footprint when
                   // collapsed); rows only when expanded. Vanishes entirely at
                   // count 0.
-                  if (snoozedThreads.length > 0) {
+                  if (snoozedThreads.filter(inSpace).length > 0) {
                     items.push(
                       <li
                         key="snoozed-shelf-header"
@@ -4135,7 +4812,7 @@ export default function Sidebar() {
                           <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
                             {snoozedShelfExpanded
                               ? "Snoozed"
-                              : `Snoozed (${snoozedThreads.length})`}
+                              : `Snoozed (${snoozedThreads.filter(inSpace).length})`}
                           </span>
                           <span className="h-px flex-1 bg-blue-500/20 dark:bg-blue-400/15" />
                           <ChevronDownIcon
@@ -4148,11 +4825,11 @@ export default function Sidebar() {
                         </button>
                       </li>,
                     );
-                    for (const thread of visibleSnoozedThreads) {
+                    for (const thread of visibleSnoozedThreads.filter(inSpace)) {
                       items.push(renderThreadRow(thread, "snoozed"));
                     }
                   }
-                  if (settledThreads.length > 0) {
+                  if (settledThreads.filter(inSpace).length > 0) {
                     items.push(
                       <li
                         key="settled-shelf-header"
@@ -4169,7 +4846,7 @@ export default function Sidebar() {
                           <span className="text-xs font-medium text-muted-foreground/50">
                             {settledShelfExpanded
                               ? "Settled"
-                              : `Settled (${settledThreads.length})`}
+                              : `Settled (${settledThreads.filter(inSpace).length})`}
                           </span>
                           <span className="h-px flex-1 bg-sidebar-border/60" />
                           <ChevronDownIcon
@@ -4183,12 +4860,15 @@ export default function Sidebar() {
                       </li>,
                     );
                   }
-                  for (const thread of renderedSettledThreads) {
+                  for (const thread of (spaceFilter !== null && settledShelfExpanded
+                    ? settledThreads
+                    : renderedSettledThreads
+                  ).filter(inSpace)) {
                     items.push(renderThreadRow(thread, "settled"));
                   }
                   return items;
                 })()}
-                {settledShelfExpanded && hiddenSettledCount > 0 ? (
+                {spaceFilter === null && settledShelfExpanded && hiddenSettledCount > 0 ? (
                   <li className="list-none">
                     <button
                       type="button"
@@ -4210,17 +4890,23 @@ export default function Sidebar() {
             snoozedThreads.length +
             settledThreads.length ===
             0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {projects.length === 0 ? (
+            <div className="flex flex-col items-start gap-2 px-3 py-4 text-xs text-sidebar-muted-foreground">
+              {visibleProjects.length === 0 ? (
                 <>
-                  <span>No projects yet</span>
+                  <span>
+                    {activeProfile.id === ALL_PROFILE_ID
+                      ? "No projects yet"
+                      : `Add a project to start using ${activeProfile.name}.`}
+                  </span>
                   <button
                     type="button"
                     onClick={openAddProjectCommandPalette}
                     className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
                   >
                     <PlusIcon className="-mx-0.5 size-3" />
-                    Add project
+                    {activeProfile.id === ALL_PROFILE_ID
+                      ? "Add project"
+                      : `Add project to ${activeProfile.name}`}
                   </button>
                 </>
               ) : scopedProjectGroup ? (
@@ -4233,6 +4919,109 @@ export default function Sidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarChromeFooter />
-    </>
+      {spaceAssignmentKeys ? (
+        <ThreadSpaceDialog
+          threads={threads
+            .filter((thread) =>
+              spaceAssignmentKeys.includes(
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+              ),
+            )
+            .map((thread) => ({
+              threadKey: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+              projectKey: `${thread.environmentId}:${thread.projectId}`,
+            }))}
+          onClose={() => setSpaceAssignmentKeys(null)}
+          onMove={(profileId, spaceId) => moveSpaceThreads(spaceAssignmentKeys, spaceId, profileId)}
+        />
+      ) : null}
+      <Popover
+        open={profileAssignment !== null && assignmentProject !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setProfileAssignment(null);
+        }}
+      >
+        {profileAssignment && assignmentProject ? (
+          <PopoverPopup
+            anchor={{
+              getBoundingClientRect: () =>
+                new DOMRect(profileAssignment.position.x, profileAssignment.position.y, 0, 0),
+            }}
+            align="start"
+            side="bottom"
+            className="w-60 max-w-[calc(100vw-1rem)]"
+            viewportClassName="p-1"
+            finalFocus={threadSearchInputRef}
+          >
+            <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
+              <ProjectFavicon
+                environmentId={assignmentProject.environmentId}
+                cwd={assignmentProject.workspaceRoot}
+                projectName={assignmentProject.title}
+                faviconPath={assignmentProject.faviconPath}
+                projectIcon={assignmentProject.projectIcon}
+                className="size-4 shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <PopoverTitle className="truncate text-xs leading-4">
+                  {assignmentProject.title}
+                </PopoverTitle>
+                <PopoverDescription className="text-[11px] leading-4">
+                  Move to a profile
+                </PopoverDescription>
+              </div>
+              <PopoverClose
+                aria-label="Close profile assignment"
+                render={<Button variant="ghost" size="icon-xs" />}
+              >
+                <XIcon className="size-3.5" />
+              </PopoverClose>
+            </div>
+            {assignmentCheckouts.length > 1 ? (
+              <label className="mx-1 mb-1 flex cursor-pointer items-center gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs">
+                <Checkbox checked={assignAllCheckouts} onCheckedChange={setAssignAllCheckouts} />
+                Include all {assignmentCheckouts.length} known checkouts
+              </label>
+            ) : null}
+            <div className="max-h-64 overflow-y-auto" aria-label="Choose a profile">
+              {[...rawProfiles, { ...ALL_PROFILE, name: "Unassigned" }].map((profile) => {
+                const selected = assignmentKeys.every(
+                  (key) =>
+                    (profileForProject(rawProfiles, key)?.id ?? ALL_PROFILE_ID) === profile.id,
+                );
+                return (
+                  <button
+                    key={profile.id}
+                    type="button"
+                    aria-pressed={selected}
+                    disabled={!primarySettingsLoaded}
+                    onClick={() => {
+                      updatePrimarySettings({
+                        profiles: moveProjectToProfile(rawProfiles, assignmentKeys, profile.id),
+                      });
+                      setProfileAssignment(null);
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                      selected && "bg-accent/60",
+                      profile.id === ALL_PROFILE_ID && "mt-1 border-t border-border/60",
+                    )}
+                  >
+                    <ProfileDot color={profile.color} className="size-2.5" />
+                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                      <span className="block truncate">{profile.name}</span>
+                      {profile.id === ALL_PROFILE_ID ? (
+                        <span className="block text-[11px] text-muted-foreground">All only</span>
+                      ) : null}
+                    </span>
+                    {selected ? <CheckIcon aria-hidden className="size-4 shrink-0" /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          </PopoverPopup>
+        ) : null}
+      </Popover>
+    </div>
   );
 }

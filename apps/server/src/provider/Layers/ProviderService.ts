@@ -1125,7 +1125,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     registry.getInstanceInfo(instanceId);
 
   const assertConversationRollbackSupported: ProviderServiceMethod<"assertConversationRollbackSupported"> =
-    Effect.fn("assertConversationRollbackSupported")(function* (threadId) {
+    Effect.fn("assertConversationRollbackSupported")(function* (threadId, options) {
       const routed = yield* resolveRoutableSession({
         threadId,
         operation: "ProviderService.assertConversationRollbackSupported",
@@ -1135,6 +1135,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         return yield* toValidationError(
           "ProviderService.assertConversationRollbackSupported",
           `Provider '${routed.adapter.provider}' does not support conversation rewind.`,
+        );
+      }
+      if (options?.forMessageEdit && !routed.adapter.capabilities.supportsMessageEditing) {
+        return yield* toValidationError(
+          "ProviderService.assertConversationRollbackSupported",
+          `Provider '${routed.adapter.provider}' does not support message editing while preserving files.`,
         );
       }
     });
@@ -1166,6 +1172,21 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.rollback_turns": input.numTurns,
       });
       yield* routed.adapter.rollbackThread(routed.threadId, input.numTurns);
+      const resumed = (yield* routed.adapter.listSessions()).find(
+        (session) => session.threadId === routed.threadId,
+      );
+      if (resumed) {
+        const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+        yield* upsertSessionBinding(
+          { ...resumed, providerInstanceId: routed.instanceId },
+          input.threadId,
+          {
+            lastRuntimeEvent: "provider.conversation.rolled_back",
+            lastRuntimeEventAt: yield* nowIso,
+            modelSelection: readPersistedModelSelection(binding?.runtimePayload),
+          },
+        );
+      }
       yield* analytics.record("provider.conversation.rolled_back", {
         provider: routed.adapter.provider,
         turns: input.numTurns,

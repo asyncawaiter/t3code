@@ -37,3 +37,5 @@ export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
 export * from "./usageLimits.ts";
 export * from "./rpc.ts";
+
+export * from "./threadRewind.ts";

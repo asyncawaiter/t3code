@@ -93,8 +93,40 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
 
+  // A rewind spans provider/filesystem work outside the dispatch queue. Reserve
+  // the thread until its result (and optional replacement) has been committed.
+  const rewindingThreads = new Map<ThreadId, string>();
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+
+  const updateRewindReservation = (event: OrchestrationEvent) => {
+    if (
+      event.type === "thread.checkpoint-revert-requested" &&
+      event.payload.edit &&
+      event.commandId
+    ) {
+      rewindingThreads.set(event.payload.threadId, event.commandId);
+    } else if (event.type === "thread.reverted" && !event.payload.resending) {
+      rewindingThreads.delete(event.payload.threadId);
+    } else if (
+      event.type === "thread.turn-start-requested" &&
+      event.commandId === `server:rewind-send:${rewindingThreads.get(event.payload.threadId)}`
+    ) {
+      rewindingThreads.delete(event.payload.threadId);
+    } else if (
+      event.type === "thread.activity-appended" &&
+      event.payload.activity.kind === "checkpoint.revert.failed"
+    ) {
+      const payload = event.payload.activity.payload;
+      if (
+        payload &&
+        typeof payload === "object" &&
+        "requestId" in payload &&
+        payload.requestId === rewindingThreads.get(event.payload.threadId)
+      )
+        rewindingThreads.delete(event.payload.threadId);
+    }
+  };
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
@@ -127,6 +159,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       commandReadModel = yield* projectEventsOntoReadModel(commandReadModel, persistedEvents);
 
       for (const persistedEvent of persistedEvents) {
+        updateRewindReservation(persistedEvent);
         yield* PubSub.publish(eventPubSub, persistedEvent);
       }
     });
@@ -169,6 +202,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             commandId: envelope.command.commandId,
             detail: existingReceipt.value.error ?? "Previously rejected.",
           });
+        }
+
+        if ("threadId" in envelope.command) {
+          if (
+            envelope.command.type === "thread.checkpoint.revert" &&
+            envelope.command.edit &&
+            threadBackgroundLiveness.getThreadBackgroundLiveness(envelope.command.threadId)
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: envelope.command.type,
+              detail: "Stop background work in this chat before editing its latest message.",
+            });
+          }
+          const reservation = rewindingThreads.get(envelope.command.threadId);
+          if (
+            reservation &&
+            [
+              "thread.turn.start",
+              "thread.checkpoint.revert",
+              "thread.archive",
+              "thread.delete",
+              "thread.meta.update",
+              "thread.runtime-mode.set",
+              "thread.interaction-mode.set",
+            ].includes(envelope.command.type) &&
+            envelope.command.commandId !== `server:rewind-send:${reservation}`
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: envelope.command.type,
+              detail: "This chat is being rewound. Wait for the edit to finish.",
+            });
+          }
         }
 
         if (
@@ -274,6 +339,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           yield* cleanup;
         }
         for (const [index, event] of committedCommand.committedEvents.entries()) {
+          updateRewindReservation(event);
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {
             yield* Metric.update(

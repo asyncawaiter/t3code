@@ -39,6 +39,7 @@ const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnErro
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
 
 const CODEX_PRESENTATION = {
+  supportsMessageEditing: true,
   displayName: "Codex",
   showInteractionModeToggle: true,
 } as const;

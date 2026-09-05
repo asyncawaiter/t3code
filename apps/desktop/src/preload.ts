@@ -39,6 +39,19 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     return result as ReturnType<DesktopBridge["getAppBranding"]>;
   },
   getClientPlatform: () => clientPlatform,
+  ...(clientPlatform === "darwin"
+    ? {
+        onScrollGesture: (listener: (phase: "begin" | "end") => void) => {
+          const wrappedListener = (_event: Electron.IpcRendererEvent, phase: unknown) => {
+            if (phase === "begin" || phase === "end") listener(phase);
+          };
+          ipcRenderer.on(IpcChannels.SCROLL_GESTURE_CHANNEL, wrappedListener);
+          return () => {
+            ipcRenderer.removeListener(IpcChannels.SCROLL_GESTURE_CHANNEL, wrappedListener);
+          };
+        },
+      }
+    : {}),
   getSystemLocale: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_LOCALE_CHANNEL);
     return typeof result === "string" ? result : null;

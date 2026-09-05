@@ -4,7 +4,15 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
+import {
+  ALL_PROFILE,
+  findProfile,
+  isProjectInProfile,
+  DEFAULT_RUNTIME_MODE,
+  type ScopedProjectRef,
+  type ModelSelection,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -28,12 +36,13 @@ import {
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
+  scopeNewThreadContext,
 } from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
 import { primaryServerSettingsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
-import { useClientSettings } from "./useSettings";
+import { useClientSettings, usePrimarySettings, useLegacySidebarEnabled } from "./useSettings";
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -77,6 +86,9 @@ export function useNewThreadHandler() {
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
         replace?: boolean;
+        forceNew?: boolean;
+        useProjectDefaults?: boolean;
+        modelSelection?: ModelSelection;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
@@ -135,9 +147,10 @@ export function useNewThreadHandler() {
           candidate.environmentId === projectRef.environmentId,
       );
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
+        options?.modelSelection ??
         resolveNewThreadModelSelectionOverride({
           projectDefaultSelection: project?.defaultModelSelection ?? null,
-          carrySelection: carryModelSelection,
+          carrySelection: options?.useProjectDefaults ? null : carryModelSelection,
           carrySourceDraftId:
             currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
           destinationDraftId,
@@ -195,7 +208,7 @@ export function useNewThreadHandler() {
           ? getDraftThread(currentRouteTarget.threadRef)
           : getDraftSession(currentRouteTarget.draftId)
         : null;
-      if (emptyStoredDraftThread) {
+      if (emptyStoredDraftThread && !options?.forceNew) {
         return (async () => {
           const isDraftAlreadyOpen =
             currentRouteTarget?.kind === "draft" &&
@@ -321,6 +334,7 @@ export function useNewThreadHandler() {
       }
 
       if (
+        !options?.forceNew &&
         latestActiveDraftThread &&
         currentRouteTarget?.kind === "draft" &&
         latestActiveDraftThread.logicalProjectKey === logicalProjectKey &&
@@ -361,6 +375,7 @@ export function useNewThreadHandler() {
         // reuse the winner instead, like the synchronous path above does.
         const racedDraft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
         if (
+          !options?.forceNew &&
           racedDraft &&
           // Only a draft REGISTERED during the await counts as a raced
           // winner. An invested draft this invocation deliberately declined
@@ -427,6 +442,9 @@ export function useNewThreadHandler() {
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const activeProfileId = useUiStateStore((store) => store.activeProfileId);
+  const profiles = usePrimarySettings((settings) => settings.profiles);
+  const legacySidebarEnabled = useLegacySidebarEnabled();
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -454,13 +472,36 @@ export function useHandleNewThread() {
     });
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadHandler();
+  const profileProjects = useMemo(() => {
+    const profile = legacySidebarEnabled
+      ? ALL_PROFILE
+      : (findProfile(profiles, activeProfileId) ?? ALL_PROFILE);
+    return orderedProjects.filter((project) =>
+      isProjectInProfile(
+        profile,
+        scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
+      ),
+    );
+  }, [activeProfileId, legacySidebarEnabled, orderedProjects, profiles]);
+  const newThreadContext = useMemo(
+    () =>
+      scopeNewThreadContext(
+        {
+          activeDraftThread,
+          activeThread: activeThread ?? undefined,
+          defaultProjectRef: null,
+          handleNewThread,
+        },
+        profileProjects.map((project) => scopeProjectRef(project.environmentId, project.id)),
+      ),
+    [activeDraftThread, activeThread, handleNewThread, profileProjects],
+  );
 
   return {
+    profileProjects,
+    newThreadContext,
     activeDraftThread,
     activeThread,
-    defaultProjectRef: orderedProjects[0]
-      ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
-      : null,
     handleNewThread,
     routeThreadRef,
   };

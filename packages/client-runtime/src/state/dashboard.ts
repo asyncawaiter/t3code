@@ -72,10 +72,10 @@ export function classifyDashboardThread<Shell extends OrchestrationThreadShell>(
   now: string,
 ): DashboardEntry<Shell> | null {
   const nowMs = Date.parse(now);
+  const snoozedNow = isSnoozed(shell, nowMs);
   if (shell.archivedAt !== null) return null;
   // Snoozed threads that raise a hand still surface: the user asked to be
   // left alone, not to miss an approval.
-  const snoozed = isSnoozed(shell, nowMs);
   const turn = shell.latestTurn;
 
   if (shell.hasPendingApprovals) {
@@ -84,7 +84,7 @@ export function classifyDashboardThread<Shell extends OrchestrationThreadShell>(
   if (shell.hasPendingUserInput) {
     return { shell, lane: "needs-you", reason: "awaiting-input", since: shell.updatedAt };
   }
-  if (snoozed) return null;
+  if (snoozedNow || shell.settledOverride === "settled") return null;
 
   const sessionStatus = shell.session?.status;
   if (sessionStatus === "running" || turn?.state === "running") {
@@ -130,7 +130,12 @@ export function classifyDashboardThread<Shell extends OrchestrationThreadShell>(
           : turn.state === "interrupted"
             ? "interrupted"
             : "completed";
-      return { shell, lane: "done", reason, since: turn.completedAt };
+      return {
+        shell,
+        lane: reason === "completed" ? "done" : "needs-you",
+        reason,
+        since: turn.completedAt,
+      };
     }
   }
   return null;
@@ -181,4 +186,27 @@ export function isEscalated(entry: DashboardEntry, now: string): boolean {
   if (entry.lane !== "needs-you") return false;
   const waited = Date.parse(now) - Date.parse(entry.since);
   return !Number.isNaN(waited) && waited >= DASHBOARD_WAITING_ESCALATION_MS;
+}
+
+export type DashboardHistoryView = "snoozed" | "settled" | "archived";
+
+/** Lifecycle lists include idle chats and old results, independent of agent status. */
+export function dashboardHistory<Shell extends OrchestrationThreadShell>(
+  shells: ReadonlyArray<Shell>,
+  now: string,
+  view: DashboardHistoryView,
+): Shell[] {
+  const nowMs = Date.parse(now);
+  return shells
+    .filter((shell) => {
+      if (view === "archived") return shell.archivedAt !== null;
+      if (shell.archivedAt !== null) return false;
+      return view === "snoozed" ? isSnoozed(shell, nowMs) : shell.settledOverride === "settled";
+    })
+    .sort((a, b) => {
+      if (view === "snoozed") return a.snoozedUntil!.localeCompare(b.snoozedUntil!);
+      const timestamp = (shell: Shell) =>
+        (view === "archived" ? shell.archivedAt : shell.settledAt) ?? shell.updatedAt;
+      return timestamp(b).localeCompare(timestamp(a));
+    });
 }

@@ -1,3 +1,4 @@
+import { dispatchAndWaitForMessageEdit } from "./orchestration/awaitMessageEdit.ts";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -1306,9 +1307,16 @@ const makeWsRpcLayer = (
                     ),
                   )
                 : false;
-              const result = yield* dispatchNormalizedCommand(normalizedCommand).pipe(
-                Effect.tapError(() => cleanupFailedUploadedAttachments(command, normalizedCommand)),
-              );
+              const dispatch = () =>
+                dispatchNormalizedCommand(normalizedCommand).pipe(
+                  Effect.tapError(() =>
+                    cleanupFailedUploadedAttachments(command, normalizedCommand),
+                  ),
+                );
+              const result = yield* normalizedCommand.type === "thread.checkpoint.revert" &&
+              normalizedCommand.edit
+                ? dispatchAndWaitForMessageEdit(normalizedCommand, dispatch)
+                : dispatch();
               yield* recordClientCommandAnalytics(normalizedCommand);
               if (archiveCommand) {
                 if (shouldStopSessionAfterCommand) {

@@ -39,6 +39,8 @@ export interface ProviderAdapterCapabilities {
   readonly promptlessTurnContinuation?: boolean;
   /** False when native conversation history cannot be rewound. */
   readonly supportsConversationRollback?: boolean;
+  /** Native rollback preserves files and supports replacing the latest user turn. */
+  readonly supportsMessageEditing?: boolean;
 }
 
 export interface ProviderThreadTurnSnapshot {

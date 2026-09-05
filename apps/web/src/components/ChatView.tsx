@@ -1,3 +1,4 @@
+import { EditMessageDialog } from "./chat/EditMessageDialog";
 import {
   type AssistantCitation,
   type ApprovalRequestId,
@@ -1453,9 +1454,7 @@ function ChatViewContent(props: ChatViewProps) {
   // twice in a row (same href) would not re-scroll on the second click.
   const forkSeamMessageTarget = useMemo<AssistantMessageScrollTarget | null>(() => {
     const messageId = assistantMessageIdFromLocation(citationLocation.href);
-    return messageId
-      ? { messageId, key: citationLocation.key ?? citationLocation.href }
-      : null;
+    return messageId ? { messageId, key: citationLocation.key ?? citationLocation.href } : null;
   }, [citationLocation.href, citationLocation.key]);
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
@@ -1557,6 +1556,7 @@ function ChatViewContent(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -4814,6 +4814,7 @@ function ChatViewContent(props: ChatViewProps) {
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
+    setEditingMessage(null);
   }, [activeThread?.id]);
 
   useEffect(() => {
@@ -7468,6 +7469,15 @@ function ChatViewContent(props: ChatViewProps) {
   revertTurnCountRef.current = revertTurnCountByUserMessageId;
   const onRevertToTurnCountRef = useRef(onRevertToTurnCount);
   onRevertToTurnCountRef.current = onRevertToTurnCount;
+  const latestEditableMessage =
+    serverMessages?.findLast((message) => message.role === "user") ?? null;
+  const onEditUserMessage = useCallback(
+    (messageId: MessageId) => {
+      const message = serverMessages?.find((entry) => entry.id === messageId);
+      if (message) setEditingMessage(message);
+    },
+    [serverMessages],
+  );
   const onRevertUserMessage = useCallback((messageId: MessageId) => {
     const targetTurnCount = revertTurnCountRef.current.get(messageId);
     if (typeof targetTurnCount !== "number") {
@@ -7673,6 +7683,31 @@ function ChatViewContent(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+      {editingMessage && activeThread ? (
+        <EditMessageDialog
+          key={`${environmentId}:${editingMessage.id}`}
+          message={editingMessage}
+          thread={activeThread}
+          environmentId={environmentId}
+          connected={!activeEnvironmentUnavailable}
+          supported={conversationProviderStatus?.supportsMessageEditing === true}
+          maxFileBytes={serverConfig?.environment.capabilities.fileAttachments?.maxUploadBytes ?? 0}
+          hasComposerDraft={composerHasUnsentContent}
+          onClose={() => setEditingMessage(null)}
+          onRecoverDraft={(text, attachments) => {
+            setComposerDraftPrompt(composerDraftTarget, text);
+            addComposerDraftImages(
+              composerDraftTarget,
+              attachments.filter((attachment) => attachment.type === "image"),
+            );
+            addComposerDraftFiles(
+              composerDraftTarget,
+              attachments.filter((attachment) => attachment.type === "file"),
+            );
+            composerRef.current?.focusAt(text.length);
+          }}
+        />
+      ) : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -7782,6 +7817,12 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
+                editableMessageId={
+                  serverConfig?.environment.capabilities.messageEditing
+                    ? (latestEditableMessage?.id ?? null)
+                    : null
+                }
+                onEditUserMessage={onEditUserMessage}
                 onForkFromMessage={onForkFromMessage}
                 messageScrollTarget={forkSeamMessageTarget}
                 onUseArtifactTemplate={useArtifactTemplate}

@@ -1110,11 +1110,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.checkpoint.revert": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (
+        command.edit &&
+        (thread.archivedAt !== null ||
+          thread.session?.status === "running" ||
+          thread.session?.status === "starting" ||
+          thread.latestTurn?.state === "running")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Stop the current turn before editing an active chat.",
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -1126,6 +1138,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          ...(command.edit ? { edit: command.edit } : {}),
           createdAt: command.createdAt,
         },
       };
@@ -1343,6 +1356,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          ...(command.sourceMessageId ? { sourceMessageId: command.sourceMessageId } : {}),
+          ...(command.removedTurnId ? { removedTurnId: command.removedTurnId } : {}),
+          ...(command.requestId ? { requestId: command.requestId } : {}),
+          ...(command.resending !== undefined ? { resending: command.resending } : {}),
         },
       };
     }

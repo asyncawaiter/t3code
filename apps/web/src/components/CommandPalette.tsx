@@ -1,4 +1,5 @@
 "use client";
+import { moveThreadsToSpace, profileForProject } from "@t3tools/contracts";
 
 import {
   scopedProjectKey,
@@ -179,7 +180,11 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
-import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
+import {
+  deriveLogicalProjectKey,
+  getProjectOrderKey,
+  selectProjectGroupingSettings,
+} from "../logicalProject";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import {
   buildSidebarProjectPickerEntries,
@@ -644,9 +649,14 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
-    useHandleNewThread();
-  const projects = useProjects();
+  const {
+    activeDraftThread,
+    activeThread,
+    handleNewThread,
+    newThreadContext,
+    profileProjects: projects,
+  } = useHandleNewThread();
+  const allProjects = useProjects();
   const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
   const activeThreadProject = useProject(
     activeThread === null
@@ -707,7 +717,17 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const threads = useThreadShells();
+  const allThreads = useThreadShells();
+  const threads = useMemo(() => {
+    const keys = new Set(
+      projects.map((project) =>
+        scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
+      ),
+    );
+    return allThreads.filter((thread) =>
+      keys.has(scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId))),
+    );
+  }, [allThreads, projects]);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const providers = useAtomValue(primaryServerProvidersAtom);
@@ -834,14 +854,8 @@ function OpenCommandPaletteDialog(props: {
     [clientSettings.sidebarProjectSortOrder, threads, unsortedProjectGroups],
   );
   const contextualProjectRef = useMemo(
-    () =>
-      resolveThreadActionProjectRef({
-        activeDraftThread,
-        activeThread: activeThread ?? undefined,
-        defaultProjectRef,
-        handleNewThread,
-      }),
-    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread],
+    () => resolveThreadActionProjectRef(newThreadContext),
+    [newThreadContext],
   );
   const projectPickerEntries = useMemo(
     () =>
@@ -1642,12 +1656,7 @@ function OpenCommandPaletteDialog(props: {
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "chat.new",
         run: async () => {
-          await startNewThreadFromContext({
-            activeDraftThread,
-            activeThread: activeThread ?? undefined,
-            defaultProjectRef,
-            handleNewThread,
-          });
+          await startNewThreadFromContext(newThreadContext);
         },
       });
     }
@@ -1733,6 +1742,52 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
+  const spaceProfile = findProfile(resolvedProfiles, activeProfileId);
+  if (spaceProfile && spaceProfile.id !== ALL_PROFILE_ID && primarySettingsLoaded) {
+    actionItems.push({
+      kind: "action",
+      value: "action:new-space",
+      title: "New space",
+      searchTerms: ["space", "create", "add"],
+      icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        window.dispatchEvent(new Event("t3:create-space"));
+      },
+    });
+  }
+  const thread = activeThread;
+  const threadProfile = thread
+    ? profileForProject(rawProfiles, `${thread.environmentId}:${thread.projectId}`)
+    : undefined;
+  if (primarySettingsLoaded && threadProfile && thread) {
+    for (const destination of [
+      { id: null, name: `${threadProfile.name} / Outside spaces` },
+      ...(threadProfile.spaces ?? []),
+    ]) {
+      actionItems.push({
+        kind: "action",
+        value: `action:space:${destination.id ?? "root"}`,
+        title: `Move thread: ${destination.name}`,
+        searchTerms: ["space", "move", destination.name],
+        icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          const updated = moveThreadsToSpace(
+            threadProfile,
+            [
+              {
+                threadKey: `${thread.environmentId}:${thread.id}`,
+                projectKey: `${thread.environmentId}:${thread.projectId}`,
+              },
+            ],
+            destination.id,
+          );
+          updatePrimarySettings({
+            profiles: rawProfiles.map((profile) => (profile.id === updated.id ? updated : profile)),
+          });
+        },
+      });
+    }
+  }
   const userProfiles = resolvedProfiles.filter((profile) => profile.id !== ALL_PROFILE_ID);
   if (userProfiles.length > 0) {
     for (const profile of resolvedProfiles) {
@@ -1813,6 +1868,53 @@ function OpenCommandPaletteDialog(props: {
     projectGroups[0] ??
     null;
   if (contextualProjectGroup) {
+    if (primarySettingsLoaded && rawProfiles.length > 0) {
+      const projectKey = scopedProjectKey(
+        scopeProjectRef(contextualProjectGroup.environmentId, contextualProjectGroup.id),
+      );
+      const repositoryKey = deriveLogicalProjectKey(contextualProjectGroup);
+      const checkoutKeys = allProjects
+        .filter((project) => deriveLogicalProjectKey(project) === repositoryKey)
+        .map((project) => scopedProjectKey(scopeProjectRef(project.environmentId, project.id)));
+      actionItems.push({
+        kind: "submenu",
+        value: "action:move-project-profile",
+        title: "Move project to profile",
+        description: contextualProjectGroup.displayName,
+        searchTerms: ["profile", "assign", "move", "project", "checkout"],
+        icon: <CircleIcon className={ITEM_ICON_CLASS} />,
+        addonIcon: <CircleIcon className={ADDON_ICON_CLASS} />,
+        groups: [
+          { value: "checkout", label: "This checkout", keys: [projectKey] },
+          ...(checkoutKeys.length > 1
+            ? [
+                {
+                  value: "repository",
+                  label: `All known checkouts (${checkoutKeys.length})`,
+                  keys: checkoutKeys,
+                },
+              ]
+            : []),
+        ].map((scope) => ({
+          value: scope.value,
+          label: scope.label,
+          items: [{ id: ALL_PROFILE_ID, name: "None (All only)" }, ...rawProfiles].map(
+            (profile) => ({
+              kind: "action" as const,
+              value: `move-profile:${scope.value}:${profile.id}`,
+              title: profile.name,
+              searchTerms: [profile.name, scope.label],
+              icon: <CircleIcon className={ITEM_ICON_CLASS} />,
+              run: async () => {
+                updatePrimarySettings({
+                  profiles: moveProjectToProfile(rawProfiles, scope.keys, profile.id),
+                });
+              },
+            }),
+          ),
+        })),
+      });
+    }
     actionItems.push({
       kind: "action",
       value: "action:project-settings",
@@ -1930,12 +2032,25 @@ function OpenCommandPaletteDialog(props: {
       if (cwd.length === 0) return;
 
       const existing = findProjectByPath(
-        projects.filter((project) => project.environmentId === input.environmentId),
+        allProjects.filter((project) => project.environmentId === input.environmentId),
         cwd,
       );
       if (existing) {
+        const profile = findProfile(resolvedProfiles, activeProfileId);
+        const projectKey = scopedProjectKey(scopeProjectRef(existing.environmentId, existing.id));
+        if (profile && profile.id !== ALL_PROFILE_ID && !profile.projectKeys.includes(projectKey)) {
+          const api = readLocalApi();
+          if (!api || !primarySettingsLoaded) return;
+          const confirmed = await api.dialogs.confirm(
+            `Move "${existing.title}" to ${profile.name} and open it? This moves this checkout and its threads from its current profile.`,
+          );
+          if (!confirmed) return;
+          updatePrimarySettings({
+            profiles: moveProjectToProfile(rawProfiles, projectKey, profile.id),
+          });
+        }
         const latestThread = getLatestThreadForProject(
-          threads.filter((thread) => thread.environmentId === existing.environmentId),
+          allThreads.filter((thread) => thread.environmentId === existing.environmentId),
           existing.id,
           clientSettings.sidebarThreadSortOrder,
         );
@@ -2028,18 +2143,19 @@ function OpenCommandPaletteDialog(props: {
     },
     [
       activeProfileId,
+      allProjects,
+      allThreads,
+      rawProfiles,
       handleNewThread,
       createProject,
       environments,
       navigate,
       primaryEnvironmentId,
       primarySettingsLoaded,
-      projects,
       providers,
       resolvedProfiles,
       setOpen,
       clientSettings.sidebarThreadSortOrder,
-      threads,
       updatePrimarySettings,
     ],
   );

@@ -2433,6 +2433,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   return {
     provider: PROVIDER,
     capabilities: {
+      supportsMessageEditing: true,
       sessionModelSwitch: "in-session",
       promptlessTurnContinuation: true,
     },

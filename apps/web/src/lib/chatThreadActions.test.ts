@@ -12,6 +12,7 @@ import {
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
   startNewThreadFromContext,
+  scopeNewThreadContext,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
 
@@ -38,6 +39,44 @@ function createContext(overrides: Partial<ChatThreadActionContext> = {}): ChatTh
 }
 
 describe("chatThreadActions", () => {
+  it("creates inside the profile even when the open thread and draft belong elsewhere", async () => {
+    const handleNewThread = vi.fn(async () => {});
+    const allowed = scopeProjectRef(EnvironmentId.make("remote"), PROJECT_ID);
+    const context = scopeNewThreadContext(
+      createContext({
+        activeThread: { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID },
+        activeDraftThread: { environmentId: ENVIRONMENT_ID, projectId: FALLBACK_PROJECT_ID },
+        handleNewThread,
+      }),
+      [allowed],
+    );
+    expect(await startNewThreadFromContext(context)).toBe(true);
+    expect(handleNewThread).toHaveBeenCalledExactlyOnceWith(allowed);
+  });
+
+  it("retains an in-profile active project instead of switching to the first project", () => {
+    const active = { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID };
+    const context = scopeNewThreadContext(createContext({ activeThread: active }), [
+      scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID),
+      scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID),
+    ]);
+    expect(resolveThreadActionProjectRef(context)).toEqual(
+      scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID),
+    );
+  });
+
+  it("does not create outside an empty profile", async () => {
+    const handleNewThread = vi.fn(async () => {});
+    const context = scopeNewThreadContext(
+      createContext({
+        activeThread: { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID },
+        handleNewThread,
+      }),
+      [],
+    );
+    expect(await startNewThreadFromContext(context)).toBe(false);
+    expect(handleNewThread).not.toHaveBeenCalled();
+  });
   it("only treats an active stored selection marked explicit as an explicit pick", () => {
     const draft = {
       activeProvider: PROJECT_DEFAULT_SELECTION.instanceId,

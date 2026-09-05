@@ -750,20 +750,32 @@ export function projectEvent(
           }
 
           const checkpoints = thread.checkpoints
-            .filter((entry) => entry.checkpointTurnCount <= payload.turnCount)
+            .filter((entry) =>
+              payload.removedTurnId
+                ? entry.turnId !== payload.removedTurnId
+                : entry.checkpointTurnCount <= payload.turnCount,
+            )
             .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
             .slice(-MAX_THREAD_CHECKPOINTS);
           const retainedTurnIds = new Set(checkpoints.map((checkpoint) => checkpoint.turnId));
-          const messages = retainThreadMessagesAfterRevert(
-            thread.messages,
-            retainedTurnIds,
-            payload.turnCount,
+          const messages = (
+            payload.sourceMessageId
+              ? thread.messages.slice(
+                  0,
+                  ((index) => (index < 0 ? thread.messages.length : index))(
+                    thread.messages.findIndex((message) => message.id === payload.sourceMessageId),
+                  ),
+                )
+              : retainThreadMessagesAfterRevert(thread.messages, retainedTurnIds, payload.turnCount)
           ).slice(-MAX_THREAD_MESSAGES);
-          const proposedPlans = retainThreadProposedPlansAfterRevert(
-            thread.proposedPlans,
-            retainedTurnIds,
+          const proposedPlans = (
+            payload.removedTurnId
+              ? thread.proposedPlans.filter((plan) => plan.turnId !== payload.removedTurnId)
+              : retainThreadProposedPlansAfterRevert(thread.proposedPlans, retainedTurnIds)
           ).slice(-200);
-          const activities = retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds);
+          const activities = payload.removedTurnId
+            ? thread.activities.filter((activity) => activity.turnId !== payload.removedTurnId)
+            : retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds);
 
           const latestCheckpoint = checkpoints.at(-1) ?? null;
           const latestTurn =

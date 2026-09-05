@@ -1,3 +1,7 @@
+import { useLinkedThreadPullRequest } from "../ThreadStatusIndicators";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import type { ProviderInstanceEntry } from "../../providerInstances";
+import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import type { EnvironmentMachineKind, ProjectIconOverride } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { GitBranchIcon } from "lucide-react";
@@ -28,6 +32,8 @@ const REASON_COLOR_CLASS: Record<DashboardBoardEntry["reason"], string> = {
 };
 
 function dashboardTimeLabel(entry: DashboardBoardEntry, nowMs: number): string {
+  if (entry.reason === "failed" || entry.reason === "interrupted")
+    return formatRelativeTimeLabel(entry.since);
   const elapsed = formatElapsedDurationLabel(entry.since, nowMs);
   switch (entry.lane) {
     case "needs-you":
@@ -43,27 +49,41 @@ function dashboardTimeLabel(entry: DashboardBoardEntry, nowMs: number): string {
 
 export const DashboardCard = memo(function DashboardCard({
   entry,
+  unread,
   now,
   projectTitle,
+  spaceName,
   projectCwd,
   projectFaviconPath,
   projectIcon,
   showMachineIcon,
   machineKind,
+  providerEntry,
+  deviceLabel,
+  connected,
 }: {
+  readonly unread: boolean;
   readonly entry: DashboardBoardEntry;
   readonly now: string;
   readonly projectTitle: string;
+  spaceName?: string | undefined;
   readonly projectCwd: string;
   readonly projectFaviconPath: string | null | undefined;
   readonly projectIcon: ProjectIconOverride | null | undefined;
   readonly showMachineIcon: boolean;
   readonly machineKind: EnvironmentMachineKind | null;
+  readonly providerEntry: ProviderInstanceEntry | undefined;
+  readonly deviceLabel: string;
+  readonly connected: boolean;
 }) {
   const navigate = useNavigate();
   const { shell } = entry;
   const environmentId = shell.environmentId;
   const threadId = shell.id;
+  const linkedStatus = useLinkedThreadPullRequest(
+    connected ? environmentId : null,
+    shell.linkedPullRequest,
+  );
   const nowMs = Date.parse(now);
   const escalated = isEscalated(entry, now);
 
@@ -77,11 +97,14 @@ export const DashboardCard = memo(function DashboardCard({
   async function onStop(event: React.MouseEvent) {
     event.stopPropagation();
     setStopping(true);
-    await interruptTurn({
-      environmentId,
-      input: buildThreadTurnInterruptInput(shell),
-    });
-    setStopping(false);
+    try {
+      await interruptTurn({
+        environmentId,
+        input: buildThreadTurnInterruptInput(shell),
+      });
+    } finally {
+      setStopping(false);
+    }
   }
 
   const stopClick = (event: React.MouseEvent) => void onStop(event);
@@ -91,7 +114,13 @@ export const DashboardCard = memo(function DashboardCard({
   };
 
   let actions: React.ReactNode;
-  if (entry.reason === "pending-approval") {
+  if (shell.archivedAt !== null) {
+    actions = <span className="text-[11px] text-muted-foreground">Archived</span>;
+  } else if (!connected) {
+    actions = (
+      <span className="text-[11px] text-muted-foreground">Offline, showing last known state</span>
+    );
+  } else if (entry.reason === "pending-approval") {
     actions = (
       <div onClick={(event) => event.stopPropagation()}>
         <DashboardApprovalActions environmentId={environmentId} threadId={threadId} />
@@ -125,18 +154,21 @@ export const DashboardCard = memo(function DashboardCard({
       tabIndex={0}
       onClick={openThread}
       onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
           event.preventDefault();
           openThread();
         }
       }}
       className={cn(
-        "flex min-w-0 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 py-2.5 text-sm",
+        "group flex min-w-0 cursor-pointer flex-col gap-2 rounded-lg border border-border bg-card p-2.5 text-xs outline-none hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring",
         escalated && "ring-1 ring-amber-500/60 dark:ring-amber-400/50",
       )}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex w-full min-w-0 flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/80">
+          {unread ? (
+            <span aria-label="Unread" className="size-1.5 shrink-0 rounded-full bg-blue-500" />
+          ) : null}
           <ProjectFavicon
             environmentId={environmentId}
             cwd={projectCwd}
@@ -145,13 +177,27 @@ export const DashboardCard = memo(function DashboardCard({
             projectIcon={projectIcon}
             className="size-3 shrink-0"
           />
-          <span className="min-w-0 truncate">{projectTitle}</span>
+          <Tooltip>
+            <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
+              {projectTitle}
+              {spaceName ? ` · ${spaceName}` : ""}
+            </TooltipTrigger>
+            <TooltipPopup>{projectCwd}</TooltipPopup>
+          </Tooltip>
           {showMachineIcon && machineKind ? (
             <EnvironmentMachineIcon kind={machineKind} className="size-3 shrink-0" />
           ) : null}
+          <Tooltip>
+            <TooltipTrigger render={<span className="max-w-24 truncate text-[10px]" />}>
+              {deviceLabel}
+            </TooltipTrigger>
+            <TooltipPopup>{deviceLabel}</TooltipPopup>
+          </Tooltip>
         </div>
-        <div className="min-w-0 truncate font-medium text-foreground">{shell.title}</div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground/80">
+        <div className="line-clamp-2 min-w-0 text-[13px] font-medium leading-5 text-foreground">
+          {shell.title}
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
           <span
             className={cn(
               "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 font-medium",
@@ -161,6 +207,32 @@ export const DashboardCard = memo(function DashboardCard({
             {DASHBOARD_REASON_LABELS[entry.reason]}
           </span>
           <span className="shrink-0">{dashboardTimeLabel(entry, nowMs)}</span>
+          {shell.linkedPullRequest ? (
+            <Button
+              size="micro"
+              variant="ghost-muted"
+              onClick={(event) => {
+                event.stopPropagation();
+                const pr = shell.linkedPullRequest!;
+                void navigate({
+                  to: "/pull-requests",
+                  search: {
+                    involvement: "all",
+                    state: "all",
+                    environmentId,
+                    projectId: pr.projectId,
+                    selectedEnvironmentId: environmentId,
+                    selectedProjectId: pr.projectId,
+                    repository: pr.repository,
+                    number: pr.number,
+                  },
+                });
+              }}
+            >
+              #{shell.linkedPullRequest.number} ·{" "}
+              {connected && linkedStatus ? linkedStatus.pr.state : "Status unavailable"}
+            </Button>
+          ) : null}
           {shell.branch ? (
             <span className="flex min-w-0 shrink items-center gap-1">
               <GitBranchIcon className="size-3 shrink-0" />
@@ -172,14 +244,22 @@ export const DashboardCard = memo(function DashboardCard({
           ) : null}
         </div>
       </div>
-      <div
-        className="flex shrink-0 items-center gap-1.5"
-        onClick={(event) => event.stopPropagation()}
-      >
+      <div className="flex w-full shrink-0 items-center justify-between gap-1.5 border-t border-border/60 pt-1.5">
         {actions}
-        <Button size="micro" variant="ghost-muted" onClick={openClick}>
-          Open
-        </Button>
+        <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+          {providerEntry ? (
+            <>
+              <ProviderInstanceIcon
+                driverKind={providerEntry.driverKind}
+                displayName={providerEntry.displayName}
+                iconClassName="size-3"
+              />
+              {providerEntry.displayName}
+            </>
+          ) : (
+            shell.modelSelection.model
+          )}
+        </span>
       </div>
     </div>
   );

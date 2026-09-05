@@ -12,6 +12,7 @@
  * @module Profile
  */
 import * as Schema from "effect/Schema";
+import { ModelSelection } from "./orchestration.ts";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const PROFILE_NAME_MAX_LENGTH = 48;
@@ -43,11 +44,33 @@ export const PROFILE_COLORS = [
 export const ProfileColor = Schema.Literals(PROFILE_COLORS);
 export type ProfileColor = typeof ProfileColor.Type;
 
+export const ProfileSpace = Schema.Struct({
+  id: ProfileId,
+  name: ProfileName,
+  newChatDefaults: Schema.optional(
+    Schema.Struct({
+      projectKey: TrimmedNonEmptyString,
+      deviceLabel: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+      workspaceRoot: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+      modelSelection: Schema.optional(ModelSelection),
+      envMode: Schema.optional(Schema.Literals(["local", "worktree"])),
+    }),
+  ),
+  threads: Schema.Array(
+    Schema.Struct({
+      threadKey: TrimmedNonEmptyString,
+      projectKey: TrimmedNonEmptyString,
+    }),
+  ).check(Schema.isMaxLength(10000)),
+});
+export type ProfileSpace = typeof ProfileSpace.Type;
+
 export const Profile = Schema.Struct({
   id: ProfileId,
   name: ProfileName,
   color: ProfileColor,
   projectKeys: Schema.Array(Schema.String),
+  spaces: Schema.optional(Schema.Array(ProfileSpace).check(Schema.isMaxLength(64))),
 });
 export type Profile = typeof Profile.Type;
 
@@ -84,7 +107,9 @@ export function findProfile(
   profiles: ReadonlyArray<Profile>,
   id: string | null | undefined,
 ): Profile | undefined {
-  return id === null || id === undefined ? undefined : profiles.find((profile) => profile.id === id);
+  return id === null || id === undefined
+    ? undefined
+    : profiles.find((profile) => profile.id === id);
 }
 
 export function isProjectInProfile(profile: Profile, projectKey: string): boolean {
@@ -120,4 +145,55 @@ export function nextProfileId(
     throw new Error("nextProfileId: profiles must not be empty");
   }
   return next.id;
+}
+
+/** Resolve only assignments whose project still belongs to this profile. */
+export function spaceForThread(profile: Profile, threadKey: string, projectKey: string) {
+  if (!isProjectInProfile(profile, projectKey)) return undefined;
+  return profile.spaces?.find((space) =>
+    space.threads.some(
+      (thread) => thread.threadKey === threadKey && thread.projectKey === projectKey,
+    ),
+  );
+}
+
+/** A thread has one placement within a profile; null returns it to the root. */
+export function moveThreadsToSpace(
+  profile: Profile,
+  threads: ReadonlyArray<{ threadKey: string; projectKey: string }>,
+  spaceId: string | null,
+): Profile {
+  if (spaceId !== null && !profile.spaces?.some((space) => space.id === spaceId)) return profile;
+  const eligible = [
+    ...new Map(
+      threads
+        .filter((thread) => profile.projectKeys.includes(thread.projectKey))
+        .map((thread) => [thread.threadKey, thread]),
+    ).values(),
+  ];
+  const keys = new Set(eligible.map((thread) => thread.threadKey));
+  return {
+    ...profile,
+    spaces: profile.spaces?.map((space) => ({
+      ...space,
+      threads: [
+        ...space.threads.filter((thread) => !keys.has(thread.threadKey)),
+        ...(space.id === spaceId ? eligible : []),
+      ],
+    })),
+  };
+}
+
+/** Build once per settings change, then resolve sidebar and dashboard rows in constant time. */
+export function indexProfileSpaces(profiles: ReadonlyArray<Profile>) {
+  const result = new Map<string, { profile: Profile; space: ProfileSpace; projectKey: string }>();
+  for (const profile of profiles) {
+    const projects = new Set(profile.projectKeys);
+    for (const space of profile.spaces ?? [])
+      for (const thread of space.threads) {
+        if (projects.has(thread.projectKey) && !result.has(thread.threadKey))
+          result.set(thread.threadKey, { profile, space, projectKey: thread.projectKey });
+      }
+  }
+  return result;
 }

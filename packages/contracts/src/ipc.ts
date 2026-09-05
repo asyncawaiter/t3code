@@ -1121,6 +1121,8 @@ export interface DesktopBridge {
    */
   probeRemoteEditors?: () => Promise<readonly EditorId[]>;
   onMenuAction: (listener: (action: string) => void) => () => void;
+  /** Scroll gesture boundaries on macOS. Absent in older shells and web clients. */
+  onScrollGesture?: (listener: (phase: "begin" | "end") => void) => () => void;
   /**
    * Quit-confirmation hint pushes. Optional: older desktop builds never emit
    * them.

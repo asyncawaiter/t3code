@@ -374,6 +374,36 @@ function makeProviderServiceLayer(
   };
 }
 
+const rewindBinding = makeProviderServiceLayer();
+rewindBinding.layer("rewind session persistence", (it) => {
+  it.effect("persists the native session changed by conversation rewind", () => {
+    const harness = rewindBinding;
+    const threadId = asThreadId("claude-rewind-binding");
+    const resumeCursor = { resume: "forked-native-session", turnCount: 1 };
+    harness.claude.rollbackThread.mockImplementation(() =>
+      Effect.sync(() => {
+        harness.claude.updateSession(threadId, (session) => ({ ...session, resumeCursor }));
+        return { threadId, turns: [] };
+      }),
+    );
+    return Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      yield* provider.startSession(threadId, {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      yield* provider.rollbackConversation({ threadId, numTurns: 1 });
+      const repository = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository;
+      const persisted = yield* repository.getByThreadId({ threadId });
+      assert.equal(Option.isSome(persisted), true);
+      if (Option.isSome(persisted)) assert.deepEqual(persisted.value.resumeCursor, resumeCursor);
+    });
+  });
+});
+
 it.effect("ProviderServiceLive catches stopAll failures during shutdown", () =>
   Effect.gen(function* () {
     const codex = makeFakeCodexAdapter();

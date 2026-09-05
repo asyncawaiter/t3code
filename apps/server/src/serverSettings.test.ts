@@ -73,6 +73,46 @@ const recordProviderUsage = (provider: string, instanceId: string | null = provi
   });
 
 it.layer(NodeServices.layer)("server settings", (it) => {
+  it.effect("persists profile spaces and device-qualified thread assignments", () =>
+    Effect.gen(function* () {
+      const settings = yield* ServerSettingsModule.ServerSettingsService;
+      const patch = yield* decodeSettingsPatch({
+        profiles: [
+          {
+            id: "work",
+            name: "Work",
+            color: "blue",
+            projectKeys: ["a:p", "b:p"],
+            spaces: [
+              {
+                id: "build",
+                name: "Build",
+                newChatDefaults: {
+                  projectKey: "a:p",
+                  deviceLabel: "Godel",
+                  workspaceRoot: "/work/pod",
+                  envMode: "worktree",
+                  modelSelection: { instanceId: "claude", model: "claude-sonnet-4-6" },
+                },
+                threads: [
+                  { threadKey: "a:t", projectKey: "a:p" },
+                  { threadKey: "b:t", projectKey: "b:p" },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      yield* settings.updateSettings(patch);
+      const saved = yield* settings.getSettings;
+      assert.deepEqual(saved.profiles, patch.profiles);
+      yield* settings.updateSettings({
+        profiles: patch.profiles!.map((profile) => ({ ...profile, spaces: [] })),
+      });
+      assert.deepEqual((yield* settings.getSettings).profiles[0]?.spaces, []);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("preserves context when reading a provider environment secret fails", () => {
     const platformCause = PlatformError.systemError({
       _tag: "PermissionDenied",

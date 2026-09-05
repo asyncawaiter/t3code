@@ -1,3 +1,4 @@
+import { PencilIcon } from "lucide-react";
 import {
   type AssistantCitation,
   type EnvironmentId,
@@ -205,6 +206,8 @@ interface TimelineRowSharedState {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
+  editableMessageId?: MessageId | null;
+  onEditUserMessage?: (messageId: MessageId) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
@@ -318,6 +321,8 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  editableMessageId?: MessageId | null;
+  onEditUserMessage?: (messageId: MessageId) => void;
   onForkFromMessage?: (messageId: MessageId) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   isRevertingCheckpoint: boolean;
@@ -372,6 +377,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  editableMessageId = null,
+  onEditUserMessage = NOOP_FORK_FROM_MESSAGE,
   onForkFromMessage = NOOP_FORK_FROM_MESSAGE,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   isRevertingCheckpoint,
@@ -673,6 +680,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      editableMessageId,
+      onEditUserMessage,
       onForkFromMessage,
       onUseArtifactTemplate,
       onImageExpand,
@@ -698,6 +707,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      editableMessageId,
+      onEditUserMessage,
       onForkFromMessage,
       onUseArtifactTemplate,
       onImageExpand,
@@ -724,7 +735,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       latestTurnId: latestTurn?.turnId ?? null,
       forkSourceMessageId,
     }),
-    [isRevertingCheckpoint, isWorking, isPreparingWorktree, latestTurn?.turnId, forkSourceMessageId],
+    [
+      isRevertingCheckpoint,
+      isWorking,
+      isPreparingWorktree,
+      latestTurn?.turnId,
+      forkSourceMessageId,
+    ],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -1410,7 +1427,26 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
+            {ctx.editableMessageId === row.message.id ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      aria-label="Edit / rewind message"
+                      onClick={() => ctx.onEditUserMessage?.(row.message.id)}
+                    />
+                  }
+                >
+                  <PencilIcon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup>Edit / rewind</TooltipPopup>
+              </Tooltip>
+            ) : canRevertAgentWork ? (
+              <RevertUserMessageButton messageId={row.message.id} />
+            ) : null}
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
             )}
@@ -1471,10 +1507,7 @@ const FORK_SEAM_TOOLTIP =
 
 function ForkSeamTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "fork-seam" }> }) {
   const ctx = use(TimelineRowCtx);
-  const sourceThreadRef = scopeThreadRef(
-    ctx.activeThreadEnvironmentId,
-    row.forkedFrom.threadId,
-  );
+  const sourceThreadRef = scopeThreadRef(ctx.activeThreadEnvironmentId, row.forkedFrom.threadId);
 
   const content = (
     <Link

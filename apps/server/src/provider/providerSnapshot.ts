@@ -57,6 +57,8 @@ export interface ServerProviderPresentation {
   readonly badgeLabel?: string;
   readonly showInteractionModeToggle?: boolean;
   readonly requiresNewThreadForModelChange?: boolean;
+  readonly supportsConversationRollback?: boolean;
+  readonly supportsMessageEditing?: boolean;
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
@@ -238,6 +240,12 @@ export function buildServerProvider(input: {
       : {}),
     ...(typeof input.presentation.requiresNewThreadForModelChange === "boolean"
       ? { requiresNewThreadForModelChange: input.presentation.requiresNewThreadForModelChange }
+      : {}),
+    ...(input.presentation.supportsConversationRollback !== undefined
+      ? { supportsConversationRollback: input.presentation.supportsConversationRollback }
+      : {}),
+    ...(input.presentation.supportsMessageEditing !== undefined
+      ? { supportsMessageEditing: input.presentation.supportsMessageEditing }
       : {}),
     enabled: input.enabled,
     installed: input.probe.installed,
