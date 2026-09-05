@@ -6,6 +6,10 @@ chat keeps running untouched.
 
 ## Starting a fork
 
+New forks append a numbered suffix to the original title, such as `Fix login (fork 1)`
+and `Fix login (fork 2)`. Forking a fork continues the numbering without stacking
+suffixes. You can rename the new chat normally.
+
 On any assistant response, open the fork icon next to **Copy** and choose **Fork in a new tab**.
 While a response is still streaming, the same action is available on its working row. Forking
 there uses the response as it stands at that moment, even if it has not finished.

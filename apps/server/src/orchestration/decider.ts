@@ -337,6 +337,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      let title = command.title;
       const forkedFrom = command.forkedFrom;
       if (forkedFrom) {
         const sourceThread = yield* requireThreadNotDeleted({
@@ -349,6 +350,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             commandType: command.type,
             detail: `Fork source thread '${forkedFrom.threadId}' belongs to project '${sourceThread.projectId}', not '${command.projectId}'.`,
           });
+        }
+        if (title === sourceThread.title) {
+          const baseTitle = title.replace(/ \(fork \d+\)$/, "");
+          let number = 1;
+          const prefix = `${baseTitle} (fork `;
+          for (const thread of readModel.threads) {
+            if (thread.projectId !== command.projectId) continue;
+            if (thread.forkedFrom?.threadId === sourceThread.id) number += 1;
+          }
+          for (const thread of readModel.threads) {
+            if (thread.projectId !== command.projectId || !thread.title.startsWith(prefix))
+              continue;
+            const suffix = thread.title.slice(prefix.length);
+            if (!/^\d+\)$/.test(suffix)) continue;
+            const previous = Number(suffix.slice(0, -1));
+            if (Number.isSafeInteger(previous)) number = Math.max(number, previous + 1);
+          }
+          title = `${baseTitle} (fork ${number})`;
         }
         // No check that forkedFrom.messageId exists on sourceThread here: the
         // command read model never carries historical messages (see
@@ -369,7 +388,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           projectId: command.projectId,
-          title: command.title,
+          title,
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,

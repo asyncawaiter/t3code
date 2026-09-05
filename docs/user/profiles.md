@@ -132,7 +132,8 @@ or change the location, profile or space first. A selected space is preselected;
 shortcut for creating in the current project.
 
 The device selector includes devices without saved projects. Browse folders with a
-path such as `~/Documents/`, drill into subfolders, then choose **Use folder**.
+path such as `~/Documents/` and drill into subfolders. The displayed folder is selected
+automatically once it loads. Choose **Open chat** or **Save & open chat** to continue.
 An existing checkout is reused. Moving a checkout from another profile asks for
 confirmation because its existing chats move with it.
 

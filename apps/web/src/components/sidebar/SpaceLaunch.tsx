@@ -225,15 +225,17 @@ export function SpaceLaunch({
       <PopoverPopup
         side="right"
         align="start"
-        className="w-72"
-        viewportClassName={editing ? "p-2.5" : "p-1.5"}
+        className={editing ? "w-80" : "w-72"}
+        viewportClassName={editing ? "p-2" : "p-1.5"}
         aria-label={`New chat in ${space.name}`}
       >
         {editing && (
-          <PopoverTitle className="mb-2 text-xs font-medium">New-chat defaults</PopoverTitle>
+          <PopoverTitle className="mb-2 truncate px-1 pr-2 text-xs font-medium">
+            New chat in {space.name}
+          </PopoverTitle>
         )}
         {editing ? (
-          <div className="space-y-3">
+          <div className="space-y-2">
             <ProjectLocationPicker
               value={location}
               disabled={busy}
@@ -293,7 +295,12 @@ export function SpaceLaunch({
                 </div>
               </details>
             )}
-            <div className="flex justify-end gap-1">
+            {error && (
+              <p role="alert" className="text-xs text-destructive">
+                {error}
+              </p>
+            )}
+            <div className="flex justify-end gap-1 border-t border-border/50 pt-2">
               {space.newChatDefaults && (
                 <Button
                   size="xs"
@@ -320,7 +327,8 @@ export function SpaceLaunch({
                 Cancel
               </Button>
               <Button
-                size="xs"
+                size="compact"
+                className="border-zinc-700 bg-zinc-700 text-white hover:bg-zinc-600 dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-300"
                 disabled={!location || busy}
                 onClick={async () => {
                   if (!location || pending.current) return;

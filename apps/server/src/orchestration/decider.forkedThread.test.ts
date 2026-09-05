@@ -234,3 +234,68 @@ it.layer(NodeServices.layer)("forked thread.create decider", (it) => {
       }),
   );
 });
+
+it.layer(NodeServices.layer)("fork titles", (it) => {
+  it.effect("numbers repeated forks, skips existing suffixes, and preserves explicit names", () =>
+    Effect.gen(function* () {
+      const source = makeThread();
+      const command = forkCreateCommand({
+        forkedFrom: {
+          threadId: source.id,
+          messageId: "msg-assistant-1",
+          turnId: null,
+          sequence: 3,
+          forkedAt: NOW,
+        },
+      });
+      let readModel = makeReadModel(source);
+      const create = (title: string) =>
+        decideOrchestrationCommand({
+          command: { ...command, title },
+          readModel,
+        });
+      for (const expected of ["Source thread (fork 1)", "Source thread (fork 2)"]) {
+        const result = yield* create(source.title);
+        const event = Array.isArray(result) ? result[0] : result;
+        if (event?.type !== "thread.created") return expect.fail("Expected thread.created");
+        expect(event.payload.title).toBe(expected);
+        readModel = {
+          ...readModel,
+          threads: [
+            ...readModel.threads,
+            makeThread({
+              id: ThreadId.make(expected),
+              title: event.payload.title,
+              forkedFrom: command.forkedFrom,
+            }),
+          ],
+        };
+      }
+      readModel = {
+        ...readModel,
+        threads: [
+          ...readModel.threads,
+          makeThread({ id: ThreadId.make("renamed"), title: "Source thread (fork 8)" }),
+        ],
+      };
+      const result = yield* create(source.title);
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event).toMatchObject({ payload: { title: "Source thread (fork 9)" } });
+      const explicit = yield* create("My alternative");
+      expect(Array.isArray(explicit) ? explicit[0] : explicit).toMatchObject({
+        payload: { title: "My alternative" },
+      });
+      const nested = yield* decideOrchestrationCommand({
+        command: {
+          ...command,
+          title: "Source thread (fork 1)",
+          forkedFrom: { ...command.forkedFrom, threadId: ThreadId.make("Source thread (fork 1)") },
+        },
+        readModel,
+      });
+      expect(Array.isArray(nested) ? nested[0] : nested).toMatchObject({
+        payload: { title: "Source thread (fork 9)" },
+      });
+    }),
+  );
+});

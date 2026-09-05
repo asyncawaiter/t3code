@@ -239,7 +239,7 @@ export function SpaceTile({
   };
   return (
     <li
-      className={cn("min-w-0 list-none", renaming && "col-span-2")}
+      className="min-w-0 list-none"
       data-thread-selection-safe
       onDragOver={(event) => {
         if (
@@ -285,7 +285,7 @@ export function SpaceTile({
     >
       <div
         className={cn(
-          "group/space relative overflow-hidden rounded-xl transition-colors",
+          "group/space relative h-18 overflow-hidden rounded-xl transition-colors",
           selected
             ? "bg-zinc-700 text-zinc-50 dark:bg-zinc-300 dark:text-zinc-900"
             : "bg-sidebar-foreground/5 text-sidebar-foreground hover:bg-sidebar-foreground/10",
@@ -319,7 +319,7 @@ export function SpaceTile({
           <>
             <button
               type="button"
-              className="flex min-h-12 w-full flex-col items-start justify-center gap-0.5 px-2.5 py-2 pr-6 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+              className="flex h-full w-full flex-col items-start gap-0.5 px-2.5 py-2 pr-6 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
               aria-label={`Open space ${space.name}`}
               aria-pressed={selected}
               onClick={onSelect}
@@ -336,34 +336,36 @@ export function SpaceTile({
                 move(index + offset);
               }}
             >
-              <span className="flex w-full min-w-0 items-center gap-1.5 text-inherit">
-                <span className="line-clamp-2 break-words text-xs font-medium leading-4">
-                  {space.name}
-                </span>
+              <span className="flex w-full min-w-0 shrink-0 items-center gap-1.5 text-inherit">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="truncate text-xs font-medium leading-4" />}
+                  >
+                    {space.name}
+                  </TooltipTrigger>
+                  <TooltipPopup>{space.name}</TooltipPopup>
+                </Tooltip>
               </span>
-              {space.newChatDefaults && (
-                <span className="w-full truncate text-[10px] opacity-75">
-                  {space.newChatDefaults.deviceLabel} ·{" "}
-                  {space.newChatDefaults.workspaceRoot.split(/[\\/]/).findLast(Boolean)}
-                </span>
-              )}
-              <span className="flex w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-inherit opacity-75">
+              <span className="h-3.5 w-full shrink-0 truncate text-[10px] leading-3.5 opacity-75">
+                {space.newChatDefaults
+                  ? `${space.newChatDefaults.deviceLabel} · ${space.newChatDefaults.workspaceRoot.split(/[\\/]/).findLast(Boolean)}`
+                  : null}
+              </span>
+              <span className="mt-auto flex w-full min-w-0 items-center gap-1 text-[10px] text-inherit opacity-75">
                 {attention ? (
                   <span
                     aria-label="Needs attention"
                     className="size-1.5 rounded-full bg-amber-500"
                   />
                 ) : null}
-                <span className="whitespace-nowrap">
+                <span className="truncate">
                   {count > 0 || draftCount === 0
                     ? `${count} ${count === 1 ? "thread" : "threads"}`
                     : ""}
                   {count > 0 && draftCount > 0 ? " · " : ""}
                   {draftCount > 0 ? `${draftCount} ${draftCount === 1 ? "draft" : "drafts"}` : ""}
                 </span>
-                {attention ? (
-                  <span className="whitespace-nowrap text-inherit">Needs you</span>
-                ) : null}
+                {attention ? <span className="sr-only">Needs you</span> : null}
               </span>
             </button>
             <SpaceLaunch

@@ -197,11 +197,11 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
       }}
     >
       <DialogPopup
-        className="w-[360px] p-4"
+        className="w-[360px] overflow-hidden p-0"
         showCloseButton={!busy}
         initialFocus={location ? submitButton : undefined}
       >
-        <DialogTitle className="mb-3 text-sm">
+        <DialogTitle className="px-3.5 pb-2 pt-4 text-sm">
           {request.draftId ? "Chat location" : "New chat"}
         </DialogTitle>
         <form
@@ -211,10 +211,10 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
             void submit();
           }}
         >
-          <fieldset disabled={busy} className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <label className="space-y-1 text-[11px] text-muted-foreground">
-                <span>Profile</span>
+          <fieldset disabled={busy} className="space-y-2 px-3">
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/50 p-1">
+              <label className="min-w-0 text-[10px] text-muted-foreground">
+                <span className="px-2">Profile</span>
                 <Select
                   value={profileId}
                   onValueChange={(id) => {
@@ -224,7 +224,12 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                     }
                   }}
                 >
-                  <SelectTrigger size="sm" className="w-full" aria-label="Chat profile">
+                  <SelectTrigger
+                    size="compact"
+                    variant="ghost"
+                    className="w-full min-w-0 text-xs sm:text-xs"
+                    aria-label="Chat profile"
+                  >
                     <SelectValue>{profile?.name ?? "All"}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
@@ -237,14 +242,19 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                   </SelectPopup>
                 </Select>
               </label>
-              <label className="space-y-1 text-[11px] text-muted-foreground">
-                <span>Space</span>
+              <label className="min-w-0 text-[10px] text-muted-foreground">
+                <span className="px-2">Space</span>
                 <Select
                   value={spaceId ?? "outside"}
                   disabled={!profile}
                   onValueChange={(id) => setSpaceId(id === "outside" ? null : id)}
                 >
-                  <SelectTrigger size="sm" className="w-full" aria-label="Chat space">
+                  <SelectTrigger
+                    size="compact"
+                    variant="ghost"
+                    className="w-full min-w-0 text-xs sm:text-xs"
+                    aria-label="Chat space"
+                  >
                     <SelectValue>
                       {profile?.spaces?.find((space) => space.id === spaceId)?.name ??
                         "Outside spaces"}
@@ -268,11 +278,17 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
               {error}
             </p>
           )}
-          <div className="flex justify-end gap-1.5">
-            <Button size="sm" variant="ghost" disabled={busy} onClick={close}>
+          <div className="flex justify-end gap-1.5 border-t border-border/50 bg-muted/30 px-3 py-2">
+            <Button size="compact" variant="ghost" disabled={busy} onClick={close}>
               Cancel
             </Button>
-            <Button ref={submitButton} size="sm" type="submit" disabled={!location || busy}>
+            <Button
+              ref={submitButton}
+              size="compact"
+              className="border-zinc-700 bg-zinc-700 text-white hover:bg-zinc-600 dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-300"
+              type="submit"
+              disabled={!location || busy}
+            >
               {busy ? "Opening..." : request.draftId ? "Apply location" : "Open chat"}
             </Button>
           </div>

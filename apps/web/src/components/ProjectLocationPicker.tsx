@@ -1,6 +1,12 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
-import { useState } from "react";
-import { ArrowUpIcon, ChevronRightIcon, FolderOpenIcon, SearchIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  ArrowUpIcon,
+  ChevronRightIcon,
+  FolderOpenIcon,
+  MonitorIcon,
+  SearchIcon,
+} from "lucide-react";
 import {
   filterFilesystemBrowseEntries,
   getFilesystemBrowsePath,
@@ -56,6 +62,35 @@ export function ProjectLocationPicker({
       project.environmentId === chosenId &&
       `${project.title} ${project.workspaceRoot}`.toLowerCase().includes(query.toLowerCase()),
   );
+  // Only expose the displayed directory after this device has resolved it.
+  useEffect(() => {
+    if (!browsing || disabled) return;
+    const workspaceRoot =
+      connected && path.isBrowsing && !path.filterQuery && !folder.isPending && !folder.error
+        ? folder.data?.parentPath
+        : undefined;
+    if (workspaceRoot && chosenId) {
+      if (value?.environmentId !== chosenId || value.workspaceRoot !== workspaceRoot)
+        onChange({ environmentId: chosenId, workspaceRoot });
+    } else if (value) onChange(null);
+  }, [
+    browsing,
+    disabled,
+    connected,
+    path.isBrowsing,
+    path.filterQuery,
+    folder.isPending,
+    folder.error,
+    folder.data?.parentPath,
+    chosenId,
+    value,
+    onChange,
+  ]);
+  const browse = (nextQuery: string) => {
+    onChange(null);
+    setQuery(nextQuery);
+    setBrowsing(true);
+  };
   const choose = (workspaceRoot: string) => {
     if (!chosenId || !connected) return;
     onChange({ environmentId: chosenId, workspaceRoot });
@@ -63,46 +98,53 @@ export function ProjectLocationPicker({
     setQuery("");
   };
   return (
-    <div className="space-y-2">
-      <Select
-        value={chosenId}
-        onValueChange={(id) => {
-          const env = environments.find((item) => item.environmentId === id);
-          if (!env) return;
-          setDeviceId(env.environmentId);
-          onChange(null);
-          setQuery("");
-          setBrowsing(true);
-        }}
-        disabled={disabled}
-      >
-        <SelectTrigger size="sm" className="w-full" aria-label="Device">
-          <SelectValue>{environment?.label ?? "Choose device"}</SelectValue>
-        </SelectTrigger>
-        <SelectPopup>
-          {environments.map((env) => (
-            <SelectItem
-              key={env.environmentId}
-              value={env.environmentId}
-              disabled={env.connection.phase !== "connected"}
-            >
-              {env.label}
-              {env.connection.phase !== "connected" ? " (offline)" : ""}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
+    <div className="overflow-hidden rounded-lg border border-border/60 bg-background/50">
+      <div className="flex items-center gap-2 border-b border-border/50 px-2 py-1">
+        <MonitorIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-[11px] text-muted-foreground">Device</span>
+        <Select
+          value={chosenId}
+          onValueChange={(id) => {
+            const env = environments.find((item) => item.environmentId === id);
+            if (!env) return;
+            setDeviceId(env.environmentId);
+            onChange(null);
+            setQuery("");
+            setBrowsing(true);
+          }}
+          disabled={disabled}
+        >
+          <SelectTrigger
+            size="compact"
+            variant="ghost"
+            className="ml-auto min-w-0 max-w-[75%] text-xs sm:text-xs"
+            aria-label="Device"
+          >
+            <SelectValue>{environment?.label ?? "Choose device"}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {environments.map((env) => (
+              <SelectItem
+                key={env.environmentId}
+                value={env.environmentId}
+                disabled={env.connection.phase !== "connected"}
+              >
+                {env.label}
+                {env.connection.phase !== "connected" ? " (offline)" : ""}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
       {value && !browsing ? (
         <button
           type="button"
           disabled={disabled}
           onClick={() => {
-            setQuery(ensureBrowseDirectoryPath(value.workspaceRoot));
             setDeviceId(value.environmentId);
-            onChange(null);
-            setBrowsing(true);
+            browse(ensureBrowseDirectoryPath(value.workspaceRoot));
           }}
-          className="flex w-full min-w-0 items-center gap-2 rounded-md bg-muted/50 px-2.5 py-2 text-left text-xs hover:bg-muted"
+          className="flex w-full min-w-0 items-center gap-2 px-2.5 py-2.5 text-left text-xs hover:bg-muted"
           aria-label="Change folder"
         >
           <FolderOpenIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -112,20 +154,22 @@ export function ProjectLocationPicker({
             </TooltipTrigger>
             <TooltipPopup>{value.workspaceRoot}</TooltipPopup>
           </Tooltip>
-          <ChevronRightIcon className="size-3.5 shrink-0" />
+          <span className="text-[10px] text-muted-foreground">Change</span>
         </button>
       ) : chosenId && connected ? (
-        <div className="overflow-hidden rounded-md border border-border/70">
-          <div className="flex items-center gap-1.5 border-b border-border/70 px-2">
+        <div>
+          <div className="flex items-center gap-1.5 border-b border-border/50 px-2.5">
             <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
             <Input
               size="compact"
+              unstyled
+              autoFocus
               aria-label="Find project or folder"
-              placeholder="Search projects or type ~/path/"
+              placeholder="Find project or enter a path..."
               value={query}
               disabled={disabled}
-              onChange={(event) => setQuery(event.target.value)}
-              className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+              onChange={(event) => browse(event.target.value)}
+              className="min-w-0 flex-1 [&_input]:px-0"
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
@@ -138,7 +182,7 @@ export function ProjectLocationPicker({
               }}
             />
           </div>
-          <div className="max-h-44 overflow-y-auto p-1">
+          <div className="h-36 overflow-y-auto overscroll-contain p-1">
             {path.isBrowsing ? (
               <>
                 {path.canBrowseUp && (
@@ -146,7 +190,8 @@ export function ProjectLocationPicker({
                     size="xs"
                     variant="ghost"
                     className="w-full justify-start"
-                    onClick={() => setQuery(path.parentPath ?? "~/")}
+                    disabled={disabled}
+                    onClick={() => browse(path.parentPath ?? "~/")}
                   >
                     <ArrowUpIcon className="size-3" />
                     Parent folder
@@ -164,8 +209,8 @@ export function ProjectLocationPicker({
                       key={entry.fullPath}
                       type="button"
                       disabled={disabled}
-                      onClick={() => setQuery(ensureBrowseDirectoryPath(entry.fullPath))}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                      onClick={() => browse(ensureBrowseDirectoryPath(entry.fullPath))}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                     >
                       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                       <ChevronRightIcon className="size-3 text-muted-foreground" />
@@ -184,13 +229,13 @@ export function ProjectLocationPicker({
                     key={project.id}
                     disabled={disabled}
                     onClick={() => choose(project.workspaceRoot)}
-                    className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+                    className="block w-full rounded-md px-2 py-1 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                   >
-                    <span className="block truncate text-xs">{project.title}</span>
+                    <span className="block truncate text-xs font-medium">{project.title}</span>
                     <Tooltip>
                       <TooltipTrigger
                         render={
-                          <span className="block truncate text-[11px] text-muted-foreground" />
+                          <span className="block truncate text-[10px] leading-4 text-muted-foreground" />
                         }
                       >
                         {project.workspaceRoot}
@@ -199,44 +244,34 @@ export function ProjectLocationPicker({
                     </Tooltip>
                   </button>
                 ))}
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="w-full justify-start"
-                  onClick={() => setQuery("~/")}
-                >
-                  <FolderOpenIcon className="size-3.5" />
-                  Browse folders on {environment?.label}
-                </Button>
               </>
             )}
           </div>
-          {path.isBrowsing &&
-            folder.data &&
-            !folder.error &&
-            !folder.isPending &&
-            !path.filterQuery && (
-              <div className="flex items-center gap-2 border-t border-border/70 px-2 py-1.5">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground" />
-                    }
-                  >
-                    {folder.data.parentPath}
-                  </TooltipTrigger>
-                  <TooltipPopup>{folder.data.parentPath}</TooltipPopup>
-                </Tooltip>
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  disabled={disabled}
-                  onClick={() => choose(folder.data!.parentPath)}
+          <div className="flex min-h-8 items-center gap-2 border-t border-border/50 px-2 py-1">
+            {path.isBrowsing ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground" />
+                  }
                 >
-                  Use folder
-                </Button>
-              </div>
+                  {value ? `Selected: ${value.workspaceRoot}` : "Navigate to a folder to select it"}
+                </TooltipTrigger>
+                {value && <TooltipPopup>{value.workspaceRoot}</TooltipPopup>}
+              </Tooltip>
+            ) : (
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={disabled}
+                className="w-full justify-start"
+                onClick={() => browse("~/")}
+              >
+                <FolderOpenIcon className="size-3" />
+                Browse this device
+              </Button>
             )}
+          </div>
         </div>
       ) : null}
       {environment && !connected && (
