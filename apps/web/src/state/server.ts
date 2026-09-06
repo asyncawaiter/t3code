@@ -18,6 +18,8 @@ import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { environmentSession } from "./session";
+import { resolveProfileSource } from "./profileSync.logic";
+import { readProfileCache } from "./profileSyncCache";
 
 // Opted in for every environment, not just the primary one. Only the primary
 // environment's themes are rendered, but which environment is primary changes
@@ -79,9 +81,24 @@ export const primaryServerWelcomeAtom = Atom.make(
   (get): ServerLifecycleWelcomePayload | null => get(primaryServerStateAtom).welcome,
 ).pipe(Atom.withLabel("web-primary-server-welcome"));
 
-export const primaryServerSettingsAtom = Atom.make(
-  (get): ServerSettings => get(primaryServerConfigAtom)?.settings ?? DEFAULT_SERVER_SETTINGS,
-).pipe(Atom.withLabel("web-primary-server-settings"));
+export const profileSourceAtom = Atom.make((get) => {
+  const configs = get(environmentServerConfigsAtom);
+  const resolved = resolveProfileSource(configs, get(primaryEnvironmentIdAtom));
+  const config = resolved.sourceId ? configs.get(resolved.sourceId) : undefined;
+  const cached = readProfileCache();
+  return {
+    ...resolved,
+    config: config ?? null,
+    profiles:
+      config?.settings.profiles ?? (cached?.sourceId === resolved.sourceId ? cached.profiles : []),
+  };
+}).pipe(Atom.withLabel("web-profile-source"));
+
+export const primaryServerSettingsAtom = Atom.make((get): ServerSettings => {
+  const settings = get(primaryServerConfigAtom)?.settings ?? DEFAULT_SERVER_SETTINGS;
+  const source = get(profileSourceAtom);
+  return { ...settings, profiles: source.conflict ? settings.profiles : source.profiles };
+}).pipe(Atom.withLabel("web-primary-server-settings"));
 
 export const primaryServerProvidersAtom = Atom.make(
   (get): ReadonlyArray<ServerProvider> =>

@@ -13,13 +13,13 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { primaryServerSettingsAtom } from "../state/server";
 import { readThreadShell } from "../state/entities";
 import { useSaveProfiles } from "./useChatCreation";
-import { usePrimarySettingsLoaded } from "./useSettings";
+import { useProfilesLoaded } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
 
 export function useThreadPinMenu() {
   const saveProfiles = useSaveProfiles();
   const { pinThread } = useThreadActions();
-  const loaded = usePrimarySettingsLoaded();
+  const loaded = useProfilesLoaded();
   const getPinMenu = useCallback(
     (ref: ScopedThreadRef): ContextMenuItem<ThreadActionMenuId> => {
       const thread = readThreadShell(ref);

@@ -1876,11 +1876,11 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
-        [WS_METHODS.serverUpdateSettings]: ({ patch }) =>
+        [WS_METHODS.serverUpdateSettings]: ({ patch, baseProfiles, expectedProfileSourceId }) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateSettings,
             serverSettings
-              .updateSettings(patch)
+              .updateSettings(patch, baseProfiles, expectedProfileSourceId)
               .pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
             {
               "rpc.aggregate": "server",

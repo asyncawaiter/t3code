@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 
 import {
   indexProfilePins,
+  mergeProfileEdits,
   moveThreadsToSpace,
   ALL_PROFILE,
   ALL_PROFILE_ID,
@@ -136,5 +137,70 @@ describe("pin scopes", () => {
       ]).get("env-1:thread"),
     ).toEqual({ profileId: "work", spaceId: null });
     expect(indexProfilePins([{ ...profile, projectKeys: [] }]).size).toBe(0);
+  });
+});
+
+describe("mergeProfileEdits", () => {
+  it("restores a removed row at its requested position", () => {
+    expect(mergeProfileEdits([home], [home], [work, home]).map((profile) => profile.id)).toEqual([
+      work.id,
+      home.id,
+    ]);
+  });
+  it("keeps concurrent chats added to the same space", () => {
+    const base = [{ ...work, spaces: [{ id: "build", name: "Build", threads: [] }] }];
+    const withChat = (threadKey: string) => [
+      {
+        ...work,
+        spaces: [
+          { id: "build", name: "Build", threads: [{ threadKey, projectKey: "env-1:proj-1" }] },
+        ],
+      },
+    ];
+    expect(
+      mergeProfileEdits(withChat("a"), base, withChat("b"))[0]?.spaces?.[0]?.threads.map(
+        (t) => t.threadKey,
+      ),
+    ).toEqual(["a", "b"]);
+  });
+  it("preserves another client's rename when adding a pin", () => {
+    const current = [{ ...work, name: "Renamed" }];
+    const edited = [
+      { ...work, threadPins: [{ threadKey: "a:t", projectKey: "env-1:proj-1", spaceId: null }] },
+    ];
+    expect(mergeProfileEdits(current, [work], edited)[0]).toEqual({
+      ...edited[0],
+      name: "Renamed",
+    });
+  });
+  it("rejects competing renames and does not resurrect deleted profiles", () => {
+    expect(() =>
+      mergeProfileEdits([{ ...work, name: "One" }], [work], [{ ...work, name: "Two" }]),
+    ).toThrow();
+    expect(() => mergeProfileEdits([], [work], [{ ...work, name: "Two" }])).toThrow();
+  });
+  it("keeps unrelated profiles and handles reorder with concurrent additions", () => {
+    const third = { ...home, id: "third", projectKeys: [] };
+    expect(
+      mergeProfileEdits([work, home, third], [work, home], [home, work]).map((p) => p.id),
+    ).toEqual([home.id, work.id, third.id]);
+  });
+  it("rejects concurrent assignments of one chat to two spaces", () => {
+    const thread = { threadKey: "a:t", projectKey: "env-1:proj-1" };
+    const base = [
+      {
+        ...work,
+        spaces: [
+          { id: "one", name: "One", threads: [] },
+          { id: "two", name: "Two", threads: [] },
+        ],
+      },
+    ];
+    const assign = (id: string) =>
+      base.map((p) => ({
+        ...p,
+        spaces: p.spaces.map((s) => ({ ...s, threads: s.id === id ? [thread] : [] })),
+      }));
+    expect(() => mergeProfileEdits(assign("one"), base, assign("two"))).toThrow("another space");
   });
 });

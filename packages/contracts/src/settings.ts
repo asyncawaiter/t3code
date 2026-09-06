@@ -2,7 +2,12 @@ import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { ForwardCompatibleNullable, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import {
+  EnvironmentId,
+  ForwardCompatibleNullable,
+  TrimmedNonEmptyString,
+  TrimmedString,
+} from "./baseSchemas.ts";
 import { EnvironmentMachineKind, ThreadEnvMode } from "./environment.ts";
 import {
   DEFAULT_TEXT_GENERATION_MODEL,
@@ -819,11 +824,15 @@ export const ServerSettings = Schema.Struct({
   ),
   sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
-   * Named, colored groups of projects shown in the sidebar. Shared across
-   * every connected environment so profiles follow the user to any client;
-   * the active profile is a client-local choice and is not stored here.
+   * Named groups stored on the chosen profile source. Clients subscribe to
+   * that source instead of copying this array between environments.
+   * The active profile remains a client-local choice.
    */
   profiles: Schema.Array(Profile).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /** The environment holding the shared profile collection. Local copies are retained for recovery. */
+  profileSyncSourceId: Schema.NullOr(EnvironmentId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
   // consumers should resolve `backgroundActivity` instead.
@@ -1073,6 +1082,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   profiles: Schema.optionalKey(Schema.Array(Profile)),
+  profileSyncSourceId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

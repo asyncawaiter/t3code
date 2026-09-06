@@ -10,6 +10,7 @@ import {
   AuthTokenExchangeGrantType,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  type ServerSettings as ServerSettingsData,
   type DpopFailureReason,
   EnvironmentId,
   EventId,
@@ -5356,6 +5357,64 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
         assert.deepEqual(calls, ["start", "cancel:old-operation", "cancel:install-operation"]);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("shares profile edits between two websocket clients and a reconnecting client", () =>
+    Effect.gen(function* () {
+      const initial: ServerSettingsData = {
+        ...DEFAULT_SERVER_SETTINGS,
+        profiles: [{ id: "work", name: "Work", color: "gray", projectKeys: [] }],
+      };
+      const state = yield* Ref.make(initial);
+      const changes = yield* PubSub.unbounded<typeof initial>();
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Ref.get(state),
+            updateSettings: (patch, baseProfiles) =>
+              Effect.gen(function* () {
+                assert.deepEqual(baseProfiles, initial.profiles);
+                const next = { ...initial, profiles: patch.profiles ?? initial.profiles };
+                yield* Ref.set(state, next);
+                yield* PubSub.publish(changes, next);
+                return next;
+              }),
+            streamChanges: Stream.fromPubSub(changes),
+          },
+        },
+      });
+      const url = yield* getWsServerUrl("/ws");
+      const readyA = yield* Deferred.make<void>();
+      const readyB = yield* Deferred.make<void>();
+      const follow = (ready: Deferred.Deferred<void>) =>
+        withWsRpcClient(url, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(
+            Stream.tap((event) =>
+              event.type === "snapshot" ? Deferred.succeed(ready, undefined) : Effect.void,
+            ),
+            Stream.filter((event) => event.type === "settingsUpdated"),
+            Stream.runHead,
+          ),
+        );
+      const a = yield* follow(readyA).pipe(Effect.forkChild);
+      const b = yield* follow(readyB).pipe(Effect.forkChild);
+      yield* Deferred.await(readyA);
+      yield* Deferred.await(readyB);
+      const profiles = [{ ...initial.profiles[0]!, name: "Shared from Poly" }];
+      yield* withWsRpcClient(url, (client) =>
+        client[WS_METHODS.serverUpdateSettings]({
+          patch: { profiles },
+          baseProfiles: initial.profiles,
+        }),
+      );
+      const first = Option.getOrThrow(yield* Fiber.join(a));
+      const second = Option.getOrThrow(yield* Fiber.join(b));
+      assert.deepEqual(first, second);
+      const reconnected = yield* withWsRpcClient(url, (client) =>
+        client[WS_METHODS.serverGetSettings]({}),
+      );
+      assert.deepEqual(reconnected.profiles, profiles);
+    }).pipe(Effect.scoped, Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc subscribeServerConfig streams snapshot then update", () =>

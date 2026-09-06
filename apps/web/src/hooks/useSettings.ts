@@ -13,6 +13,7 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
+  mergeProfileEdits,
   type EnvironmentId,
   ServerSettings,
   type ServerSettingsPatch,
@@ -53,6 +54,8 @@ import {
 } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useTheme } from "./useTheme";
+import { useSaveProfiles } from "./useProfileSync";
+export { useProfilesLoaded } from "./useProfileSync";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
@@ -324,7 +327,7 @@ export function usePrimarySettings<T = UnifiedSettings>(
 
 /**
  * Whether `usePrimarySettings` is backed by a real, loaded server config
- * rather than `DEFAULT_SERVER_SETTINGS`. Shared keys (like `profiles`) fan
+ * rather than `DEFAULT_SERVER_SETTINGS`. Shared keys (like worktree defaults) fan
  * out a write to every connected environment, so writing from the
  * pre-load default snapshot would overwrite real values everywhere.
  * Callers that write shared keys must gate on this, not just render with it.
@@ -340,7 +343,7 @@ export const PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE =
  * Whether primary-scoped server settings have a server to live on. The
  * hosted app connects to every environment as a remote, so it has no primary:
  * `usePrimarySettings` reads schema defaults there. Shared keys (like
- * `profiles`) still fan a write out to every connected environment in that
+ * worktree defaults) still fan a write out to every connected environment in that
  * case, which is exactly why writes from an unloaded primary must be gated
  * separately with `usePrimarySettingsLoaded`. Desktop and server-served web
  * always have a primary.
@@ -384,6 +387,8 @@ function useConnectedEnvironmentIds(): ReadonlyArray<EnvironmentId> {
  * client persistence.
  */
 function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
+  const saveProfiles = useSaveProfiles();
+  const displayedProfiles = useAtomValue(primaryServerSettingsAtom).profiles;
   const persistServerSettings = useAtomCommand(
     serverEnvironment.updateSettings,
     "server settings update",
@@ -391,7 +396,20 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
   const connectedEnvironmentIds = useConnectedEnvironmentIds();
   const updateSettings = useCallback(
     (patch: UnifiedSettingsPatch) => {
-      const { serverPatch, clientPatch } = splitPatch(patch);
+      const { profiles, ...otherPatch } = patch;
+      if (profiles) {
+        void saveProfiles((current) =>
+          mergeProfileEdits(current, displayedProfiles, profiles),
+        ).catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Profile changes not saved",
+            description:
+              error instanceof Error ? error.message : "Reconnect the profile source and retry.",
+          });
+        });
+      }
+      const { serverPatch, clientPatch } = splitPatch(otherPatch);
 
       if (Object.keys(serverPatch).length > 0) {
         const { sharedPatch, localPatch } = splitSharedServerPatch(serverPatch);
@@ -435,7 +453,13 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
         });
       }
     },
-    [connectedEnvironmentIds, environmentId, persistServerSettings],
+    [
+      connectedEnvironmentIds,
+      environmentId,
+      persistServerSettings,
+      saveProfiles,
+      displayedProfiles,
+    ],
   );
 
   return updateSettings;

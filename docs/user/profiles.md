@@ -60,10 +60,29 @@ through a direct link. The currently open thread stays open when you switch prof
 
 ## Syncing
 
-Profiles you create sync to every device connected to the same server, so your groups look the same
-on every desktop and browser you use. Mobile does not show profiles yet. The profile you currently have selected does not sync;
-it is remembered per device, so you can be looking at a different profile on your phone than on your
-desktop.
+Profiles and spaces use one shared source device. Every connected desktop and web client reads
+the same collection, including names, ordering, project assignments, space membership, new-chat
+defaults, and pin scopes. Pin status and pin order continue to stream from each chat's host.
+The selected profile, search, scroll position, and open chat stay independent on each client.
+Unsent drafts stay on the client where you compose them. Mobile does not show profiles yet.
+
+Open **Manage profiles** from the sidebar profile menu, or **Settings, General, Profiles**, to see
+the shared source. An existing collection is discovered automatically when the connected devices
+have one collection or identical copies. If devices have different collections, choose the device
+whose collection you want to use. Other devices' previous collections are retained, not merged or
+deleted. Changing the source selects that device's stored collection; it does not move the current
+collection to that device.
+
+All participating clients and the source need a build supporting shared profiles. Keep the source
+connected to edit organization. If it disconnects, the last displayed collection is cached and
+read-only until it reconnects. Chats still use their normal host connections; profile sharing does
+not copy files, transfer execution, grant permissions, or connect an unpaired device automatically.
+Use **All** and the normal new-chat picker to work without changing organization when the source
+is unavailable.
+
+Edits are saved on the source and delivered through the live connection. Independent changes can
+be combined, including two clients adding chats to the same space. Competing changes to the same
+field or placement are rejected with a retry message instead of silently overwriting either edit.
 
 ## Spaces
 

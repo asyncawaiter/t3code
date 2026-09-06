@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
   resolveProviderInstanceEnabled,
@@ -73,6 +74,56 @@ const recordProviderUsage = (provider: string, instanceId: string | null = provi
   });
 
 it.layer(NodeServices.layer)("server settings", (it) => {
+  it.effect("protects a selected collection from legacy writes and stale source changes", () =>
+    Effect.gen(function* () {
+      const settings = yield* ServerSettingsModule.ServerSettingsService;
+      const source = EnvironmentId.make("godel");
+      const other = EnvironmentId.make("poly");
+      yield* settings.updateSettings({ profileSyncSourceId: source });
+      const legacy = yield* settings.updateSettings({ profiles: [] }).pipe(Effect.exit);
+      assert.equal(legacy._tag, "Failure");
+      const stale = yield* settings
+        .updateSettings({ profiles: [], profileSyncSourceId: other }, [])
+        .pipe(Effect.exit);
+      assert.equal(stale._tag, "Failure");
+      const discoveryRace = yield* settings
+        .updateSettings({ profileSyncSourceId: other }, undefined, null)
+        .pipe(Effect.exit);
+      assert.equal(discoveryRace._tag, "Failure");
+      yield* settings.updateSettings({ profileSyncSourceId: source }, undefined, null);
+      assert.equal((yield* settings.getSettings).profileSyncSourceId, source);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+  it.effect(
+    "streams the same shared organization to two subscribers and preserves concurrent edits",
+    () =>
+      Effect.gen(function* () {
+        const settings = yield* ServerSettingsModule.ServerSettingsService;
+        const base = [{ id: "work", name: "Work", color: "gray" as const, projectKeys: [] }];
+        yield* settings.updateSettings({ profiles: base });
+        const laptopA = yield* settings.subscribeChanges;
+        const laptopB = yield* settings.subscribeChanges;
+        yield* settings.updateSettings({ profiles: [{ ...base[0]!, name: "Shared" }] }, base);
+        const a = yield* Stream.runHead(laptopA);
+        const b = yield* Stream.runHead(laptopB);
+        assert.deepEqual(Option.getOrThrow(a).profiles, Option.getOrThrow(b).profiles);
+        assert.equal(Option.getOrThrow(a).profiles[0]?.name, "Shared");
+        // A second client still has the old snapshot. Its independent placement survives.
+        yield* settings.updateSettings(
+          { profiles: [{ ...base[0]!, projectKeys: ["poly:project"] }] },
+          base,
+        );
+        const saved = yield* settings.getSettings;
+        assert.equal(saved.profiles[0]?.name, "Shared");
+        assert.deepEqual(saved.profiles[0]?.projectKeys, ["poly:project"]);
+        const competing = yield* settings
+          .updateSettings({ profiles: [{ ...base[0]!, name: "Other" }] }, base)
+          .pipe(Effect.exit);
+        assert.equal(competing._tag, "Failure");
+        assert.deepEqual((yield* settings.getSettings).profiles, saved.profiles);
+      }).pipe(Effect.scoped, Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("persists profile spaces and device-qualified thread assignments", () =>
     Effect.gen(function* () {
       const settings = yield* ServerSettingsModule.ServerSettingsService;

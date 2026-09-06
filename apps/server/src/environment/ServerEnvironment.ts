@@ -220,6 +220,7 @@ export const make = Effect.gen(function* () {
       pullRequests: true,
       threadSettlement: true,
       threadAutoSettlement: true,
+      profileSynchronization: true,
       threadSnooze: true,
       environmentThemes: true,
       threadPinning: true,

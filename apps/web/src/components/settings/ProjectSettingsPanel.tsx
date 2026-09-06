@@ -6,7 +6,11 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import { scopeProjectRef, scopedProjectKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopeProjectRef,
+  scopedProjectKey,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import { AsyncResult } from "effect/unstable/reactivity";
 import {
   deriveProjectGroupingOverrideKey,
@@ -46,7 +50,7 @@ import {
   useEnvironmentSettings,
   useUpdateClientSettings,
   usePrimarySettings,
-  usePrimarySettingsLoaded,
+  useProfilesLoaded,
   useUpdatePrimarySettings,
 } from "../../hooks/useSettings";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
@@ -321,7 +325,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
     EMPTY_SERVER_PROVIDERS;
   const updateClientSettings = useUpdateClientSettings();
   const updatePrimarySettings = useUpdatePrimarySettings();
-  const primarySettingsLoaded = usePrimarySettingsLoaded();
+  const primarySettingsLoaded = useProfilesLoaded();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const threads = useThreadShells();
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });

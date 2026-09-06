@@ -1,7 +1,7 @@
 /**
  * Profiles - named, colored groups of projects shown in the sidebar
- * (Arc-browser style). Profile definitions sync across every connected
- * environment as a shared server setting; the active profile a client has
+ * (Arc-browser style). Clients read profile definitions from one shared
+ * source environment; the active profile a client has
  * selected is client-local and lives elsewhere.
  *
  * `projectKeys` holds scoped project keys in the client-runtime format
@@ -12,6 +12,7 @@
  * @module Profile
  */
 import * as Schema from "effect/Schema";
+import * as Equal from "effect/Equal";
 import { ModelSelection } from "./orchestration.ts";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -82,6 +83,145 @@ export const Profile = Schema.Struct({
   ),
 });
 export type Profile = typeof Profile.Type;
+
+function mergeValue<T>(current: T, base: T, edited: T): T {
+  if (Equal.equals(base, edited) || Equal.equals(current, edited)) return current;
+  if (Equal.equals(current, base)) return edited;
+  throw new Error(
+    "This profile field changed on another device. Review its latest value and retry.",
+  );
+}
+
+function mergeMembers(
+  current: ReadonlyArray<string>,
+  base: ReadonlyArray<string>,
+  edited: ReadonlyArray<string>,
+) {
+  const before = new Set(base);
+  const after = new Set(edited);
+  const removed = new Set(base.filter((key) => !after.has(key)));
+  return [
+    ...new Set([
+      ...current.filter((key) => !removed.has(key)),
+      ...edited.filter((key) => !before.has(key)),
+    ]),
+  ];
+}
+
+/** Merge keyed organization rows; reject competing edits to the same field or order. */
+function mergeRows<T>(
+  current: ReadonlyArray<T>,
+  base: ReadonlyArray<T>,
+  edited: ReadonlyArray<T>,
+  key: (row: T) => string,
+  merge: (current: T, base: T, edited: T) => T = mergeValue,
+): ReadonlyArray<T> {
+  const before = new Map(base.map((row) => [key(row), row]));
+  const after = new Map(edited.map((row) => [key(row), row]));
+  const live = new Map(current.map((row) => [key(row), row]));
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    const old = before.get(id),
+      next = after.get(id),
+      existing = live.get(id);
+    if (Equal.equals(old, next)) continue;
+    const resolved =
+      old !== undefined && next !== undefined && existing !== undefined
+        ? merge(existing, old, next)
+        : mergeValue(existing, old, next);
+    if (resolved === undefined) live.delete(id);
+    else live.set(id, resolved);
+  }
+  const commonOrder = (rows: ReadonlyArray<T>) =>
+    rows.map(key).filter((id) => before.has(id) && after.has(id) && live.has(id));
+  const reordered = !Equal.equals(commonOrder(base), commonOrder(edited));
+  if (reordered) mergeValue(commonOrder(current), commonOrder(base), commonOrder(edited));
+  let existingFollows = false;
+  let insertedBeforeExisting = false;
+  for (let index = edited.length - 1; index >= 0; index--) {
+    if (before.has(key(edited[index]!))) existingFollows = true;
+    else if (existingFollows) insertedBeforeExisting = true;
+  }
+  const order = new Set([
+    ...(reordered || insertedBeforeExisting ? edited : current).map(key),
+    ...live.keys(),
+  ]);
+  return [...order].flatMap((id) => {
+    const row = live.get(id);
+    return row === undefined ? [] : [row];
+  });
+}
+
+function mergeSpace(current: ProfileSpace, base: ProfileSpace, edited: ProfileSpace): ProfileSpace {
+  return {
+    ...current,
+    name: mergeValue(current.name, base.name, edited.name),
+    newChatDefaults: mergeValue(
+      current.newChatDefaults,
+      base.newChatDefaults,
+      edited.newChatDefaults,
+    ),
+    threads: mergeRows(current.threads, base.threads, edited.threads, (thread) => thread.threadKey),
+  };
+}
+
+function mergeProfile(current: Profile, base: Profile, edited: Profile): Profile {
+  return {
+    ...current,
+    name: mergeValue(current.name, base.name, edited.name),
+    color: mergeValue(current.color, base.color, edited.color),
+    projectKeys: mergeMembers(current.projectKeys, base.projectKeys, edited.projectKeys),
+    ...(current.spaces || base.spaces || edited.spaces
+      ? {
+          spaces: mergeRows(
+            current.spaces ?? [],
+            base.spaces ?? [],
+            edited.spaces ?? [],
+            (space) => space.id,
+            mergeSpace,
+          ),
+        }
+      : {}),
+    ...(current.threadPins || base.threadPins || edited.threadPins
+      ? {
+          threadPins: mergeRows(
+            current.threadPins ?? [],
+            base.threadPins ?? [],
+            edited.threadPins ?? [],
+            (pin) => pin.threadKey,
+          ),
+        }
+      : {}),
+  };
+}
+
+/** Apply concurrent organizational edits without replacing another client's unrelated work. */
+export function mergeProfileEdits(
+  current: ReadonlyArray<Profile>,
+  base: ReadonlyArray<Profile>,
+  edited: ReadonlyArray<Profile>,
+): ReadonlyArray<Profile> {
+  const profiles = mergeRows(current, base, edited, (profile) => profile.id, mergeProfile);
+  const projects = new Set<string>();
+  const threads = new Set<string>();
+  for (const profile of profiles) {
+    for (const project of profile.projectKeys) {
+      if (projects.has(project))
+        throw new Error(
+          "This project was assigned to another profile. Review its placement and retry.",
+        );
+      projects.add(project);
+    }
+    for (const space of profile.spaces ?? [])
+      for (const thread of space.threads) {
+        if (threads.has(thread.threadKey))
+          throw new Error(
+            "This chat was assigned to another space. Review its placement and retry.",
+          );
+        threads.add(thread.threadKey);
+      }
+  }
+  return profiles;
+}
 
 export const ALL_PROFILE_ID: ProfileId = "all";
 

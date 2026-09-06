@@ -15,6 +15,9 @@ import {
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
+  mergeProfileEdits,
+  type Profile,
+  type EnvironmentId,
   type ModelSelection,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
@@ -54,6 +57,46 @@ import {
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 
 export { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
+
+const applyProfilePatch = (
+  current: ServerSettings,
+  patch: ServerSettingsPatch,
+  baseProfiles?: ReadonlyArray<Profile>,
+  expectedProfileSourceId?: EnvironmentId | null,
+) =>
+  Effect.try({
+    try: () => {
+      if (
+        expectedProfileSourceId !== undefined &&
+        current.profileSyncSourceId !== expectedProfileSourceId &&
+        current.profileSyncSourceId !== patch.profileSyncSourceId
+      ) {
+        throw new Error("The shared profile source changed. Review it and retry.");
+      }
+      if (current.profileSyncSourceId && patch.profiles && !baseProfiles) {
+        throw new Error("Update this client before editing shared profiles.");
+      }
+      if (
+        patch.profiles &&
+        current.profileSyncSourceId &&
+        patch.profileSyncSourceId &&
+        current.profileSyncSourceId !== patch.profileSyncSourceId
+      ) {
+        throw new Error("The shared profile source changed. Refresh and retry.");
+      }
+      return applyServerSettingsPatch(
+        current,
+        patch.profiles && baseProfiles
+          ? {
+              ...patch,
+              profiles: mergeProfileEdits(current.profiles, baseProfiles, patch.profiles),
+            }
+          : patch,
+      );
+    },
+    catch: (cause) =>
+      new ServerSettingsError({ settingsPath: "<memory>", operation: "normalize", cause }),
+  });
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
@@ -177,6 +220,8 @@ export class ServerSettingsService extends Context.Service<
     /** Patch settings and persist. Returns the new full settings object. */
     readonly updateSettings: (
       patch: ServerSettingsPatch,
+      baseProfiles?: ReadonlyArray<Profile>,
+      expectedProfileSourceId?: EnvironmentId | null,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
     /** Stream of settings change events. */
@@ -209,17 +254,22 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
         : {}),
     });
     const currentSettingsRef = yield* Ref.make<ServerSettings>(initialSettings);
+    const writes = yield* Semaphore.make(1);
 
     return {
       start: Effect.void,
       ready: Effect.void,
       getSettings: Ref.get(currentSettingsRef).pipe(Effect.map(resolveTextGenerationProvider)),
-      updateSettings: (patch) =>
-        Ref.get(currentSettingsRef).pipe(
-          Effect.map((currentSettings) => applyServerSettingsPatch(currentSettings, patch)),
-          Effect.flatMap(normalizeServerSettings),
-          Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
-          Effect.map(resolveTextGenerationProvider),
+      updateSettings: (patch, baseProfiles, expectedProfileSourceId) =>
+        writes.withPermits(1)(
+          Ref.get(currentSettingsRef).pipe(
+            Effect.flatMap((currentSettings) =>
+              applyProfilePatch(currentSettings, patch, baseProfiles, expectedProfileSourceId),
+            ),
+            Effect.flatMap(normalizeServerSettings),
+            Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
+            Effect.map(resolveTextGenerationProvider),
+          ),
         ),
       streamChanges: Stream.empty,
       subscribeChanges: Effect.succeed(Stream.empty),
@@ -735,14 +785,17 @@ const make = Effect.gen(function* () {
       Effect.flatMap(materializeProviderEnvironmentSecrets),
       Effect.map(resolveTextGenerationProvider),
     ),
-    updateSettings: (patch) =>
+    updateSettings: (patch, baseProfiles, expectedProfileSourceId) =>
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const nextPersisted = yield* persistProviderEnvironmentSecrets(
+          const patched = yield* applyProfilePatch(
             current,
-            applyServerSettingsPatch(current, patch),
+            patch,
+            baseProfiles,
+            expectedProfileSourceId,
           );
+          const nextPersisted = yield* persistProviderEnvironmentSecrets(current, patched);
           const next = yield* normalizeServerSettings(nextPersisted);
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);

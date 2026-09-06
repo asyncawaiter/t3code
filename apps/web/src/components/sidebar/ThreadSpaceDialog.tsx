@@ -2,7 +2,7 @@ import { CheckIcon } from "lucide-react";
 import { spaceForThread, ALL_PROFILE_ID, moveThreadsToSpace } from "@t3tools/contracts";
 import {
   usePrimarySettings,
-  usePrimarySettingsLoaded,
+  useProfilesLoaded,
   useUpdatePrimarySettings,
 } from "../../hooks/useSettings";
 import { moveProjectToProfile } from "../settings/ProjectSettingsPanel.logic";
@@ -21,7 +21,7 @@ export function ThreadSpaceDialog({
   onMove: (profileId: string, spaceId: string | null) => void;
 }) {
   const profiles = usePrimarySettings((settings) => settings.profiles);
-  const loaded = usePrimarySettingsLoaded();
+  const loaded = useProfilesLoaded();
   const update = useUpdatePrimarySettings();
   const projectKeys = [...new Set(threads.map((thread) => thread.projectKey))];
   const profile = commonSpaceProfile(profiles, projectKeys);

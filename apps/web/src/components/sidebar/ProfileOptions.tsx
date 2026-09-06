@@ -3,7 +3,7 @@ import { ALL_PROFILE_ID, PROFILE_MAX_COUNT, PROFILE_NAME_MAX_LENGTH } from "@t3t
 import { MoreHorizontalIcon, PlusIcon, PencilIcon, Settings2Icon } from "lucide-react";
 import {
   usePrimarySettings,
-  usePrimarySettingsLoaded,
+  useProfilesLoaded,
   useUpdatePrimarySettings,
 } from "../../hooks/useSettings";
 import { randomUUID } from "../../lib/utils";
@@ -29,7 +29,7 @@ export function ProfileOptions({
   onSelect: (id: string) => void;
 }) {
   const profiles = usePrimarySettings((settings) => settings.profiles);
-  const loaded = usePrimarySettingsLoaded();
+  const loaded = useProfilesLoaded();
   const updateSettings = useUpdatePrimarySettings();
   const [editor, setEditor] = useState<string | null>(null);
   const [name, setName] = useState("");

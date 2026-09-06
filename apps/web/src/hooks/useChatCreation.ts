@@ -1,8 +1,7 @@
 import { moveProjectToProfile } from "../components/settings/ProjectSettingsPanel.logic";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { ALL_PROFILE_ID, type EnvironmentId, type Profile } from "@t3tools/contracts";
-import { useCallback } from "react";
+import { ALL_PROFILE_ID, type EnvironmentId } from "@t3tools/contracts";
 import { readLocalApi } from "../localApi";
 import {
   findProjectByPath,
@@ -12,67 +11,20 @@ import {
 import { newProjectId } from "../lib/utils";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readProjects, waitForProject } from "../state/entities";
-import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
+import { useEnvironments } from "../state/environments";
 import { filesystemEnvironment } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
-import { primaryServerSettingsAtom, serverEnvironment } from "../state/server";
+import { primaryServerSettingsAtom } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
-import { toastManager } from "../components/ui/toast";
 
 export interface ChatLocation {
   environmentId: EnvironmentId;
   workspaceRoot: string;
 }
 
-// Creation can update project membership, defaults and draft placement in succession.
-// Serialize those writes and read settings when each write starts.
-let profileWrites = Promise.resolve();
-export function useSaveProfiles() {
-  const primary = usePrimaryEnvironment();
-  const { environments } = useEnvironments();
-  const persist = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
-  return useCallback(
-    (update: (profiles: ReadonlyArray<Profile>) => ReadonlyArray<Profile>) => {
-      const write = profileWrites.then(async () => {
-        if (!primary?.serverConfig || primary.connection.phase !== "connected") {
-          throw new Error("Connect the primary device to save profile placement.");
-        }
-        const current = appAtomRegistry.get(primaryServerSettingsAtom).profiles;
-        const profiles = update(current);
-        if (profiles === current) return;
-        const result = await persist({
-          environmentId: primary.environmentId,
-          input: { patch: { profiles } },
-        });
-        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        await Promise.all(
-          environments
-            .filter(
-              (env) =>
-                env.environmentId !== primary.environmentId && env.connection.phase === "connected",
-            )
-            .map(async (env) => {
-              const replica = await persist({
-                environmentId: env.environmentId,
-                input: { patch: { profiles } },
-              });
-              if (replica._tag === "Failure")
-                toastManager.add({
-                  type: "warning",
-                  title: `Profile sync failed on ${env.label}`,
-                  description:
-                    "Saved on the primary device. Retry shared settings sync in Settings.",
-                });
-            }),
-        );
-      });
-      profileWrites = write.catch(() => {});
-      return write;
-    },
-    [primary, environments, persist],
-  );
-}
+export { useSaveProfiles } from "./useProfileSync";
+import { useSaveProfiles } from "./useProfileSync";
 
 export function useResolveChatProject() {
   const { environments } = useEnvironments();

@@ -81,7 +81,7 @@ import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import {
   useClientSettings,
   usePrimarySettings,
-  usePrimarySettingsLoaded,
+  useProfilesLoaded,
   useUpdatePrimarySettings,
 } from "../hooks/useSettings";
 import { moveProjectToProfile } from "./settings/ProjectSettingsPanel.logic";
@@ -625,7 +625,7 @@ function OpenCommandPaletteDialog(props: {
   const activeProfileId = useUiStateStore((store) => store.activeProfileId);
   const setActiveProfileId = useUiStateStore((store) => store.setActiveProfileId);
   const updatePrimarySettings = useUpdatePrimarySettings();
-  const primarySettingsLoaded = usePrimarySettingsLoaded();
+  const primarySettingsLoaded = useProfilesLoaded();
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });

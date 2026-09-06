@@ -13,12 +13,17 @@ import {
   type Profile,
   type ProfileColor,
 } from "@t3tools/contracts";
-import { ChevronDownIcon, ChevronUpIcon, Plus as PlusIcon, Trash2 as Trash2Icon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  Plus as PlusIcon,
+  Trash2 as Trash2Icon,
+} from "lucide-react";
 import { useState } from "react";
 
 import {
   usePrimarySettings,
-  usePrimarySettingsLoaded,
+  useProfilesLoaded,
   useUpdatePrimarySettings,
 } from "../../hooks/useSettings";
 import { cn, randomUUID } from "../../lib/utils";
@@ -37,6 +42,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import { searchableSetting } from "./settingsSearch";
 import { SettingsRow } from "./settingsLayout";
+import { ProfileSyncStatus } from "../sidebar/ProfileSyncStatus";
 
 /** Static so Tailwind can see every class literal; never build these from a variable. */
 const PROFILE_COLOR_DOT_CLASSNAME: Record<ProfileColor, string> = {
@@ -106,7 +112,7 @@ function ProfileColorPicker({
 export function ProfilesSettings() {
   const userProfiles = usePrimarySettings((settings) => settings.profiles);
   const updateSettings = useUpdatePrimarySettings();
-  const settingsLoaded = usePrimarySettingsLoaded();
+  const settingsLoaded = useProfilesLoaded();
   const [profilePendingRemoval, setProfilePendingRemoval] = useState<Profile | null>(null);
 
   const addProfile = () => {
@@ -129,7 +135,9 @@ export function ProfilesSettings() {
   const recolorProfile = (id: string, color: ProfileColor) => {
     if (!settingsLoaded) return;
     updateSettings({
-      profiles: userProfiles.map((profile) => (profile.id === id ? { ...profile, color } : profile)),
+      profiles: userProfiles.map((profile) =>
+        profile.id === id ? { ...profile, color } : profile,
+      ),
     });
   };
 
@@ -152,7 +160,6 @@ export function ProfilesSettings() {
   return (
     <SettingsRow
       {...searchableSetting("profiles")}
-      serverScoped
       description="Group projects into profiles. Swipe horizontally on the sidebar or press the profile shortcut to switch."
       control={
         <Button
@@ -166,6 +173,7 @@ export function ProfilesSettings() {
         </Button>
       }
     >
+      <ProfileSyncStatus settings />
       <div className="mt-2 space-y-1 pb-2">
         {userProfiles.map((profile, index) => (
           <div

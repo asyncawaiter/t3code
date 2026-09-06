@@ -144,7 +144,7 @@ import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   useClientSettings,
   usePrimarySettings,
-  usePrimarySettingsLoaded,
+  useProfilesLoaded,
   useUpdatePrimarySettings,
 } from "../hooks/useSettings";
 import { moveProjectToProfile } from "./settings/ProjectSettingsPanel.logic";
@@ -1886,7 +1886,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const rawProfiles = usePrimarySettings((s) => s.profiles);
-  const primarySettingsLoaded = usePrimarySettingsLoaded();
+  const primarySettingsLoaded = useProfilesLoaded();
   const updatePrimarySettings = useUpdatePrimarySettings();
   const latestProfilesRef = useRef(rawProfiles);
   latestProfilesRef.current = rawProfiles;

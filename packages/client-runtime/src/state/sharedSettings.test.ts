@@ -28,7 +28,6 @@ describe("pickSharedServerSettings", () => {
     expect(Object.keys(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS)).sort()).toEqual([
       "defaultThreadEnvMode",
       "newWorktreesStartFromOrigin",
-      "profiles",
       "sidebarAutoSettleAfterDays",
       "sidebarAutoSettleOnMerge",
       "sourceControlWritingStyle",

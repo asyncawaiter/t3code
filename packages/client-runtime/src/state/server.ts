@@ -938,6 +938,10 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    settings: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:settings-read",
+      tag: WS_METHODS.serverGetSettings,
+    }),
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
