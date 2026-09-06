@@ -1,3 +1,4 @@
+import { useThreadPinMenu } from "./useThreadPinMenu";
 import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   type AtomCommandResult,
@@ -67,6 +68,7 @@ export function useThreadActionMenu(input: {
   readonly onStartRename: () => void;
 }) {
   const { threadRef, projectCwd, onStartRename } = input;
+  const { getPinMenu, handlePinScope } = useThreadPinMenu();
   const router = useRouter();
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -138,6 +140,7 @@ export function useThreadActionMenu(input: {
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
         const items = buildThreadActionMenuItems({
+          pinMenu: getPinMenu(threadRef),
           branch: thread.branch ?? null,
           isPinned: thread.pinnedAt != null,
           isSettled: supports.settlement && thread.settledOverride === "settled",
@@ -150,6 +153,7 @@ export function useThreadActionMenu(input: {
         });
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
+        if (await handlePinScope(threadRef, clicked.value)) return;
         const action: ThreadActionMenuId = clicked.value;
         if (action.startsWith("snooze:")) {
           const preset = snoozePresets.find((candidate) => `snooze:${candidate.id}` === action);
@@ -329,6 +333,8 @@ export function useThreadActionMenu(input: {
       })();
     },
     [
+      getPinMenu,
+      handlePinScope,
       archiveThread,
       confirmThreadArchive,
       confirmThreadDelete,

@@ -66,3 +66,19 @@ describe("moveProjectToProfile", () => {
     ]);
   });
 });
+
+it("moves a scoped pin with its project and falls back to profile scope", () => {
+  const source: Profile = {
+    id: "source",
+    name: "Source",
+    color: "blue",
+    projectKeys: ["env:p"],
+    threadPins: [{ threadKey: "env:t", projectKey: "env:p", spaceId: "old" }],
+  };
+  const target: Profile = { id: "target", name: "Target", color: "gray", projectKeys: [] };
+  const moved = moveProjectToProfile([source, target], "env:p", "target");
+  expect(moved[0]?.threadPins).toEqual([]);
+  expect(moved[1]?.threadPins).toEqual([
+    { threadKey: "env:t", projectKey: "env:p", spaceId: null },
+  ]);
+});

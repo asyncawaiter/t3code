@@ -3,6 +3,8 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import {
+  indexProfilePins,
+  moveThreadsToSpace,
   ALL_PROFILE,
   ALL_PROFILE_ID,
   Profile,
@@ -13,8 +15,18 @@ import {
   type Profile as ProfileType,
 } from "./profile.ts";
 
-const work: ProfileType = { id: "work", name: "Work", color: "blue", projectKeys: ["env-1:proj-1"] };
-const home: ProfileType = { id: "home", name: "Home", color: "green", projectKeys: ["env-1:proj-2"] };
+const work: ProfileType = {
+  id: "work",
+  name: "Work",
+  color: "blue",
+  projectKeys: ["env-1:proj-1"],
+};
+const home: ProfileType = {
+  id: "home",
+  name: "Home",
+  color: "green",
+  projectKeys: ["env-1:proj-2"],
+};
 
 describe("resolveProfiles", () => {
   it("pins All first, ahead of the user's own profiles", () => {
@@ -78,12 +90,51 @@ describe("Profile schema", () => {
   const decode = Schema.decodeUnknownSync(Profile);
 
   it("rejects an unknown color", () => {
-    expect(() =>
-      decode({ id: "work", name: "Work", color: "magenta", projectKeys: [] }),
-    ).toThrow();
+    expect(() => decode({ id: "work", name: "Work", color: "magenta", projectKeys: [] })).toThrow();
   });
 
   it("decodes a valid profile", () => {
     expect(decode(work)).toEqual(work);
+  });
+});
+
+describe("pin scopes", () => {
+  it("keeps placement separate and falls back to profile when a space is removed or unassigned", () => {
+    const profile = Schema.decodeUnknownSync(Profile)({
+      ...work,
+      spaces: [
+        {
+          id: "assigned",
+          name: "Assigned",
+          threads: [{ threadKey: "env-1:thread", projectKey: "env-1:proj-1" }],
+        },
+        { id: "other", name: "Other", threads: [] },
+      ],
+      threadPins: [{ threadKey: "env-1:thread", projectKey: "env-1:proj-1", spaceId: "assigned" }],
+    });
+    expect(indexProfilePins([profile]).get("env-1:thread")).toEqual({
+      profileId: "work",
+      spaceId: "assigned",
+    });
+    const outside = moveThreadsToSpace(
+      profile,
+      [{ threadKey: "env-1:thread", projectKey: "env-1:proj-1" }],
+      null,
+    );
+    expect(indexProfilePins([outside]).get("env-1:thread")).toEqual({
+      profileId: "work",
+      spaceId: null,
+    });
+    expect(outside.threadPins?.[0]?.spaceId).toBeNull();
+    expect(indexProfilePins([{ ...profile, spaces: [] }]).get("env-1:thread")).toEqual({
+      profileId: "work",
+      spaceId: null,
+    });
+    expect(
+      indexProfilePins([
+        { ...profile, threadPins: [{ ...profile.threadPins![0]!, spaceId: null }] },
+      ]).get("env-1:thread"),
+    ).toEqual({ profileId: "work", spaceId: null });
+    expect(indexProfilePins([{ ...profile, projectKeys: [] }]).size).toBe(0);
   });
 });

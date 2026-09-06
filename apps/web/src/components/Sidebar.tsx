@@ -1,3 +1,4 @@
+import { useThreadPinMenu } from "../hooks/useThreadPinMenu";
 import { openChatCreation } from "../chatCreationStore";
 import type { DraftThreadState } from "../composerDraftStore";
 import { ThreadSpaceDialog } from "./sidebar/ThreadSpaceDialog";
@@ -11,6 +12,7 @@ import { buildDashboard } from "@t3tools/client-runtime/state/dashboard";
 import {
   spaceForThread,
   indexProfileSpaces,
+  indexProfilePins,
   moveThreadsToSpace,
   type Profile,
   type ProfileSpace,
@@ -1968,6 +1970,8 @@ export default function Sidebar() {
     },
     [activeProfile.id, rawProfiles, threads, changeSpaces],
   );
+  const { getPinMenu, handlePinScope } = useThreadPinMenu();
+  const pinIndex = useMemo(() => indexProfilePins(rawProfiles), [rawProfiles]);
   const spaceIndex = useMemo(() => indexProfileSpaces(rawProfiles), [rawProfiles]);
   const defaultSpaceFilter = activeProfile.id === ALL_PROFILE_ID ? null : OUTSIDE_SPACES;
   const spaceSelection = useUiStateStore((state) => state.spaceSelection);
@@ -2205,16 +2209,26 @@ export default function Sidebar() {
       ),
     [projects],
   );
+  const allProjectGroups = useMemo(
+    () =>
+      buildSidebarProjectSnapshots({
+        projects,
+        settings: projectGroupingSettings,
+        primaryEnvironmentId,
+        resolveEnvironmentLabel: (id) => environmentLabelById.get(id) ?? null,
+      }),
+    [projects, projectGroupingSettings, primaryEnvironmentId, environmentLabelById],
+  );
   const projectDisplayNameByKey = useMemo(
     () =>
       new Map(
-        projectGroups.flatMap((group) =>
+        allProjectGroups.flatMap((group) =>
           group.memberProjects.map(
             (project) => [`${project.environmentId}:${project.id}`, group.displayName] as const,
           ),
         ),
       ),
-    [projectGroups],
+    [allProjectGroups],
   );
 
   const nowMinute = useNowMinute();
@@ -2424,7 +2438,12 @@ export default function Sidebar() {
     const visible = threads.filter(
       (thread) =>
         thread.archivedAt === null &&
-        (scopedProjectKeys === null ||
+        ((thread.pinnedAt != null &&
+          (!pinIndex.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) ||
+            activeProfile.id === ALL_PROFILE_ID ||
+            pinIndex.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
+              ?.profileId === activeProfile.id)) ||
+          scopedProjectKeys === null ||
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
     const pinned: EnvironmentThreadShell[] = [];
@@ -2477,7 +2496,15 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [
+    nowMinute,
+    scopedProjectKeys,
+    serverConfigs,
+    snoozeWakeTick,
+    threads,
+    pinIndex,
+    activeProfile.id,
+  ]);
 
   const spaceAttention = useMemo(
     () =>
@@ -2622,9 +2649,15 @@ export default function Sidebar() {
         const space = spaceIndex.get(
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
         )?.space;
-        return matchesSidebarSpace(space?.id, spaceFilter) || (thread.pinnedAt != null && !space);
+        return (
+          matchesSidebarSpace(space?.id, spaceFilter) ||
+          (thread.pinnedAt != null &&
+            !pinIndex.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
+              ?.spaceId)
+        );
       }),
     [
+      pinIndex,
       pinnedThreads,
       activeThreads,
       visibleSnoozedThreads,
@@ -3473,15 +3506,14 @@ export default function Sidebar() {
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
-        const ownerProfile = commonSpaceProfile(rawProfiles, [
-          `${thread.environmentId}:${thread.projectId}`,
-        ]);
+
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             [
               ...buildThreadActionMenuItems({
+                pinMenu: getPinMenu(threadRef),
                 branch: thread.branch ?? null,
                 isPinned,
                 isSettled,
@@ -3499,22 +3531,6 @@ export default function Sidebar() {
                 snoozePresets,
               }),
               { id: "move-space", label: "Move to space...", disabled: !primarySettingsLoaded },
-              ...(ownerProfile
-                ? [
-                    {
-                      id: "pin-space",
-                      label: "Pin to",
-                      disabled: !primarySettingsLoaded || !supportsPinning,
-                      children: [
-                        { id: "space-pin:root", label: `${ownerProfile.name} / Outside spaces` },
-                        ...(ownerProfile.spaces ?? []).map((space) => ({
-                          id: `space-pin:${space.id}`,
-                          label: `${ownerProfile.name} / ${space.name}`,
-                        })),
-                      ],
-                    },
-                  ]
-                : []),
               {
                 id: "move-project-profile",
                 label: "Move project to profile",
@@ -3526,16 +3542,7 @@ export default function Sidebar() {
           ),
         );
         if (clicked._tag === "Failure") return;
-        if (clicked.value?.startsWith("space:") || clicked.value?.startsWith("space-pin:")) {
-          const destination = clicked.value.slice(clicked.value.indexOf(":") + 1);
-          moveSpaceThreads(
-            [threadKey],
-            destination === "root" ? null : destination,
-            ownerProfile?.id,
-          );
-          if (clicked.value.startsWith("space-pin:") && !isPinned) attemptPin(threadRef);
-          return;
-        }
+        if (await handlePinScope(threadRef, clicked.value)) return;
         if (clicked.value?.startsWith("snooze:")) {
           const preset = snoozePresets.find(
             (candidate) => `snooze:${candidate.id}` === clicked.value,
@@ -3556,7 +3563,7 @@ export default function Sidebar() {
             return;
           }
           case "project-settings": {
-            const projectGroup = projectGroupsRef.current.find((group) =>
+            const projectGroup = allProjectGroups.find((group) =>
               group.memberProjectRefs.some(
                 (projectRef) =>
                   projectRef.environmentId === thread.environmentId &&
@@ -3710,6 +3717,8 @@ export default function Sidebar() {
       })();
     },
     [
+      getPinMenu,
+      handlePinScope,
       archiveThread,
       attemptPin,
       attemptSettle,
@@ -3728,6 +3737,7 @@ export default function Sidebar() {
       openProjectProfileMenu,
       primarySettingsLoaded,
       rawProfiles,
+      allProjectGroups,
       markThreadUnread,
       openProjectSettings,
       projectCwdByKey,
@@ -4476,7 +4486,12 @@ export default function Sidebar() {
                   // Pinned rows render in the one shared pinned order; only
                   // reorder-capable rows register as sortable (legacy-server
                   // pins render in place as plain rows).
-                  const rootPins = orderedPinnedThreads.filter((thread) => !threadSpace(thread));
+                  const rootPins = orderedPinnedThreads.filter(
+                    (thread) =>
+                      !pinIndex.get(
+                        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                      )?.spaceId,
+                  );
                   const draftBlock = (
                     <SidebarDraftBlock
                       key="draft-sessions"
@@ -4655,7 +4670,9 @@ export default function Sidebar() {
                   const inSpace = (thread: EnvironmentThreadShell) =>
                     matchesSidebarSpace(threadSpace(thread)?.id, spaceFilter);
                   const spacePins = orderedPinnedThreads.filter(
-                    (thread) => threadSpace(thread) && inSpace(thread),
+                    (thread) =>
+                      pinIndex.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
+                        ?.spaceId && inSpace(thread),
                   );
                   if (spacePins.length)
                     items.push(

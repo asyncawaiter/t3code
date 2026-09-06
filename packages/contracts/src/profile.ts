@@ -71,6 +71,15 @@ export const Profile = Schema.Struct({
   color: ProfileColor,
   projectKeys: Schema.Array(Schema.String),
   spaces: Schema.optional(Schema.Array(ProfileSpace).check(Schema.isMaxLength(64))),
+  threadPins: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        threadKey: TrimmedNonEmptyString,
+        projectKey: TrimmedNonEmptyString,
+        spaceId: Schema.NullOr(ProfileId),
+      }),
+    ).check(Schema.isMaxLength(10000)),
+  ),
 });
 export type Profile = typeof Profile.Type;
 
@@ -174,6 +183,13 @@ export function moveThreadsToSpace(
   const keys = new Set(eligible.map((thread) => thread.threadKey));
   return {
     ...profile,
+    ...(profile.threadPins
+      ? {
+          threadPins: profile.threadPins.map((pin) =>
+            keys.has(pin.threadKey) && pin.spaceId !== spaceId ? { ...pin, spaceId: null } : pin,
+          ),
+        }
+      : {}),
     spaces: profile.spaces?.map((space) => ({
       ...space,
       threads: [
@@ -194,6 +210,23 @@ export function indexProfileSpaces(profiles: ReadonlyArray<Profile>) {
         if (projects.has(thread.projectKey) && !result.has(thread.threadKey))
           result.set(thread.threadKey, { profile, space, projectKey: thread.projectKey });
       }
+  }
+  return result;
+}
+
+/** Missing entries are global pins; stale space pins fall back to their owning profile. */
+export function indexProfilePins(profiles: ReadonlyArray<Profile>) {
+  const result = new Map<string, { profileId: string; spaceId: string | null }>();
+  for (const profile of profiles) {
+    const projects = new Set(profile.projectKeys);
+    for (const pin of profile.threadPins ?? []) {
+      if (!projects.has(pin.projectKey)) continue;
+      const space = spaceForThread(profile, pin.threadKey, pin.projectKey);
+      result.set(pin.threadKey, {
+        profileId: profile.id,
+        spaceId: pin.spaceId === space?.id ? pin.spaceId : null,
+      });
+    }
   }
   return result;
 }

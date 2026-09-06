@@ -81,9 +81,11 @@ Use the tag button on a chat row or its **Move to space** context-menu action to
 a space. These work in All as well as a specific profile. Choose **Outside spaces** to
 remove a space assignment. If the project has no profile, the dialog lets you choose one
 first and explains that moving a project changes the profile of all its chats.
-The context menu also offers **Pin to** a profile or space. You can
-move a selection of threads together, drag threads onto a tile, or drop them on the
-profile selector to return them directly to the profile. Unpinning keeps their placement.
+The **Pin** submenu offers one scope at a time: **Global** appears across profiles and
+spaces, **Profile** stays above the owning profile's grid, and **Space** stays in the
+chat's assigned space. Only that space is offered. Pinning never moves a chat.
+Chats outside spaces can use Global or Profile. Removing a space assignment returns
+its space pin to the profile level. **Unpin** keeps the chat's placement.
 
 The tile's overflow menu offers rename and delete. You can also drag tiles to
 reorder them. Deleting a space returns its threads and pins directly to the profile;

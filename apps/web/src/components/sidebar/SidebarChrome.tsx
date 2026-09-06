@@ -6,10 +6,11 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useCallback } from "react";
+import { lazy, memo, Suspense, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { T3Wordmark } from "../T3Wordmark";
@@ -34,6 +35,17 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
+
+const T3ConnectSidebarSignIn = lazy(() =>
+  import("../clerk/T3ConnectSidebarSignIn").then((module) => ({
+    default: module.T3ConnectSidebarSignIn,
+  })),
+);
+const T3ConnectSidebarAvatar = lazy(() =>
+  import("../clerk/T3ConnectSidebarSignIn").then((module) => ({
+    default: module.T3ConnectSidebarAvatar,
+  })),
+);
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -237,7 +249,21 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarUtilityMenu />
+      {hasCloudPublicConfig() ? (
+        <Suspense fallback={null}>
+          <T3ConnectSidebarSignIn />
+        </Suspense>
+      ) : null}
+      <div className="flex items-center gap-1">
+        <div className="min-w-0 flex-1">
+          <SidebarUtilityMenu />
+        </div>
+        {hasCloudPublicConfig() ? (
+          <Suspense fallback={null}>
+            <T3ConnectSidebarAvatar />
+          </Suspense>
+        ) : null}
+      </div>
     </SidebarFooter>
   );
 });

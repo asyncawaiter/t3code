@@ -24,9 +24,22 @@ export function moveProjectToProfile(
   )
     return profiles;
   const projectKeys = new Set(typeof projectKey === "string" ? [projectKey] : projectKey);
+  const movedPins = profiles.flatMap((profile) =>
+    (profile.threadPins ?? [])
+      .filter((pin) => projectKeys.has(pin.projectKey))
+      .map((pin) => (profile.id === targetProfileId ? pin : { ...pin, spaceId: null })),
+  );
   const withoutProject = profiles.map((profile) => ({
     ...profile,
     projectKeys: profile.projectKeys.filter((key) => !projectKeys.has(key)),
+    ...(profile.threadPins || (profile.id === targetProfileId && movedPins.length)
+      ? {
+          threadPins: [
+            ...(profile.threadPins ?? []).filter((pin) => !projectKeys.has(pin.projectKey)),
+            ...(profile.id === targetProfileId ? movedPins : []),
+          ],
+        }
+      : {}),
     ...(profile.spaces
       ? {
           spaces: profile.spaces.map((space) => ({
