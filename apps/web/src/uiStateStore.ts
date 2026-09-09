@@ -31,11 +31,14 @@ export interface PersistedUiState {
   threadChangedFilesExpansionVersion?: number;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   pullRequestMergeMethod?: string;
+  activeProfileId?: string | null;
 }
 
 export interface UiProjectState {
+  spaceSelection?: { profileId: string; filter: string | null } | undefined;
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
+  activeProfileId: string | null;
   // Logical project key the sidebar list is scoped to, or null for "all
   // projects". Lives here so routes that unmount the sidebar (Settings)
   // cannot reset the filter.
@@ -66,6 +69,7 @@ const initialState: UiState = {
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
   pullRequestMergeMethod: "merge",
+  activeProfileId: null,
 };
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
@@ -158,6 +162,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
+    activeProfileId: sanitizeOptionalKey(parsed.activeProfileId),
   };
 }
 
@@ -232,6 +237,7 @@ export function persistState(state: UiState): void {
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
+        activeProfileId: state.activeProfileId,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -329,14 +335,14 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   };
 }
 
-export function setSidebarProjectScopeKey(state: UiState, projectKey: string | null): UiState {
-  const nextKey = sanitizeOptionalKey(projectKey);
-  if (state.sidebarProjectScopeKey === nextKey) {
+export function setActiveProfileId(state: UiState, id: string | null): UiState {
+  if (state.activeProfileId === id) {
     return state;
   }
   return {
     ...state,
-    sidebarProjectScopeKey: nextKey,
+    activeProfileId: id,
+    spaceSelection: undefined,
   };
 }
 
@@ -344,6 +350,12 @@ function setPullRequestMergeMethod(state: UiState, method: PullRequestMergeMetho
   return state.pullRequestMergeMethod === method
     ? state
     : { ...state, pullRequestMergeMethod: method };
+}
+
+export function setSidebarProjectScopeKey(state: UiState, projectKey: string | null): UiState {
+  const nextKey = sanitizeOptionalKey(projectKey);
+  if (state.sidebarProjectScopeKey === nextKey) return state;
+  return { ...state, sidebarProjectScopeKey: nextKey };
 }
 
 export function resolveProjectExpanded(
@@ -436,6 +448,7 @@ interface UiStateStore extends UiState {
     draggedProjectIds: readonly string[],
     targetProjectIds: readonly string[],
   ) => void;
+  setActiveProfileId: (id: string | null) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -457,6 +470,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) =>
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),
     ),
+  setActiveProfileId: (id) => set((state) => setActiveProfileId(state, id)),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

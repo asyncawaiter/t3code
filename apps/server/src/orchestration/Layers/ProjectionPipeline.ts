@@ -38,6 +38,7 @@ import {
   ProjectionTurnRepository,
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
+import { ThreadForkContextRepository } from "../../persistence/Services/ThreadForkContext.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
@@ -47,6 +48,7 @@ import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/La
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
+import { ThreadForkContextRepositoryLive } from "../../persistence/Layers/ThreadForkContext.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -484,6 +486,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
+    const threadForkContextRepository = yield* ThreadForkContextRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -609,6 +612,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
             linkedPullRequest: null,
+            forkSourceThreadId: event.payload.forkedFrom?.threadId ?? null,
+            forkSourceMessageId: event.payload.forkedFrom?.messageId ?? null,
+            forkSourceTurnId: event.payload.forkedFrom?.turnId ?? null,
+            forkSourceSequence: event.payload.forkedFrom?.sequence ?? null,
+            forkForkedAt: event.payload.forkedFrom?.forkedAt ?? null,
             branchPullRequest: null,
             latestTurnId: null,
             createdAt: event.payload.createdAt,
@@ -866,6 +874,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (!recreatedLater) {
             attachmentSideEffects.deletedThreadIds.add(event.payload.threadId);
           }
+          yield* threadForkContextRepository.delete({ threadId: event.payload.threadId });
+          yield* threadForkContextRepository.deleteBySourceThreadId({
+            sourceThreadId: event.payload.threadId,
+          });
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
@@ -970,8 +982,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           let latestTurnId: ProjectionTurn["turnId"] = null;
           let latestCheckpointTurnCount = -1;
+          let latestRequestedAt = "";
           for (let index = 0; index < retainedTurns.length; index += 1) {
             const turn = retainedTurns[index];
+            if (event.payload.removedTurnId) {
+              if (
+                turn?.turnId &&
+                turn.turnId !== event.payload.removedTurnId &&
+                turn.requestedAt >= latestRequestedAt
+              ) {
+                latestTurnId = turn.turnId;
+                latestRequestedAt = turn.requestedAt;
+              }
+              continue;
+            }
             if (
               !turn ||
               turn.turnId === null ||
@@ -1074,11 +1098,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const existingTurns = yield* projectionTurnRepository.listByThreadId({
             threadId: event.payload.threadId,
           });
-          const keptRows = retainProjectionMessagesAfterRevert(
-            existingRows,
-            existingTurns,
-            event.payload.turnCount,
-          );
+          const keptRows = event.payload.sourceMessageId
+            ? existingRows.slice(
+                0,
+                ((index) => (index < 0 ? existingRows.length : index))(
+                  existingRows.findIndex(
+                    (message) => message.messageId === event.payload.sourceMessageId,
+                  ),
+                ),
+              )
+            : retainProjectionMessagesAfterRevert(
+                existingRows,
+                existingTurns,
+                event.payload.turnCount,
+              );
           if (keptRows.length === existingRows.length) {
             return;
           }
@@ -1135,11 +1168,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const existingTurns = yield* projectionTurnRepository.listByThreadId({
             threadId: event.payload.threadId,
           });
-          const keptRows = retainProjectionProposedPlansAfterRevert(
-            existingRows,
-            existingTurns,
-            event.payload.turnCount,
-          );
+          const keptRows = event.payload.removedTurnId
+            ? existingRows.filter((row) => row.turnId !== event.payload.removedTurnId)
+            : retainProjectionProposedPlansAfterRevert(
+                existingRows,
+                existingTurns,
+                event.payload.turnCount,
+              );
           if (keptRows.length === existingRows.length) {
             return;
           }
@@ -1194,11 +1229,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const existingTurns = yield* projectionTurnRepository.listByThreadId({
             threadId: event.payload.threadId,
           });
-          const keptRows = retainProjectionActivitiesAfterRevert(
-            existingRows,
-            existingTurns,
-            event.payload.turnCount,
-          );
+          const keptRows = event.payload.removedTurnId
+            ? existingRows.filter((row) => row.turnId !== event.payload.removedTurnId)
+            : retainProjectionActivitiesAfterRevert(
+                existingRows,
+                existingTurns,
+                event.payload.turnCount,
+              );
           if (keptRows.length === existingRows.length) {
             return;
           }
@@ -1605,11 +1642,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const existingTurns = yield* projectionTurnRepository.listByThreadId({
             threadId: event.payload.threadId,
           });
-          const keptTurns = existingTurns.filter(
-            (turn) =>
-              turn.turnId !== null &&
-              turn.checkpointTurnCount !== null &&
-              turn.checkpointTurnCount <= event.payload.turnCount,
+          const keptTurns = existingTurns.filter((turn) =>
+            event.payload.removedTurnId
+              ? turn.turnId !== event.payload.removedTurnId
+              : turn.turnId !== null &&
+                turn.checkpointTurnCount !== null &&
+                turn.checkpointTurnCount <= event.payload.turnCount,
           );
           yield* projectionTurnRepository.deleteByThreadId({
             threadId: event.payload.threadId,
@@ -2073,4 +2111,9 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
+  // Written by the fork RPC handler and consumed by the child thread's
+  // first turn (Stage 2); this pipeline only deletes the row, on
+  // thread.deleted. Merged here so it rides the same SQL client as its
+  // sibling repositories.
+  Layer.provideMerge(ThreadForkContextRepositoryLive),
 );

@@ -1,3 +1,9 @@
+import {
+  indexProfilePins,
+  profileForProject,
+  spaceForThread,
+  type Profile,
+} from "@t3tools/contracts";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
@@ -9,6 +15,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "project-settings"
+  | `pin-scope:${"global" | "profile" | "space"}`
   | "pin"
   | "unpin"
   | "settle"
@@ -27,6 +34,7 @@ export type ThreadActionMenuId =
   | "delete";
 
 export interface ThreadActionMenuState {
+  readonly pinMenu?: ContextMenuItem<ThreadActionMenuId>;
   readonly branch: string | null;
   readonly isPinned: boolean;
   readonly isSettled: boolean;
@@ -64,9 +72,10 @@ export function buildThreadActionMenuItems(
       : []),
     ...(state.supports.pinning
       ? [
-          state.isPinned
-            ? { id: "unpin" as const, label: "Unpin thread", icon: "pin-off" }
-            : { id: "pin" as const, label: "Pin thread", icon: "pin" },
+          state.pinMenu ??
+            (state.isPinned
+              ? { id: "unpin" as const, label: "Unpin thread", icon: "pin-off" }
+              : { id: "pin" as const, label: "Pin thread", icon: "pin" }),
         ]
       : []),
     // Both lifecycle actions stay available on pinned threads: settling
@@ -140,4 +149,40 @@ export function buildThreadActionMenuItems(
       icon: "trash",
     },
   ];
+}
+
+export function buildThreadPinMenu({
+  profiles,
+  threadKey,
+  projectKey,
+  isPinned,
+  loaded,
+}: {
+  profiles: ReadonlyArray<Profile>;
+  threadKey: string;
+  projectKey: string;
+  isPinned: boolean;
+  loaded: boolean;
+}): ContextMenuItem<ThreadActionMenuId> {
+  const owner = profileForProject(profiles, projectKey);
+  const space = owner && spaceForThread(owner, threadKey, projectKey);
+  const scope = indexProfilePins(profiles).get(threadKey);
+  const current = isPinned ? (scope ? (scope.spaceId ? "space" : "profile") : "global") : null;
+  const label = (name: string, value: string) => `${name}${current === value ? " (current)" : ""}`;
+  return {
+    id: "pin",
+    label: "Pin",
+    icon: "pin",
+    disabled: !loaded,
+    children: [
+      { id: "pin-scope:global", label: label("Global", "global") },
+      ...(owner
+        ? [{ id: "pin-scope:profile" as const, label: label(`Profile: ${owner.name}`, "profile") }]
+        : []),
+      ...(space
+        ? [{ id: "pin-scope:space" as const, label: label(`Space: ${space.name}`, "space") }]
+        : []),
+      ...(isPinned ? [{ id: "unpin" as const, label: "Unpin", separatorBefore: true }] : []),
+    ],
+  };
 }

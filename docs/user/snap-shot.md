@@ -5,12 +5,12 @@ attachment carries the app name and window title, and when available the app ico
 accessibility data (its controls, text, and their positions in the image). Agents can use that data
 to reason about the screenshot.
 
-SnapShots are off by default and available in the desktop app on macOS, Windows, and Linux with
+SnapShots are enabled by default and available in the desktop app on macOS, Windows, and Linux with
 Wayland. X11 sessions are not supported.
 
 ## Turning it on
 
-Open **Settings** > **SnapShots** and turn the feature on. Setup has two steps: allow capture, then
+Open **Settings** > **SnapShots** to complete setup. Setup has two steps: allow capture, then
 choose a shortcut. Each step shows only what your desktop needs. **Finish later** turns capture back
 off but keeps anything you already installed, so you can resume where you left off.
 

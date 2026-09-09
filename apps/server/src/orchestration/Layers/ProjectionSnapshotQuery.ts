@@ -109,7 +109,10 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 );
 const ProjectionTurnStartMessageDbRowSchema = ProjectionThreadMessageDbRowSchema.mapFields(
-  Struct.assign({ hasOtherUserMessages: Schema.Number }),
+  Struct.assign({
+    hasOtherUserMessages: Schema.Number,
+    previousUserMessageAt: Schema.NullOr(Schema.String),
+  }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
@@ -345,6 +348,21 @@ function mapLatestTurn(
   };
 }
 
+function buildForkedFrom(row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>) {
+  if (row.forkSourceThreadId === null) {
+    return {};
+  }
+  return {
+    forkedFrom: {
+      threadId: row.forkSourceThreadId,
+      messageId: row.forkSourceMessageId!,
+      turnId: row.forkSourceTurnId,
+      sequence: row.forkSourceSequence!,
+      forkedAt: row.forkForkedAt!,
+    },
+  };
+}
+
 function mapTitleRegeneration(row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>) {
   return row.titleRegenerationRequestId != null && row.titleRegenerationStartedAt != null
     ? {
@@ -501,6 +519,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_source_thread_id AS "forkSourceThreadId",
+          fork_source_message_id AS "forkSourceMessageId",
+          fork_source_turn_id AS "forkSourceTurnId",
+          fork_source_sequence AS "forkSourceSequence",
+          fork_forked_at AS "forkForkedAt",
           branch_pull_request_json AS "branchPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -541,6 +564,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_source_thread_id AS "forkSourceThreadId",
+          fork_source_message_id AS "forkSourceMessageId",
+          fork_source_turn_id AS "forkSourceTurnId",
+          fork_source_sequence AS "forkSourceSequence",
+          fork_forked_at AS "forkForkedAt",
           branch_pull_request_json AS "branchPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -583,6 +611,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_source_thread_id AS "forkSourceThreadId",
+          fork_source_message_id AS "forkSourceMessageId",
+          fork_source_turn_id AS "forkSourceTurnId",
+          fork_source_sequence AS "forkSourceSequence",
+          fork_forked_at AS "forkForkedAt",
           branch_pull_request_json AS "branchPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -1074,6 +1107,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_source_thread_id AS "forkSourceThreadId",
+          fork_source_message_id AS "forkSourceMessageId",
+          fork_source_turn_id AS "forkSourceTurnId",
+          fork_source_sequence AS "forkSourceSequence",
+          fork_forked_at AS "forkForkedAt",
           branch_pull_request_json AS "branchPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -1160,7 +1198,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               LOWER(TRIM(other.text, ${MESSAGE_TRIM_WHITESPACE})) != '/compact'
               OR COALESCE(json_array_length(other.attachments_json), 0) > 0
             )
-        ) AS "hasOtherUserMessages"
+        ) AS "hasOtherUserMessages",
+        (
+          SELECT other.created_at
+          FROM projection_thread_messages AS other
+          WHERE other.thread_id = ${threadId}
+            AND other.role = 'user'
+            AND other.message_id != ${messageId}
+            AND (
+              other.created_at < projection_thread_messages.created_at
+              OR (other.created_at = projection_thread_messages.created_at
+                AND other.rowid < projection_thread_messages.rowid)
+            )
+          ORDER BY other.created_at DESC, other.rowid DESC
+          LIMIT 1
+        ) AS "previousUserMessageAt"
       FROM projection_thread_messages
       WHERE thread_id = ${threadId} AND message_id = ${messageId}
       LIMIT 1
@@ -2075,6 +2127,7 @@ pending_approval_requests AS (
                 ...(row.linkedPullRequest === null
                   ? {}
                   : { linkedPullRequest: row.linkedPullRequest }),
+                ...buildForkedFrom(row),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2290,6 +2343,7 @@ pending_approval_requests AS (
                   ...(row.linkedPullRequest === null
                     ? {}
                     : { linkedPullRequest: row.linkedPullRequest }),
+                  ...buildForkedFrom(row),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2432,6 +2486,7 @@ pending_approval_requests AS (
                       ...(row.linkedPullRequest === null
                         ? {}
                         : { linkedPullRequest: row.linkedPullRequest }),
+                      ...buildForkedFrom(row),
                       latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                       createdAt: row.createdAt,
                       updatedAt: row.updatedAt,
@@ -2582,6 +2637,7 @@ pending_approval_requests AS (
                 ...(row.linkedPullRequest === null
                   ? {}
                   : { linkedPullRequest: row.linkedPullRequest }),
+                ...buildForkedFrom(row),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2905,6 +2961,7 @@ pending_approval_requests AS (
         ...(threadRow.value.linkedPullRequest === null
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
+        ...buildForkedFrom(threadRow.value),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -2970,6 +3027,7 @@ pending_approval_requests AS (
         ...(row.attachments !== null ? { attachments: row.attachments } : {}),
       },
       hasOtherUserMessages: row.hasOtherUserMessages === 1,
+      ...(row.previousUserMessageAt ? { previousUserMessageAt: row.previousUserMessageAt } : {}),
     }));
   });
 
@@ -3188,6 +3246,7 @@ pending_approval_requests AS (
         ...(threadRow.value.linkedPullRequest === null
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
+        ...buildForkedFrom(threadRow.value),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,

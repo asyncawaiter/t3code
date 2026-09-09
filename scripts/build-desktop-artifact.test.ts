@@ -58,6 +58,7 @@ import {
   resolveWindowsServerAsarIgnoreGlobs,
   resourceMonitorExecutableName,
   resolveGitHubPublishConfig,
+  resolveGitCommitHash,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
   resolvePackageManagerUserAgent,
@@ -131,6 +132,25 @@ function mockProcess(exitCode: number, stdout = "") {
     getOutputFd: () => Stream.empty,
   });
 }
+
+it.effect("does not label uncommitted build source as HEAD", () =>
+  Effect.gen(function* () {
+    for (const status of [" M apps/web/src/app.tsx", "?? new-feature.ts", ""]) {
+      let call = 0;
+      const hash = yield* resolveGitCommitHash("/repo").pipe(
+        Effect.provide(
+          Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.succeed(mockProcess(0, call++ === 0 ? status : "123456abcdef")),
+            ),
+          ),
+        ),
+      );
+      assert.equal(hash, status ? "unknown" : "123456abcdef");
+    }
+  }),
+);
 
 function iconResizeSpawnerLayer(
   commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>,
@@ -1832,6 +1852,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         (config.dmg as Record<string, unknown>).background,
         "dmg/dmg-background-nightly.png",
       );
+      assert.equal((config.mac as Record<string, unknown>).identity, "-");
+      assert.equal((config.mac as Record<string, unknown>).hardenedRuntime, false);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 

@@ -475,6 +475,35 @@ function makeProviderServiceLayer(
   };
 }
 
+const rewindBinding = makeProviderServiceLayer();
+rewindBinding.layer("rewind session persistence", (it) => {
+  it.effect("persists the native session changed by conversation rewind", () => {
+    const harness = rewindBinding;
+    const threadId = asThreadId("claude-rewind-binding");
+    const resumeCursor = { resume: "forked-native-session", turnCount: 1 };
+    harness.claude.rollbackThread.mockImplementation(() =>
+      Effect.sync(() => {
+        harness.claude.updateSession(threadId, (session) => ({ ...session, resumeCursor }));
+        return { threadId, turns: [] };
+      }),
+    );
+    return Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      yield* provider.startSession(threadId, {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        cwd: fixtureCwd("project"),
+        runtimeMode: "full-access",
+      });
+      yield* provider.rollbackConversation({ threadId, numTurns: 1 });
+      const repository = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository;
+      const persisted = yield* repository.getByThreadId({ threadId });
+      assert.equal(Option.isSome(persisted), true);
+      if (Option.isSome(persisted)) assert.deepEqual(persisted.value.resumeCursor, resumeCursor);
+    });
+  });
+});
 for (const [enabled, completed] of [
   [false, false],
   [true, false],
@@ -1601,6 +1630,46 @@ routing.layer("ProviderServiceLive routing", (it) => {
       }),
   );
 
+  it.effect("adds message time for every provider without altering the submitted text", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      for (const [driver, instanceId, adapter] of [
+        [CODEX_DRIVER, codexInstanceId, routing.codex],
+        [CLAUDE_AGENT_DRIVER, claudeAgentInstanceId, routing.claude],
+      ] as const) {
+        const threadId = asThreadId(`timed-${driver}`);
+        yield* provider.startSession(threadId, {
+          provider: driver,
+          providerInstanceId: instanceId,
+          threadId,
+          runtimeMode: "full-access",
+        });
+        const request = {
+          threadId,
+          input: "Continue yesterday's work",
+          messageTime: {
+            submittedAt: "2026-09-07T13:30:00.000Z",
+            previousUserMessageAt: "2026-09-06T13:30:00.000Z",
+          },
+        };
+        yield* provider.sendTurn(request);
+        const delivered = adapter.sendTurn.mock.calls.at(-1)?.[0];
+        assert.include(
+          delivered?.input ?? "",
+          "Continue yesterday's work\n\n[T3 message time context",
+        );
+        assert.include(
+          delivered?.input ?? "",
+          "Elapsed between user submissions: 1 days, 0 hours, 0 minutes, 0 seconds.",
+        );
+        assert.equal(request.input, "Continue yesterday's work");
+        yield* provider.stopSession({ threadId });
+        adapter.sendTurn.mockClear();
+        adapter.startSession.mockClear();
+      }
+    }),
+  );
+
   it.effect("allows promptless continuation only for capable providers", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
@@ -2499,49 +2568,58 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
-  it.effect("recovers stale persisted sessions for rollback by resuming thread identity", () =>
-    Effect.gen(function* () {
-      const provider = yield* ProviderService.ProviderService;
+  for (const driver of ["codex", "claude"] as const)
+    it.effect(
+      `recovers stale persisted ${driver} sessions for rollback by resuming thread identity`,
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* ProviderService.ProviderService;
+          const adapter = routing[driver];
+          const providerKind =
+            driver === "codex" ? ProviderDriverKind.make("codex") : CLAUDE_AGENT_DRIVER;
 
-      const initial = yield* provider.startSession(asThreadId("thread-1"), {
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
-        threadId: asThreadId("thread-1"),
-        cwd: fixtureCwd("project"),
-        runtimeMode: "full-access",
-      });
-      yield* routing.codex.stopSession(initial.threadId);
-      routing.codex.startSession.mockClear();
-      routing.codex.rollbackThread.mockClear();
+          const initial = yield* provider.startSession(asThreadId("thread-1"), {
+            provider: providerKind,
+            providerInstanceId: driver === "codex" ? codexInstanceId : claudeAgentInstanceId,
+            threadId: asThreadId("thread-1"),
+            cwd: fixtureCwd("project"),
+            runtimeMode: "full-access",
+          });
+          yield* adapter.stopSession(initial.threadId);
+          adapter.startSession.mockClear();
+          adapter.rollbackThread.mockClear();
 
-      yield* provider.assertConversationRollbackSupported(initial.threadId);
-      assert.equal(routing.codex.startSession.mock.calls.length, 0);
+          yield* provider.assertConversationRollbackSupported(initial.threadId);
+          assert.equal(adapter.startSession.mock.calls.length, 0);
 
-      yield* provider.rollbackConversation({
-        threadId: initial.threadId,
-        numTurns: 1,
-      });
+          yield* provider.rollbackConversation({
+            threadId: initial.threadId,
+            numTurns: 1,
+          });
 
-      assert.equal(routing.codex.startSession.mock.calls.length, 1);
-      const resumedStartInput = routing.codex.startSession.mock.calls[0]?.[0];
-      assert.equal(typeof resumedStartInput === "object" && resumedStartInput !== null, true);
-      if (resumedStartInput && typeof resumedStartInput === "object") {
-        const startPayload = resumedStartInput as {
-          provider?: string;
-          cwd?: string;
-          resumeCursor?: unknown;
-          threadId?: string;
-        };
-        assert.equal(startPayload.provider, "codex");
-        assert.equal(startPayload.cwd, fixtureCwd("project"));
-        assert.deepEqual(startPayload.resumeCursor, initial.resumeCursor);
-        assert.equal(startPayload.threadId, initial.threadId);
-      }
-      assert.equal(routing.codex.rollbackThread.mock.calls.length, 1);
-      const rollbackCall = routing.codex.rollbackThread.mock.calls[0];
-      assert.equal(rollbackCall?.[1], 1);
-    }),
-  );
+          assert.equal(adapter.startSession.mock.calls.length, 1);
+          const resumedStartInput = adapter.startSession.mock.calls[0]?.[0];
+          assert.equal(typeof resumedStartInput === "object" && resumedStartInput !== null, true);
+          if (resumedStartInput && typeof resumedStartInput === "object") {
+            const startPayload = resumedStartInput as {
+              provider?: string;
+              cwd?: string;
+              resumeCursor?: unknown;
+              threadId?: string;
+            };
+            assert.equal(startPayload.provider, providerKind);
+            assert.equal(startPayload.cwd, fixtureCwd("project"));
+            assert.deepEqual(startPayload.resumeCursor, initial.resumeCursor);
+            assert.equal(startPayload.threadId, initial.threadId);
+          }
+          assert.equal(adapter.rollbackThread.mock.calls.length, 1);
+          const rollbackCall = adapter.rollbackThread.mock.calls[0];
+          assert.equal(rollbackCall?.[1], 1);
+          yield* provider.stopSession({ threadId: initial.threadId });
+          adapter.startSession.mockClear();
+          adapter.rollbackThread.mockClear();
+        }),
+    );
 
   it.effect("preserves the persisted binding when stopping a session", () =>
     Effect.gen(function* () {

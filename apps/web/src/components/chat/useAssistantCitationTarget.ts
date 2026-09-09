@@ -1,5 +1,5 @@
 import type { LegendListRef } from "@legendapp/list/react";
-import type { TurnId } from "@t3tools/contracts";
+import type { MessageId, TurnId } from "@t3tools/contracts";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { TimelineEntry } from "../../session-logic";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
@@ -10,6 +10,82 @@ export interface CitationHistoryPage {
   readonly loading: boolean;
   readonly cursor?: string | null;
   readonly onLoadEarlier: () => void;
+}
+
+/** The fork seam link's target — bundles the message id with a `key` (mirrors
+ * `AssistantCitationRequest`) so re-clicking the same seam re-scrolls. */
+export interface AssistantMessageScrollTarget {
+  messageId: MessageId;
+  key: string;
+}
+
+/**
+ * Scroll to a bare message id (the fork seam link) — no quote to highlight,
+ * so this skips the citation hook's range-resolution and pulse animation and
+ * just pages older history in, expands a collapsed turn fold if needed, and
+ * scrolls the row into view once it is loaded.
+ */
+export function useAssistantMessageScrollTarget({
+  target,
+  entries,
+  rows,
+  listRef,
+  historyLoading,
+  loadEarlier,
+  onExpandTurn,
+}: {
+  target: AssistantMessageScrollTarget | null;
+  entries: ReadonlyArray<TimelineEntry>;
+  rows: ReadonlyArray<MessagesTimelineRow>;
+  listRef: RefObject<LegendListRef | null>;
+  historyLoading: boolean;
+  loadEarlier: CitationHistoryPage | null;
+  onExpandTurn: (turnId: TurnId) => void;
+}) {
+  const requestedPagesRef = useRef<Set<string>>(new Set());
+  const doneKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (target === null) {
+      requestedPagesRef.current = new Set();
+      doneKeyRef.current = null;
+      return;
+    }
+    const { messageId, key } = target;
+    if (doneKeyRef.current === key || historyLoading) return;
+
+    const rowIndex = rows.findIndex(
+      (row) => row.kind === "message" && row.message.id === messageId,
+    );
+    if (rowIndex >= 0) {
+      doneKeyRef.current = key;
+      void listRef.current?.scrollToIndex({ index: rowIndex, animated: true, viewOffset: 24 });
+      return;
+    }
+
+    const source = entries.find(
+      (entry) => entry.kind === "message" && entry.message.id === messageId,
+    );
+    if (source && source.kind === "message" && source.message.turnId) {
+      // Present but folded — expand and let the next pass find the row.
+      onExpandTurn(source.message.turnId);
+      return;
+    }
+
+    if (!loadEarlier || loadEarlier.loading) return;
+    const cursor = loadEarlier.cursor ?? entries[0]?.id ?? "first";
+    if (requestedPagesRef.current.has(cursor) || requestedPagesRef.current.size >= 20) {
+      doneKeyRef.current = key;
+      toastManager.add({
+        type: "warning",
+        title: "Could not find the source message",
+        description: "Load earlier turns, then click the link to try again.",
+      });
+      return;
+    }
+    requestedPagesRef.current.add(cursor);
+    loadEarlier.onLoadEarlier();
+  }, [entries, historyLoading, listRef, loadEarlier, target, onExpandTurn, rows]);
 }
 
 /** Fetch, unfold, and mount the source before its measured quote owns scrolling. */

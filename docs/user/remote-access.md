@@ -63,9 +63,10 @@ another link to share.
 
 ### Balance new threads across machines
 
-Auto balance is off by default. On web and desktop, enable it in
-**Settings → Connections → Load balancing** to automatically choose a machine for
-new threads in projects grouped across connected environments.
+Auto balance is on by default on web and desktop for new threads in projects
+grouped across connected environments. Adjust it in
+**Settings → Connections → Load balancing**. Automatic choices stay within the
+project's profile. Space shortcuts and explicit machine choices keep their selected machine.
 Each machine starts at **Normal**. Choose **Prefer** to favor it when it has CPU and
 memory available, **Less often** to reduce its share, or **Manual only** to exclude
 it from automatic selection. These are preferences, not fixed traffic percentages.
@@ -75,7 +76,8 @@ The composer checks eligible machines when choosing a draft's environment, then 
 that choice stable. Choose **Auto balance** again to check current resources, or choose
 a specific machine to override it. Choosing a branch or worktree also keeps the draft
 on that machine. Existing threads stay where they started. If resource checks are
-unavailable or all eligible machines are full, choose a machine manually to continue.
+unavailable or all eligible machines are full, the default keeps the current machine.
+If you explicitly choose Auto balance, choose a machine manually to continue.
 Mobile keeps its manual environment selection.
 
 ### Tailscale HTTPS
@@ -111,6 +113,17 @@ If that port is already in use, choose another with
 [app.t3.codes](https://app.t3.codes) needs an HTTPS endpoint. It connects directly
 to your server; a hosted pairing link does not make an unreachable backend
 reachable or convert HTTP to HTTPS.
+
+Antigravity runs and saves its Google credentials on the selected environment. You can install
+it and sign in from a remote web, desktop, or mobile client without an SSH login.
+
+Start in **Settings** > **Providers** on web or desktop. On mobile, open **Settings** >
+**Environments**, expand the environment, then choose **Set up Antigravity**.
+
+After Google sign-in, a remote browser usually reaches a `127.0.0.1` page that cannot load.
+Copy that full address into the return URL field in the same T3 Code client. Choose
+**Continue** on web or desktop, or **Complete sign-in** on mobile. Keep the address unchanged.
+Do not paste the return URL into a thread or bug report.
 
 For a plain HTTP LAN endpoint, use the direct pairing URL in a browser that can
 open it, or pair from the desktop app. On mobile, an IP address entered without a

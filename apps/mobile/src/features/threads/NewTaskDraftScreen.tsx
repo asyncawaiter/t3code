@@ -1,3 +1,4 @@
+import { NewTaskOrganization, useTaskOrganization } from "./NewTaskOrganization";
 import { useAtomValue } from "@effect/atom-react";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import {
@@ -153,6 +154,7 @@ export function NewTaskDraftScreen(props: {
 }) {
   const projects = useProjects();
   const flow = useNewTaskFlow();
+  const taskOrganization = useTaskOrganization();
   const navigation = useNavigation();
   const {
     consumeShare,
@@ -280,6 +282,7 @@ export function NewTaskDraftScreen(props: {
   const [isCancellingShareImport, setIsCancellingShareImport] = useState(false);
   const [cancelledIncomingShareId, setCancelledIncomingShareId] = useState<string | null>(null);
   const [isReturningToProjectPicker, setIsReturningToProjectPicker] = useState(false);
+  const submitInFlight = useRef(false);
   const [submitNavigationAction, setSubmitNavigationAction] = useState<NavigationAction | null>(
     null,
   );
@@ -963,6 +966,7 @@ export function NewTaskDraftScreen(props: {
       !modelSelection ||
       initialMessageText.length === 0 ||
       flow.submitting ||
+      submitInFlight.current ||
       (workspaceMode === "worktree" && !selectedBranchName)
     ) {
       return;
@@ -973,7 +977,7 @@ export function NewTaskDraftScreen(props: {
     ) {
       Alert.alert(
         "Antigravity model unavailable",
-        "Set up Antigravity on web or desktop, or choose another model.",
+        "Set up Antigravity from this connection's Provider setup, or choose another model.",
       );
       return;
     }
@@ -1027,54 +1031,70 @@ export function NewTaskDraftScreen(props: {
     if (!message) {
       return;
     }
-    if (!queuesInsteadOfStarting) {
-      // Arm the lock-screen card before the async thread creation: backgrounding
-      // the app right after tapping submit would otherwise reject the foreground
-      // -only Activity start. If creation fails, the token registration's replay
-      // finds no work and ends the card within seconds.
-      armAgentAwarenessLiveActivityForLocalWork({
-        environmentId: selectedProject.environmentId,
-        threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
-        projectTitle: selectedProject.title,
-      });
-    }
-    // Persist before clearing the draft or leaving its editor. This only waits
-    // for the local outbox write; server and worktree setup run on the thread.
+    submitInFlight.current = true;
     flow.setSubmitting(true);
     try {
-      await enqueueThreadOutboxMessage(message);
-    } catch (error) {
-      Alert.alert(
-        "Could not queue task",
-        error instanceof Error ? error.message : "The task could not be saved to the outbox.",
+      try {
+        if (!(await taskOrganization.prepare(message))) return;
+      } catch (error) {
+        Alert.alert(
+          "Could not set chat location",
+          error instanceof Error ? error.message : "Please retry.",
+        );
+        return;
+      }
+      if (!queuesInsteadOfStarting) {
+        // Arm the lock-screen card before the async thread creation: backgrounding
+        // the app right after tapping submit would otherwise reject the foreground
+        // -only Activity start. If creation fails, the token registration's replay
+        // finds no work and ends the card within seconds.
+        armAgentAwarenessLiveActivityForLocalWork({
+          environmentId: selectedProject.environmentId,
+          threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
+          projectTitle: selectedProject.title,
+        });
+      }
+      // Persist before clearing the draft or leaving its editor. This only waits
+      // for the local outbox write; server and worktree setup run on the thread.
+      flow.setSubmitting(true);
+      try {
+        await enqueueThreadOutboxMessage(message);
+      } catch (error) {
+        Alert.alert(
+          "Could not queue task",
+          error instanceof Error ? error.message : "The task could not be saved to the outbox.",
+        );
+        return;
+      } finally {
+        flow.setSubmitting(false);
+      }
+      const draftSnapshot = getComposerDraftSnapshot(draftKey);
+      if (editingPendingTask) {
+        flow.finishEditingPendingTask();
+      } else {
+        // Drop draft-local model/workspace selections with the content. The
+        // next task re-resolves project defaults before sticky app defaults.
+        // The queued message owns the attachments now, so the sweep is deferred
+        // until the write confirms it.
+        clearComposerDraftContent(draftKey, {
+          clearModelSelection: true,
+          clearWorkspaceSelection: true,
+          deferAttachmentCleanup: true,
+        });
+      }
+      setSubmitNavigationAction(
+        queuesInsteadOfStarting
+          ? CommonActions.goBack()
+          : StackActions.replace("Thread", {
+              environmentId: String(message.environmentId),
+              threadId: String(message.threadId),
+            }),
       );
-      return;
+      scheduleUnusedComposerAttachmentCleanup(draftSnapshot.attachments);
     } finally {
+      submitInFlight.current = false;
       flow.setSubmitting(false);
     }
-    const draftSnapshot = getComposerDraftSnapshot(draftKey);
-    if (editingPendingTask) {
-      flow.finishEditingPendingTask();
-    } else {
-      // Drop draft-local model/workspace selections with the content. The
-      // next task re-resolves project defaults before sticky app defaults.
-      // The queued message owns the attachments now, so the sweep is deferred
-      // until the write confirms it.
-      clearComposerDraftContent(draftKey, {
-        clearModelSelection: true,
-        clearWorkspaceSelection: true,
-        deferAttachmentCleanup: true,
-      });
-    }
-    setSubmitNavigationAction(
-      queuesInsteadOfStarting
-        ? CommonActions.goBack()
-        : StackActions.replace("Thread", {
-            environmentId: String(message.environmentId),
-            threadId: String(message.threadId),
-          }),
-    );
-    scheduleUnusedComposerAttachmentCleanup(draftSnapshot.attachments);
   }
 
   if (!selectedProject) {
@@ -1221,6 +1241,7 @@ export function NewTaskDraftScreen(props: {
         style={{ flex: 1 }}
         testID="new-task-hero-scroll"
       >
+        <NewTaskOrganization />
         {hero}
       </ScrollView>
     </View>

@@ -2,13 +2,15 @@ import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
   GitPullRequestIcon,
+  LayoutDashboardIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useCallback } from "react";
+import { lazy, memo, Suspense, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { T3Wordmark } from "../T3Wordmark";
@@ -33,6 +35,18 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
+import { ProfileSyncStatus } from "./ProfileSyncStatus";
+
+const T3ConnectSidebarSignIn = lazy(() =>
+  import("../clerk/T3ConnectSidebarSignIn").then((module) => ({
+    default: module.T3ConnectSidebarSignIn,
+  })),
+);
+const T3ConnectSidebarAvatar = lazy(() =>
+  import("../clerk/T3ConnectSidebarSignIn").then((module) => ({
+    default: module.T3ConnectSidebarAvatar,
+  })),
+);
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -145,7 +159,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             ? "usage"
             : location.pathname === "/pull-requests"
               ? "pull-requests"
-              : null,
+              : location.pathname === "/dashboard"
+                ? "dashboard"
+                : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -168,6 +184,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/settings" });
+  }, [closeMobileSidebar, navigate]);
+
+  const handleDashboardClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/dashboard" });
   }, [closeMobileSidebar, navigate]);
 
   const handleUsageClick = useCallback(() => {
@@ -198,6 +219,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       ) : (
         <>
           <SidebarUtilityItem
+            icon={<LayoutDashboardIcon />}
+            label="Dashboard"
+            onClick={handleDashboardClick}
+          />
+          <SidebarUtilityItem
             icon={<SettingsIcon />}
             label="Settings"
             onClick={handleSettingsClick}
@@ -226,7 +252,22 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarUtilityMenu />
+      <ProfileSyncStatus />
+      {hasCloudPublicConfig() ? (
+        <Suspense fallback={null}>
+          <T3ConnectSidebarSignIn />
+        </Suspense>
+      ) : null}
+      <div className="flex items-center gap-1">
+        <div className="min-w-0 flex-1">
+          <SidebarUtilityMenu />
+        </div>
+        {hasCloudPublicConfig() ? (
+          <Suspense fallback={null}>
+            <T3ConnectSidebarAvatar />
+          </Suspense>
+        ) : null}
+      </div>
     </SidebarFooter>
   );
 });

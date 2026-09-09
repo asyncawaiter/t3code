@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./threadActionMenu.logic";
+import {
+  buildThreadPinMenu,
+  buildThreadActionMenuItems,
+  type ThreadActionMenuState,
+} from "./threadActionMenu.logic";
 
 const baseState: ThreadActionMenuState = {
   branch: null,
@@ -106,4 +110,49 @@ describe("buildThreadActionMenuItems", () => {
     );
     expect(archiveItem?.disabled).toBe(true);
   });
+});
+
+it("offers one pin menu with only the owning profile and assigned space", () => {
+  const profiles = [
+    {
+      id: "work",
+      name: "Work",
+      color: "blue" as const,
+      projectKeys: ["env:project"],
+      spaces: [
+        {
+          id: "build",
+          name: "Build",
+          threads: [{ threadKey: "env:thread", projectKey: "env:project" }],
+        },
+        { id: "ideas", name: "Ideas", threads: [] },
+      ],
+    },
+  ];
+  const args = {
+    profiles,
+    threadKey: "env:thread",
+    projectKey: "env:project",
+    isPinned: false,
+    loaded: true,
+  };
+  const menu = buildThreadPinMenu(args);
+  expect(menu.children?.map((item) => item.label)).toEqual([
+    "Global",
+    "Profile: Work",
+    "Space: Build",
+  ]);
+  const items = buildThreadActionMenuItems({ ...baseState, pinMenu: menu });
+  expect(items.filter((item) => item.id === "pin" || item.id === "unpin")).toEqual([menu]);
+  expect(
+    buildThreadPinMenu({ ...args, threadKey: "env:outside" }).children?.map((item) => item.label),
+  ).toEqual(["Global", "Profile: Work"]);
+  expect(
+    buildThreadPinMenu({ ...args, projectKey: "env:unassigned" }).children?.map(
+      (item) => item.label,
+    ),
+  ).toEqual(["Global"]);
+  expect(
+    buildThreadPinMenu({ ...args, isPinned: true }).children?.map((item) => item.label),
+  ).toEqual(["Global (current)", "Profile: Work", "Space: Build", "Unpin"]);
 });

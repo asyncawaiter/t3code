@@ -1,12 +1,13 @@
+import { useAtomValue } from "@effect/atom-react";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 import { useNavigation } from "@react-navigation/native";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform, useWindowDimensions } from "react-native";
 
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
-import { useProjects, useThreadShells } from "../../state/entities";
-import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
+import { useProfileThreads, profileRevealAtom, profileSelectionAtom } from "../../state/profiles";
+import { appAtomRegistry } from "../../state/atom-registry";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
@@ -28,13 +29,19 @@ import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle
 export function HomeRouteScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const { layout } = useAdaptiveWorkspaceLayout();
-  const projects = useProjects();
-  const threads = useThreadShells();
+  const { projects, threads, pendingTasks } = useProfileThreads();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
   const [searchQuery, setSearchQuery] = useState("");
-  const handleSelectThread = useHomeThreadSelection();
+  const openThread = useHomeThreadSelection();
+  const handleSelectThread = useCallback(
+    (thread: Parameters<typeof openThread>[0]) => {
+      appAtomRegistry.set(profileRevealAtom, null);
+      openThread(thread);
+    },
+    [openThread],
+  );
 
   useEffect(() => {
     void checkForAppUpdateOnLaunch();
@@ -53,7 +60,6 @@ export function HomeRouteScreen() {
     regenerateThreadTitle,
     unsettleThread,
   } = useThreadListActions();
-  const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(() => {
     const connectionStateByEnvironmentId = new Map(
@@ -83,6 +89,13 @@ export function HomeRouteScreen() {
   } = useHomeListOptions(availableEnvironmentIds);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
+  const reveal = useAtomValue(profileRevealAtom);
+  const selection = useAtomValue(profileSelectionAtom);
+  useEffect(() => {
+    setSearchQuery("");
+    setSelectedProjectKey(null);
+    setSelectedEnvironmentId(null);
+  }, [reveal, selection, setSelectedEnvironmentId]);
   const projectFilterOptions = useMemo(
     () =>
       buildHomeProjectScopes({

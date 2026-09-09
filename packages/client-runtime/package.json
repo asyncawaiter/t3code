@@ -103,6 +103,10 @@
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"
     },
+    "./state/dashboard": {
+      "types": "./src/state/dashboard.ts",
+      "default": "./src/state/dashboard.ts"
+    },
     "./state/connections": {
       "types": "./src/state/connections.ts",
       "default": "./src/state/connections.ts"
@@ -174,6 +178,10 @@
     "./state/session": {
       "types": "./src/state/session.ts",
       "default": "./src/state/session.ts"
+    },
+    "./state/profiles": {
+      "types": "./src/state/profileSync.ts",
+      "default": "./src/state/profileSync.ts"
     },
     "./state/shared-settings": {
       "types": "./src/state/sharedSettings.ts",

@@ -136,9 +136,9 @@ describe("ClaudeSettings auto-compaction", () => {
 });
 
 describe("ClientSettings load balancing", () => {
-  it("requires opt-in when settings are new or omit load balancing", () => {
-    expect(decodeClientSettings({}).loadBalancingEnabled).toBe(false);
-    expect(decodeClientSettings({ loadBalancingWeights: {} }).loadBalancingEnabled).toBe(false);
+  it("enables load balancing when settings are new or omit it", () => {
+    expect(decodeClientSettings({}).loadBalancingEnabled).toBe(true);
+    expect(decodeClientSettings({ loadBalancingWeights: {} }).loadBalancingEnabled).toBe(true);
   });
 
   it.each([true, false])("preserves a saved choice of %s", (loadBalancingEnabled) => {
@@ -168,10 +168,10 @@ describe("ClientSettings word wrap", () => {
 });
 
 describe("ClientSettings window capture", () => {
-  it("defaults capture off while keeping its feedback enabled", () => {
+  it("defaults capture and its feedback on", () => {
     const settings = decodeClientSettings({});
 
-    expect(settings.snapShotEnabled).toBe(false);
+    expect(settings.snapShotEnabled).toBe(true);
     expect(settings.snapShotIncludeAccessibility).toBe(true);
     expect(settings.snapShotShortcut).toEqual({ kind: "both-shift-keys" });
     expect(settings.snapShotPlaySound).toBe(true);
@@ -471,6 +471,18 @@ describe("ClientSettings pull request merge methods", () => {
         pullRequestMergeMethodOverrides: { project: "fast-forward" },
       }),
     ).toThrow();
+  });
+});
+
+describe("ServerSettings.profiles", () => {
+  it("defaults to an empty array", () => {
+    expect(decodeServerSettings({}).profiles).toEqual([]);
+  });
+
+  it("round-trips a valid profiles array", () => {
+    const profiles = [{ id: "work", name: "Work", color: "blue", projectKeys: ["env-1:proj-1"] }];
+    expect(decodeServerSettings({ profiles }).profiles).toEqual(profiles);
+    expect(decodeServerSettingsPatch({ profiles }).profiles).toEqual(profiles);
   });
 });
 

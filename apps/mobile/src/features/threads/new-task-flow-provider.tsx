@@ -1,4 +1,6 @@
+import { OUTSIDE_SPACES } from "@t3tools/client-runtime/state/profiles";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { profileSelectionAtom, profileSourceAtom } from "../../state/profiles";
 
 import type {
   EnvironmentId,
@@ -11,6 +13,8 @@ import type {
 } from "@t3tools/contracts";
 import {
   CommandId,
+  profileForProject,
+  spaceForThread,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   MessageId,
@@ -136,6 +140,11 @@ export function branchBadgeLabel(input: {
 }
 
 type NewTaskFlowContextValue = {
+  readonly organization: { profileId: string | null; spaceId: string | null };
+  readonly setOrganization: (selection: {
+    profileId: string | null;
+    spaceId: string | null;
+  }) => void;
   readonly projectScopes: ReadonlyArray<HomeProjectScope>;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
@@ -218,6 +227,7 @@ type NewTaskFlowContextValue = {
 const NewTaskFlowContext = React.createContext<NewTaskFlowContextValue | null>(null);
 
 export function NewTaskFlowProvider(props: React.PropsWithChildren) {
+  const [organization, setOrganization] = useState(() => appAtomRegistry.get(profileSelectionAtom));
   const projects = useProjects();
   const threads = useThreadShells();
   const { savedConnectionsById } = useSavedRemoteConnections();
@@ -264,6 +274,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const editingRevisionRef = useRef(Promise.resolve(0));
 
   const reset = useCallback(() => {
+    setOrganization(appAtomRegistry.get(profileSelectionAtom));
     setSelectedEnvironmentId(null);
     setSelectedProjectKey(null);
     setActiveDraftKey(null);
@@ -661,6 +672,39 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     );
   }, [availableBranches, branchQuery]);
 
+  const appliedShortcuts = useRef(new Set<string>());
+  useEffect(() => {
+    if (!selectedProject || !selectedProjectDraftKey || editingPendingTask) return;
+    const profile = appAtomRegistry
+      .get(profileSourceAtom)
+      .profiles.find((item) => item.id === organization.profileId);
+    const defaults = profile?.spaces?.find(
+      (item) => item.id === organization.spaceId,
+    )?.newChatDefaults;
+    const key = `${organization.spaceId}:${selectedProjectDraftKey}`;
+    if (
+      !defaults ||
+      defaults.projectKey !== `${selectedProject.environmentId}:${selectedProject.id}` ||
+      appliedShortcuts.current.has(key)
+    )
+      return;
+    appliedShortcuts.current.add(key);
+    if (!isComposerDraftEmpty(getComposerDraftSnapshot(selectedProjectDraftKey))) return;
+    updateComposerDraftSettings(selectedProjectDraftKey, {
+      ...(defaults.modelSelection ? { modelSelection: defaults.modelSelection } : {}),
+      ...(defaults.envMode
+        ? {
+            workspaceSelection: {
+              mode: defaults.envMode,
+              branch: null,
+              worktreePath: null,
+              startFromOrigin: false,
+            },
+          }
+        : {}),
+    });
+  }, [selectedProject, selectedProjectDraftKey, editingPendingTask, organization]);
+
   // The composer's draft follows the project it will be sent to: switching
   // mid-compose keeps the same draft and moves it, so typed text follows the
   // user. A pending-task edit owns its own key and is untouched here.
@@ -894,6 +938,16 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     if (!message?.creation) {
       return false;
     }
+    const profiles = appAtomRegistry.get(profileSourceAtom).profiles;
+    const projectKey = `${message.environmentId}:${message.creation.projectId}`;
+    const profile = profileForProject(profiles, projectKey);
+    setOrganization({
+      profileId: profile?.id ?? null,
+      spaceId: profile
+        ? (spaceForThread(profile, `${message.environmentId}:${message.threadId}`, projectKey)
+            ?.id ?? OUTSIDE_SPACES)
+        : null,
+    });
     const draftKey = pendingTaskDraftKey(message.messageId);
     // Only hydrate a fresh editing draft; reopening mid-edit keeps newer edits.
     if (isComposerDraftEmpty(getComposerDraftSnapshot(draftKey))) {
@@ -1130,6 +1184,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       editingPendingTask,
       prompt,
       attachments,
+      organization,
+      setOrganization,
       submitting,
       branchQuery,
       branchesLoading,
@@ -1178,6 +1234,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     }),
     [
       attachments,
+      organization,
       availableBranches,
       beginEditingPendingTask,
       branchQuery,

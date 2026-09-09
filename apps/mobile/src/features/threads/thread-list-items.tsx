@@ -1,3 +1,4 @@
+import { useThreadOrganization } from "../home/useThreadOrganization";
 import { useRecyclingState } from "@legendapp/list/react-native";
 import type {
   EnvironmentProject,
@@ -485,6 +486,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     onRegenerateThreadTitle,
     onNewThreadOnBranch,
   } = props;
+  const organization = useThreadOrganization(thread);
   const status = resolveThreadStatus(thread);
   const pr = useThreadPr(thread);
   const timestamp = relativeTime(
@@ -750,8 +752,10 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
         // ControlPillMenu injects onLongPress into the row and anchors the
         // token-styled dropdown to it; taps and swipes are untouched.
         <ControlPillMenu
-          actions={menuActions}
-          onPressAction={handleMenuAction}
+          actions={[...menuActions, ...organization.actions]}
+          onPressAction={(event) => {
+            if (!organization.handle(event.nativeEvent.event)) handleMenuAction(event);
+          }}
           shouldOpenOnLongPress
         >
           {rowContent(close)}

@@ -19,6 +19,7 @@ const testState = vi.hoisted(() => {
     }),
   };
   const draftStore = {
+    draftThreadsByThreadKey: {},
     getComposerDraft: vi.fn(() => ({})),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
     getDraftSession: vi.fn(() => null),
@@ -70,10 +71,17 @@ vi.mock("@t3tools/client-runtime/environment", () => ({
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
-vi.mock("@t3tools/contracts", () => ({
+vi.mock("@t3tools/contracts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/contracts")>()),
   DEFAULT_RUNTIME_MODE: "default",
   DEFAULT_SERVER_SETTINGS: {},
 }));
+vi.mock("../rpc/atomRegistry", () => ({
+  appAtomRegistry: { get: () => ({ profiles: [] }) },
+}));
+vi.mock("./useChatCreation", () => ({ useSaveProfiles: () => vi.fn() }));
+vi.mock("../lib/chatCreation", () => ({ draftMatchesChatLocation: () => true }));
+vi.mock("../chatCreationStore", () => ({ revealChatLocation: vi.fn() }));
 vi.mock("@t3tools/shared/threadEnvMode", () => ({
   resolveDefaultThreadEnvMode: (input: {
     readonly projectFile: "local" | "worktree" | null;
@@ -137,7 +145,7 @@ vi.mock("../state/server", () => ({
 vi.mock("../threadRoutes", () => ({ resolveThreadRouteTarget: () => null }));
 vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
-  useUiStateStore: () => [],
+  useUiStateStore: Object.assign(() => [], { getState: () => ({}) }),
 }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 

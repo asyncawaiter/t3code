@@ -21,6 +21,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import {
   MENU_ACTION_CHANNEL,
   QUIT_SHORTCUT_CHANNEL,
+  SCROLL_GESTURE_CHANNEL,
   SNAP_SHOT_EVENT_CHANNEL,
   WINDOW_FULLSCREEN_STATE_CHANNEL,
 } from "../ipc/channels.ts";
@@ -656,6 +657,14 @@ export const make = Effect.gen(function* () {
     });
 
     if (environment.platform === "darwin") {
+      // Forward boundaries only; high-frequency wheel deltas stay in the renderer.
+      window.webContents.on("input-event", (_event, input) => {
+        if (input.type === "gestureScrollBegin") {
+          window.webContents.send(SCROLL_GESTURE_CHANNEL, "begin");
+        } else if (input.type === "gestureScrollEnd") {
+          window.webContents.send(SCROLL_GESTURE_CHANNEL, "end");
+        }
+      });
       window.on("enter-full-screen", () => {
         window.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, true);
       });

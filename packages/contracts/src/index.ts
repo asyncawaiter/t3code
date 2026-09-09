@@ -34,8 +34,12 @@ export * from "./assets.ts";
 export * from "./review.ts";
 export * from "./browserImport.ts";
 export * from "./browserProfile.ts";
+export * from "./profile.ts";
 export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
+export * from "./usageLimits.ts";
 export * from "./rpc.ts";
+
+export * from "./threadRewind.ts";

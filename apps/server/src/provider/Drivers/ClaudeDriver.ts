@@ -22,6 +22,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
@@ -29,6 +30,10 @@ import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
+import {
+  claudeAccountUsageSnapshot,
+  makeClaudeAccountLimitsReader,
+} from "../Layers/claudeAccountLimits.ts";
 import { makeClaudeAdapter } from "../Layers/ClaudeAdapter.ts";
 import { makeClaudeScopedLimitNames } from "../Layers/claudeUsageLimits.ts";
 import {
@@ -151,6 +156,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
         environment: processEnv,
         modelCatalog,
+        accountLimits: makeClaudeAccountLimitsReader({
+          settings: effectiveConfig,
+          environment: processEnv,
+          fileSystem,
+          path,
+          httpClient,
+          spawner,
+          platform: yield* HostProcessPlatform,
+        }),
         scopedLimitNames,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       };
@@ -186,6 +200,23 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
                 cwd,
                 resolveClaudeModelCatalog(manifest),
                 scopedLimitNames,
+              ).pipe(
+                Effect.flatMap((status) =>
+                  status.auth.status === "authenticated" &&
+                  status.usageLimits?.unavailable?.reason === "probeFailed"
+                    ? adapterOptions.accountLimits.pipe(
+                        Effect.orElseSucceed(() => null),
+                        Effect.map((limits) =>
+                          limits?.windows.length
+                            ? {
+                                ...status,
+                                usageLimits: claudeAccountUsageSnapshot(limits, status.checkedAt),
+                              }
+                            : status,
+                        ),
+                      )
+                    : Effect.succeed(status),
+                ),
               ),
             ),
             Effect.map(stampIdentity),

@@ -52,7 +52,9 @@ import {
   useComposerDraft,
 } from "./use-composer-drafts";
 import { setPendingConnectionError } from "../state/use-remote-environment-registry";
-import { useSelectedThreadDetail } from "../state/use-thread-detail";
+import { useSelectedThreadDetailState } from "../state/use-thread-detail";
+import { threadHasOlderTurns } from "@t3tools/client-runtime/state/threads";
+import * as Option from "effect/Option";
 import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { dispatchingQueuedMessageIdAtom, useThreadOutboxMessages } from "./use-thread-outbox";
@@ -107,7 +109,8 @@ export function useThreadComposerState() {
     selectedThreadCreation,
     selectedEnvironmentRuntime,
   } = useThreadSelection();
-  const selectedThreadDetail = useSelectedThreadDetail();
+  const selectedThreadDetailState = useSelectedThreadDetailState();
+  const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const acknowledgedMessages = useAtomValue(acknowledgedThreadMessagesAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
@@ -153,6 +156,8 @@ export function useThreadComposerState() {
   );
   const selectedThreadMessages = selectedThreadDetail?.messages;
   const selectedThreadActivities = selectedThreadDetail?.activities;
+  const selectedThreadForkOrigin = selectedThreadDetail?.forkedFrom;
+  const hasOlderTurns = threadHasOlderTurns(selectedThreadDetailState);
   // A thread whose creation has not delivered its turn yet: the prompt only
   // exists in the outbox, so it is appended to whatever the server has. The
   // detail is usually present but empty during a worktree checkout, so this
@@ -162,14 +167,20 @@ export function useThreadComposerState() {
     const loadedMessages = selectedThreadMessages ?? [];
     const feed =
       (selectedThreadMessages && selectedThreadActivities) || pendingCreationMessage !== null
-        ? buildThreadFeed({
-            messages:
-              pendingCreationMessage !== null &&
-              !loadedMessages.some((message) => message.id === pendingCreationMessage.messageId)
-                ? [...loadedMessages, pendingThreadCreationMessage(pendingCreationMessage)]
-                : loadedMessages,
-            activities: selectedThreadActivities ?? [],
-          })
+        ? buildThreadFeed(
+            {
+              messages:
+                pendingCreationMessage !== null &&
+                !loadedMessages.some((message) => message.id === pendingCreationMessage.messageId)
+                  ? [...loadedMessages, pendingThreadCreationMessage(pendingCreationMessage)]
+                  : loadedMessages,
+              activities: selectedThreadActivities ?? [],
+              forkedFrom: selectedThreadForkOrigin,
+            },
+            {
+              hasOlderTurns,
+            },
+          )
         : [];
     const pendingAcknowledgments = acknowledgedMessages.filter(
       (message) =>
@@ -183,6 +194,8 @@ export function useThreadComposerState() {
   }, [
     selectedThreadActivities,
     selectedThreadMessages,
+    selectedThreadForkOrigin,
+    hasOlderTurns,
     pendingCreationMessage,
     selectedThreadKey,
     selectedThreadQueuedMessages,
@@ -334,7 +347,7 @@ export function useThreadComposerState() {
     ) {
       Alert.alert(
         "Antigravity model unavailable",
-        "Set up Antigravity on web or desktop, or choose another model.",
+        "Set up Antigravity from this connection's Provider setup, or choose another model.",
       );
       return null;
     }

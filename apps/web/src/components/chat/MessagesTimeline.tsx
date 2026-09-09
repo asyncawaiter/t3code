@@ -1,3 +1,4 @@
+import { PencilIcon } from "lucide-react";
 import {
   type AssistantCitation,
   type EnvironmentId,
@@ -7,7 +8,7 @@ import {
   type ToolActivityIcon,
   type TurnId,
 } from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import {
   resolveWorkEntryToolPresentation,
@@ -25,6 +26,7 @@ const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
+const NOOP_FORK_FROM_MESSAGE = (_messageId: MessageId) => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
@@ -51,6 +53,7 @@ import {
   type LegendListRef,
   type MaintainScrollAtEndOptions,
 } from "@legendapp/list/react";
+import { Link } from "@tanstack/react-router";
 import { FileDiff } from "@pierre/diffs/react";
 import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
 import {
@@ -61,6 +64,7 @@ import {
   workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
 } from "../../session-logic";
+import { assistantMessageNavigation } from "~/lib/assistantMessageNavigation";
 import {
   type ChatMessage,
   type ChatFileAttachment,
@@ -89,6 +93,7 @@ import {
   CircleAlertIcon,
   DownloadIcon,
   EyeIcon,
+  GitForkIcon,
   GlobeIcon,
   HammerIcon,
   MessageCircleIcon,
@@ -104,6 +109,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
@@ -131,13 +137,19 @@ import {
   type AssistantCitationRequest,
   type AssistantCitationTarget,
 } from "./AssistantCitationSource";
-import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
+import {
+  useAssistantCitationTarget,
+  useAssistantMessageScrollTarget,
+  type AssistantMessageScrollTarget,
+  type CitationHistoryPage,
+} from "./useAssistantCitationTarget";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
   resolveAssistantMessageCopyState,
+  resolveRunningTurnForkMessageId,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapCurrentIndex,
@@ -209,6 +221,8 @@ interface TimelineRowSharedState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
+  editableMessageId?: MessageId | null;
+  onEditUserMessage?: (messageId: MessageId) => void;
   onRevertToTurnCount: (targetTurnCount: number) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -221,6 +235,7 @@ interface TimelineRowSharedState {
   workGroupViewState: WorkGroupViewState;
   agentPanelModel: AgentPanelModel;
   onOpenAgents: () => void;
+  onForkFromMessage: (messageId: MessageId) => void;
 }
 
 interface TimelineRowActivityState {
@@ -229,6 +244,8 @@ interface TimelineRowActivityState {
   isCompacting: boolean;
   isRevertingCheckpoint: boolean;
   latestTurnId: TurnId | null;
+  /** Assistant message "Fork in a new tab" would target from the running turn's working row, if any. */
+  forkSourceMessageId: MessageId | null;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -320,6 +337,9 @@ interface MessagesTimelineProps {
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  editableMessageId?: MessageId | null;
+  onEditUserMessage?: (messageId: MessageId) => void;
+  onForkFromMessage?: (messageId: MessageId) => void;
   supportsConversationRollback: boolean;
   onRevertToTurnCount: (targetTurnCount: number) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
@@ -355,6 +375,8 @@ interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: CitationHistoryPage | null;
+  /** The fork seam link's target — scrolls to this message once it loads. */
+  messageScrollTarget?: AssistantMessageScrollTarget | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +400,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   turnDiffSummaries,
   routeThreadKey,
   onOpenTurnDiff,
+  editableMessageId = null,
+  onEditUserMessage = NOOP_FORK_FROM_MESSAGE,
+  onForkFromMessage = NOOP_FORK_FROM_MESSAGE,
   supportsConversationRollback,
   onRevertToTurnCount,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
@@ -402,6 +427,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  messageScrollTarget = null,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
@@ -593,6 +619,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onExpandTurn: expandCitedTurn,
     onManualNavigation,
   });
+  useAssistantMessageScrollTarget({
+    target: messageScrollTarget,
+    entries: timelineEntries,
+    rows,
+    listRef,
+    historyLoading: citationHistoryLoading,
+    loadEarlier,
+    onExpandTurn: expandCitedTurn,
+  });
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
@@ -748,6 +783,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      editableMessageId,
+      onEditUserMessage,
+      onForkFromMessage,
       onRevertToTurnCount,
       onUseArtifactTemplate,
       onImageExpand,
@@ -772,6 +810,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      editableMessageId,
+      onEditUserMessage,
+      onForkFromMessage,
       onRevertToTurnCount,
       onUseArtifactTemplate,
       onImageExpand,
@@ -786,6 +827,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenAgents,
     ],
   );
+  const forkSourceMessageId = useMemo(
+    () => resolveRunningTurnForkMessageId(timelineEntries, latestTurn?.turnId ?? null),
+    [timelineEntries, latestTurn?.turnId],
+  );
   const activityState = useMemo<TimelineRowActivityState>(
     () => ({
       isWorking,
@@ -793,8 +838,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isCompacting,
       isRevertingCheckpoint,
       latestTurnId: latestTurn?.turnId ?? null,
+      forkSourceMessageId,
     }),
-    [isCompacting, isRevertingCheckpoint, isWorking, isPreparingWorktree, latestTurn?.turnId],
+    [
+      isCompacting,
+      isRevertingCheckpoint,
+      isWorking,
+      isPreparingWorktree,
+      latestTurn?.turnId,
+      forkSourceMessageId,
+    ],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -1272,7 +1325,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
           ? "pb-1"
           : isExpandedToolGroupHeader
             ? "pb-0"
-            : row.kind === "turn-fold" || row.kind === "working"
+            : row.kind === "turn-fold" || row.kind === "working" || row.kind === "fork-seam"
               ? "pb-1.5"
               : (row.kind === "message" &&
                     row.message.role === "assistant" &&
@@ -1315,6 +1368,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
+      {row.kind === "fork-seam" ? <ForkSeamTimelineRow row={row} /> : null}
     </div>
   );
 });
@@ -1592,9 +1646,26 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {typeof revertTurnCount === "number" && (
+            {ctx.editableMessageId === row.message.id ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      aria-label="Edit / rewind message"
+                      onClick={() => ctx.onEditUserMessage?.(row.message.id)}
+                    />
+                  }
+                >
+                  <PencilIcon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup>Edit / rewind</TooltipPopup>
+              </Tooltip>
+            ) : typeof revertTurnCount === "number" ? (
               <RevertUserMessageButton turnCount={revertTurnCount} />
-            )}
+            ) : null}
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
             )}
@@ -1646,6 +1717,41 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         <span>{row.label}</span>
         <Icon className="size-3.5" />
       </button>
+    </div>
+  );
+}
+
+const FORK_SEAM_TOOLTIP =
+  "This chat shares the current checkout with the source chat. Edits in either chat are visible to both.";
+
+function ForkSeamTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "fork-seam" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const sourceThreadRef = scopeThreadRef(ctx.activeThreadEnvironmentId, row.forkedFrom.threadId);
+
+  const content = (
+    <Link
+      {...assistantMessageNavigation({
+        environmentId: sourceThreadRef.environmentId,
+        threadId: sourceThreadRef.threadId,
+        messageId: row.forkedFrom.messageId,
+      })}
+      className="flex cursor-pointer select-none items-center gap-1.5 rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+    >
+      <GitForkIcon className="size-3.5" />
+      <span>Continued from chat</span>
+    </Link>
+  );
+
+  return (
+    <div className="border-b border-border/60 pb-2 pt-1">
+      <div className="flex justify-center px-1 text-sm leading-relaxed tabular-nums">
+        <Tooltip>
+          <TooltipTrigger render={<span />}>{content}</TooltipTrigger>
+          <TooltipPopup side="bottom" className="max-w-72">
+            {FORK_SEAM_TOOLTIP}
+          </TooltipPopup>
+        </Tooltip>
+      </div>
     </div>
   );
 }
@@ -1742,6 +1848,7 @@ function AssistantMessageMeta({
         showCopyButton={showCopyButton}
         streaming={copyStreaming}
       />
+      <AssistantForkMenuButton messageId={message.id} />
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
@@ -1778,6 +1885,45 @@ function AssistantCopyButton({
   return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
 }
 
+function AssistantForkMenuButton({
+  messageId,
+  disabled = false,
+}: {
+  messageId: MessageId | null;
+  disabled?: boolean;
+}) {
+  const ctx = use(TimelineRowCtx);
+
+  return (
+    <Menu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger
+              render={<Button type="button" size="xs" variant="ghost" />}
+              disabled={disabled || messageId === null}
+              aria-label="Fork this chat"
+            />
+          }
+        >
+          <GitForkIcon className="size-3" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Fork this chat</TooltipPopup>
+      </Tooltip>
+      <MenuPopup align="start" side="top">
+        <MenuItem
+          disabled={messageId === null}
+          onClick={() => {
+            if (messageId !== null) ctx.onForkFromMessage(messageId);
+          }}
+        >
+          Fork in a new tab
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
 function ProposedPlanTimelineRow({
   row,
 }: {
@@ -1799,10 +1945,10 @@ function ProposedPlanTimelineRow({
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  const { isCompacting, isPreparingWorktree } = use(TimelineRowActivityCtx);
+  const { isCompacting, isPreparingWorktree, forkSourceMessageId } = use(TimelineRowActivityCtx);
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
-      <div className="flex h-6 min-w-0 items-baseline px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
+    <div className="group/assistant border-b border-border/60 pb-2 pt-1">
+      <div className="flex h-6 min-w-0 items-center justify-between gap-2 px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
         <span
           key={isPreparingWorktree ? "setup" : isCompacting ? "compacting" : "working"}
           ref={isPreparingWorktree || isCompacting ? observeVisibleAnimation : undefined}
@@ -1828,6 +1974,9 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
             "Working..."
           )}
         </span>
+        <div className="opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+          <AssistantForkMenuButton messageId={forkSourceMessageId} disabled={isPreparingWorktree} />
+        </div>
       </div>
     </div>
   );

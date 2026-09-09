@@ -129,7 +129,7 @@ it.each(["gnome-extension", "niri", "screenshot-portal", "picker"] as const)(
       gnomeExtension: { status: "not-installed", message: "Install the extension" },
     };
 
-    expect(DEFAULT_CLIENT_SETTINGS.snapShotEnabled).toBe(false);
+    expect(DEFAULT_CLIENT_SETTINGS.snapShotEnabled).toBe(true);
     expect(snapShotStatus(state, false)).toBe("Turn this on to set up snapshots.");
     expect(snapShotStatus(state, true)).toBe("Capture needs attention");
   },

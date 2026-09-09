@@ -7,7 +7,7 @@ import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
 } from "@t3tools/client-runtime/state/thread-search";
-import { LegendList } from "@legendapp/list/react-native";
+import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@t3tools/contracts";
@@ -26,13 +26,12 @@ import { SymbolView } from "../../components/AppSymbol";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
-import { useProjects, useThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "./use-thread-list-v2-enabled";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { environmentServerConfigsAtom } from "../../state/server";
-import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
+
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -146,8 +145,7 @@ function ThreadNavigationSidebarPane(
   props: ThreadNavigationSidebarProps & { readonly nativeChrome: boolean },
 ) {
   const insets = useSafeAreaInsets();
-  const projects = useProjects();
-  const threads = useThreadShells();
+  const { projects, threads, pendingTasks } = useProfileThreads();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const searchInputRef = useRef<TextInput>(null);
@@ -167,7 +165,6 @@ function ThreadNavigationSidebarPane(
     regenerateThreadTitle,
   } = useThreadListActions();
   const threadListV2Enabled = useThreadListV2Enabled();
-  const pendingTasks = usePendingNewTasks();
   const queuedThreadKeys = useQueuedThreadKeys();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
@@ -225,6 +222,15 @@ function ThreadNavigationSidebarPane(
       }),
     [options.projectGroupingMode, options.selectedEnvironmentId, projects],
   );
+  const reveal = useAtomValue(profileRevealAtom);
+  const selection = useAtomValue(profileSelectionAtom);
+  const revealListRef = useRef<LegendListRef>(null);
+  const revealedRequest = useRef<number | null>(null);
+  useEffect(() => {
+    props.onSearchQueryChange("");
+    setSelectedProjectKey(null);
+    setSelectedEnvironmentId(null);
+  }, [reveal, selection, props.onSearchQueryChange, setSelectedEnvironmentId]);
   const projectFilterOptions = useMemo(
     () =>
       projectScopes.map((scope) => ({
@@ -357,9 +363,9 @@ function ThreadNavigationSidebarPane(
         : buildHomeListLayout({
             groups,
             displayStates: groupDisplayStates,
-            showAllThreads: hasSearchQuery,
+            showAllThreads: hasSearchQuery || reveal !== null,
           }),
-    [threadListV2Enabled, groups, groupDisplayStates, hasSearchQuery],
+    [threadListV2Enabled, groups, groupDisplayStates, hasSearchQuery, reveal],
   );
   const projectByKey = useMemo(() => {
     const map = new Map<string, EnvironmentProject>();
@@ -618,6 +624,32 @@ function ThreadNavigationSidebarPane(
     threadListV2Enabled,
     threadListV2Layout,
   ]);
+  const revealCurrent = () => {
+    if (
+      !reveal ||
+      revealedRequest.current === reveal.request ||
+      props.searchQuery ||
+      selectedProjectKey ||
+      options.selectedEnvironmentId
+    )
+      return;
+    const index = listItems.findIndex((item) => {
+      const thread =
+        item.type === "v2-thread" ? item.item.thread : item.type === "thread" ? item.thread : null;
+      return thread && `${thread.environmentId}:${thread.id}` === reveal.threadKey;
+    });
+    if (index >= 0) {
+      revealedRequest.current = reveal.request;
+      void revealListRef.current?.scrollToIndex({
+        index,
+        animated: false,
+        viewPosition: 0.3,
+      });
+    }
+  };
+  useEffect(() => {
+    revealCurrent();
+  }, [reveal, listItems, props.searchQuery, selectedProjectKey, options.selectedEnvironmentId]);
   const listMenuActions = useMemo<MenuAction[]>(
     () => [
       {
@@ -1205,6 +1237,9 @@ function ThreadNavigationSidebarPane(
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
               <LegendList
+                ListHeaderComponent={<ProfilesPanel />}
+                ref={revealListRef}
+                onContentSizeChange={revealCurrent}
                 data={listItems}
                 drawDistance={500}
                 estimatedItemSize={64}
@@ -1250,6 +1285,9 @@ function ThreadNavigationSidebarPane(
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
             <LegendList
+              ListHeaderComponent={<ProfilesPanel />}
+              ref={revealListRef}
+              onContentSizeChange={revealCurrent}
               data={listItems}
               drawDistance={500}
               estimatedItemSize={64}
@@ -1344,3 +1382,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
 });
+import { useProfileThreads, profileRevealAtom, profileSelectionAtom } from "../../state/profiles";
+import { ProfilesPanel } from "../home/ProfilesPanel";

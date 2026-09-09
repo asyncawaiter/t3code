@@ -1,3 +1,5 @@
+import { PullRequestsScreen } from "./features/dashboard/PullRequestsScreen";
+import { DashboardScreen } from "./features/dashboard/DashboardScreen";
 import {
   createPathConfigForStaticNavigation,
   getPathFromState,
@@ -57,6 +59,7 @@ import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnv
 import { SettingsLegalRouteScreen } from "./features/settings/SettingsLegalRouteScreen";
 import { SettingsProjectGroupingRouteScreen } from "./features/settings/SettingsProjectGroupingRouteScreen";
 import { UsageLimitAccountScreen } from "./features/usage/UsageLimitsPooled";
+import { SettingsProviderSetupRouteScreen } from "./features/settings/SettingsProviderSetupRouteScreen";
 import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { ShowcaseCaptureCoordinator } from "./features/showcase/ShowcaseCaptureCoordinator";
@@ -163,6 +166,13 @@ const SettingsContentStack = createNativeStackNavigator({
       linking: "environment-new",
       options: {
         title: "Add Environment",
+      },
+    }),
+    SettingsProviderSetup: createNativeStackScreen({
+      screen: SettingsProviderSetupRouteScreen,
+      linking: "providers/:environmentId/:instanceId",
+      options: {
+        title: "Antigravity",
       },
     }),
     SettingsArchive: createNativeStackScreen({
@@ -457,6 +467,16 @@ export const RootStack = createNativeStackNavigator({
     headerShown: false,
   },
   screens: {
+    PullRequests: createNativeStackScreen({
+      screen: PullRequestsScreen,
+      linking: "pull-requests",
+      options: { ...SOLID_HEADER_OPTIONS, title: "Pull requests" },
+    }),
+    Dashboard: createNativeStackScreen({
+      screen: DashboardScreen,
+      linking: "dashboard",
+      options: { ...SOLID_HEADER_OPTIONS, title: "Dashboard" },
+    }),
     Home: createNativeStackScreen({
       screen: HomeRouteScreen,
       linking: "",

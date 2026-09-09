@@ -25,6 +25,7 @@ import {
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
+  type ThreadForkOrigin,
   type ToolLifecycleItemType,
   type ThreadId,
   type TurnId,
@@ -149,6 +150,12 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "fork-seam";
+      createdAt: string;
+      forkedFrom: ThreadForkOrigin;
     };
 
 export interface TimelineEntriesProjection {
@@ -1419,6 +1426,8 @@ function compareTimelineEntriesByCreatedAt(left: TimelineEntry, right: TimelineE
 
 function timelineEntrySourceOrder(entry: TimelineEntry): number {
   switch (entry.kind) {
+    case "fork-seam":
+      return -1;
     case "message":
       return 0;
     case "proposed-plan":
@@ -1662,8 +1671,26 @@ export function deriveTimelineEntries(
   messages: ReadonlyArray<ChatMessage>,
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
+  forkedFrom?: ThreadForkOrigin | null,
+  // Older turns still pending a page load: the seam anchors the top of a
+  // forked thread's timeline, so it can only render once nothing older is
+  // left to load, or it would sit above turns that aren't actually first.
+  hasOlderTurns = false,
 ): TimelineEntry[] {
-  return deriveTimelineEntriesWithState(messages, proposedPlans, workEntries).entries;
+  const sorted = deriveTimelineEntriesWithState(messages, proposedPlans, workEntries).entries;
+  if (!forkedFrom || hasOlderTurns) {
+    return sorted;
+  }
+  // Sorts first regardless of createdAt: the seam always anchors the top of
+  // a forked thread's timeline, even if a message's createdAt somehow sorts
+  // earlier than the fork's own timestamp.
+  const seam: TimelineEntry = {
+    id: `fork-seam:${forkedFrom.threadId}`,
+    kind: "fork-seam",
+    createdAt: forkedFrom.forkedAt,
+    forkedFrom,
+  };
+  return [seam, ...sorted];
 }
 
 export function inferCheckpointTurnCountByTurnId(

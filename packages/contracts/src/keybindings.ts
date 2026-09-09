@@ -45,7 +45,10 @@ const THREAD_KEYBINDING_COMMANDS = [
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
 
-const MODEL_PICKER_KEYBINDING_COMMANDS = [
+export const PROFILE_KEYBINDING_COMMANDS = ["profile.next", "profile.previous"] as const;
+export type ProfileKeybindingCommand = (typeof PROFILE_KEYBINDING_COMMANDS)[number];
+
+export const MODEL_PICKER_KEYBINDING_COMMANDS = [
   "modelPicker.toggle",
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
 ] as const;
@@ -71,6 +74,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "commandPalette.toggle",
   "filePicker.toggle",
   "projectSearch.toggle",
+  "dashboard.toggle",
   "themeEditor.toggle",
   "composer.stash",
   "chat.new",
@@ -78,6 +82,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "editor.openFavorite",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
+  ...PROFILE_KEYBINDING_COMMANDS,
 ] as const;
 
 export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([

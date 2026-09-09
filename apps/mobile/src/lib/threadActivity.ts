@@ -6,9 +6,11 @@ import {
 } from "@t3tools/client-runtime/pending-requests";
 import { UserInputAttachmentAnswerPayload, isToolLifecycleItemType } from "@t3tools/contracts";
 import type {
+  EnvironmentId,
   OrchestrationLatestTurn,
   OrchestrationThread,
   OrchestrationThreadActivity,
+  ThreadForkOrigin,
   ToolLifecycleItemType,
   TurnId,
   UserInputQuestion,
@@ -179,6 +181,12 @@ export type ThreadFeedEntry =
       readonly turnId: TurnId;
       readonly label: string;
       readonly expanded: boolean;
+    }
+  | {
+      readonly type: "fork-seam";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly forkedFrom: ThreadForkOrigin;
     }
   | {
       /**
@@ -2172,10 +2180,12 @@ export function buildPendingUserInputAnswers(
 }
 
 export function buildThreadFeed(
-  thread: Pick<OrchestrationThread, "messages" | "activities">,
+  thread: Pick<OrchestrationThread, "messages" | "activities" | "forkedFrom">,
   options?: {
     readonly loadedMessages?: ReadonlyArray<OrchestrationThread["messages"][number]>;
     readonly localMessages?: ReadonlyArray<OrchestrationThread["messages"][number]>;
+    /** Whether the windowed thread has older turns still unloaded — gates the fork seam. */
+    readonly hasOlderTurns?: boolean;
   },
 ): ThreadFeedEntry[] {
   const loadedMessages = options?.loadedMessages ?? thread.messages;
@@ -2184,6 +2194,7 @@ export function buildThreadFeed(
     : loadedMessages;
   const oldestLoadedMessageCreatedAt =
     options?.loadedMessages !== undefined ? (loadedMessages[0]?.createdAt ?? null) : null;
+  const hasOlderTurns = options?.hasOlderTurns ?? false;
   const activityEntries = getThreadFeedActivityEntries(thread.activities);
   const entries = Arr.sortWith(
     [
@@ -2204,7 +2215,30 @@ export function buildThreadFeed(
     Order.Date,
   );
 
-  return groupAdjacentActivities(entries);
+  const groups = groupAdjacentActivities(entries);
+  // The seam anchors the top of a forked thread's timeline, so it can only
+  // render once nothing older is left to load, or it would sit above turns
+  // that aren't actually first.
+  return thread.forkedFrom && !hasOlderTurns
+    ? [forkSeamEntry(thread.forkedFrom), ...groups]
+    : groups;
+}
+
+function forkSeamEntry(forkedFrom: ThreadForkOrigin): ThreadFeedEntry {
+  return {
+    type: "fork-seam",
+    id: `fork-seam:${forkedFrom.threadId}:${forkedFrom.messageId}`,
+    createdAt: forkedFrom.forkedAt,
+    forkedFrom,
+  };
+}
+
+/** Query-param anchor lets the source thread scroll the forked message into view. */
+export function buildForkSeamHref(
+  environmentId: EnvironmentId,
+  forkedFrom: Pick<ThreadForkOrigin, "threadId" | "messageId">,
+): string {
+  return `/threads/${encodeURIComponent(environmentId)}/${encodeURIComponent(forkedFrom.threadId)}?anchorMessageId=${encodeURIComponent(forkedFrom.messageId)}`;
 }
 
 function getThreadFeedActivityEntries(activities: ReadonlyArray<OrchestrationThreadActivity>) {

@@ -27,6 +27,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
     pullRequestMergeMethod: "merge",
+    activeProfileId: null,
     ...overrides,
   };
 }
@@ -209,6 +210,7 @@ describe("parsePersistedState", () => {
           "turn-2": true,
         },
       },
+      activeProfileId: null,
     });
   });
 
@@ -332,6 +334,7 @@ describe("uiStateStore persistence", () => {
         },
       },
       pullRequestMergeMethod: "merge",
+      activeProfileId: null,
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,

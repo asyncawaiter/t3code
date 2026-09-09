@@ -9,6 +9,8 @@
 import {
   type CanUseTool,
   query,
+  forkSession,
+  getSessionMessages,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   type PermissionResult,
@@ -20,6 +22,8 @@ import {
   type SDKUserMessage,
   type ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
+
+import { resolveClaudeRewindTarget } from "./claudeRewind.ts";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { type ClaudeScopedLimitNames, claudeRateLimitEventToUpdate } from "./claudeUsageLimits.ts";
@@ -29,6 +33,7 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
+  type UsageLimitsUpdate,
   EventId,
   type ProviderApprovalDecision,
   ProviderDriverKind,
@@ -290,6 +295,7 @@ function rememberPendingTaskModel(
 
 interface ClaudeSessionContext {
   session: ProviderSession;
+  startInput: Parameters<ClaudeAdapterShape["startSession"]>[0];
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
@@ -344,6 +350,8 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
 }
 
 export interface ClaudeAdapterLiveOptions {
+  readonly forkSession?: typeof forkSession;
+  readonly getSessionMessages?: typeof getSessionMessages;
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
   readonly createQuery?: (input: {
@@ -353,6 +361,8 @@ export interface ClaudeAdapterLiveOptions {
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
+  /** On-demand account limits; the driver builds it with its HTTP and process services. */
+  readonly accountLimits?: Effect.Effect<UsageLimitsUpdate | null, ProviderAdapterError>;
   /** Scoped-bucket names the driver's status probe last saw; see `claudeUsageLimits`. */
   readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>;
 }
@@ -4775,6 +4785,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const context: ClaudeSessionContext = {
         session,
+        startInput: input,
         promptQueue,
         query: queryRuntime,
         streamFiber: undefined,
@@ -4901,6 +4912,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     if (modelSelection?.model) {
+      context.startInput = { ...context.startInput, modelSelection };
       const apiModelId = resolveClaudeCatalogApiModelId(modelCatalog, modelSelection);
       if (context.currentApiModelId !== apiModelId) {
         yield* Effect.tryPromise({
@@ -5038,10 +5050,64 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const rollbackThread: ClaudeAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
     function* (threadId, numTurns) {
       const context = yield* requireSession(threadId);
-      const nextLength = Math.max(0, context.turns.length - numTurns);
-      context.turns.splice(nextLength);
-      yield* updateResumeCursor(context);
-      return yield* snapshotThread(context);
+      if (numTurns === 0) return yield* snapshotThread(context);
+      const invalid = (issue: string) =>
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "rollbackThread",
+          issue,
+        });
+      if (
+        context.turnState ||
+        context.liveTaskIds.size ||
+        context.pendingApprovals.size ||
+        context.pendingUserInputs.size
+      )
+        return yield* invalid("Stop Claude and its background work before rewinding.");
+      if (!context.resumeSessionId) return yield* invalid("Claude has no saved session to rewind.");
+      // Session-file SDK helpers run in this process, unlike query(), which gets
+      // a per-instance environment. Never read another profile's history.
+      if (
+        claudeEnvironment.CLAUDE_CONFIG_DIR !== process.env.CLAUDE_CONFIG_DIR ||
+        claudeEnvironment.HOME !== process.env.HOME
+      )
+        return yield* invalid(
+          "Rewind for a custom Claude configuration directory is not supported yet.",
+        );
+      const history = yield* Effect.tryPromise({
+        try: () =>
+          (options?.getSessionMessages ?? getSessionMessages)(
+            context.resumeSessionId!,
+            context.session.cwd ? { dir: context.session.cwd } : {},
+          ),
+        catch: (cause) => toRequestError(threadId, "session/read", cause),
+      });
+      const target = resolveClaudeRewindTarget(history, numTurns);
+      if ("error" in target) return yield* invalid(target.error);
+      const forked =
+        target.upToMessageId === null
+          ? null
+          : yield* Effect.tryPromise({
+              try: () =>
+                (options?.forkSession ?? forkSession)(context.resumeSessionId!, {
+                  upToMessageId: target.upToMessageId!,
+                  ...(context.session.cwd ? { dir: context.session.cwd } : {}),
+                }),
+              catch: (cause) => toRequestError(threadId, "session/fork", cause),
+            });
+      const retained = context.turns.slice(0, Math.max(0, context.turns.length - numTurns));
+      // Forking remaps native message UUIDs, so the new session must not inherit
+      // the old resumeSessionAt. The original native history remains intact.
+      yield* startSession({
+        ...context.startInput,
+        runtimeMode: context.session.runtimeMode,
+        resumeCursor: forked
+          ? { threadId, resume: forked.sessionId, turnCount: retained.length }
+          : { threadId, turnCount: 0 },
+      });
+      const resumed = yield* requireSession(threadId);
+      resumed.turns.push(...retained);
+      return yield* snapshotThread(resumed);
     },
   );
 
@@ -5127,9 +5193,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   return {
     provider: PROVIDER,
-    capabilities: {
-      sessionModelSwitch: "in-session",
-    },
+    capabilities: { supportsMessageEditing: true, sessionModelSwitch: "in-session" },
     compaction: { type: "slash-command", command: "/compact" },
     startSession,
     sendTurn,
@@ -5142,6 +5206,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     listSessions,
     hasSession,
     stopAll,
+    ...(options?.accountLimits ? { readAccountLimits: options.accountLimits } : {}),
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);
     },

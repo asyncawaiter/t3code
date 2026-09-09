@@ -94,6 +94,34 @@ recording and preserves your existing draft.
 Transcription runs on your device. T3 Code deletes the temporary audio after
 transcription or cancellation; only the message text is sent when you submit.
 
+## Edit your latest message
+
+On web and desktop, use the pencil on your latest user message after the agent and its
+background work have stopped. Codex and Claude support editing. Images and file attachments
+are recovered into the editor and stay attached unless you remove them. If an attachment
+cannot be recovered, sending is blocked so it cannot silently disappear.
+
+Choose **Keep current files** to rewind only the conversation, or **Restore files** to also
+restore the workspace checkpoint before that message. Restoring files can replace newer
+manual edits as well as agent changes. This choice requires an available Git checkpoint;
+it does not undo external actions such as pushes, deployments, or database changes.
+
+**Save & resend** replaces the latest prompt and its response and starts the edited prompt.
+**Rewind only** removes that exchange and returns your edited prompt and attachments to the
+composer. An existing composer draft is preserved; clear it first to use **Rewind only**.
+Cancel leaves the conversation unchanged.
+
+If the provider session has stopped, editing automatically resumes its saved session.
+You do not need to send a new message first.
+
+Editing is unavailable for archived chats, messages sent as steering during another turn,
+and providers other than Codex and Claude. Claude instances with a separate configuration
+directory do not support editing yet. On iPhone, tap the pencil beside the latest user message to edit.
+Tap the fork action below a completed assistant response to create a separate chat;
+the server appends a unique numbered fork suffix to its title.
+If a connection fails while applying an edit, check the conversation before retrying; use
+**Keep as draft** to retain your edited prompt when the composer is empty.
+
 ## Commands and skills
 
 Type `/` for commands or `$` to add a skill from the selected environment and
@@ -136,3 +164,19 @@ automatically. HTML previews cannot access your T3 Code session.
 
 On mobile, select a PDF attachment or link to open it. iOS uses the native viewer;
 Android opens the system chooser.
+
+On desktop, press `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux from a new thread to
+start it in the background. T3 Code opens another new thread and shows an **Open** action for the
+thread that started. The new thread keeps the selected workspace mode and base branch. If **New
+worktree** is selected, each background thread creates its own worktree.
+
+## Message time context
+
+T3 automatically tells the agent when each user message was submitted and when it
+was delivered, using explicit UTC timestamps. It includes the previous user message's
+submission time and the elapsed interval, so returning days later has time context.
+This metadata is separate from your editable message and is shared by desktop, web,
+and mobile when connected to an updated server. Queued messages retain their recorded
+submission time; edit and resend creates a new submission. New forks carry the original
+user message timestamps in their inherited context. Existing provider histories are
+not rewritten, and provider compaction may omit older timestamps.

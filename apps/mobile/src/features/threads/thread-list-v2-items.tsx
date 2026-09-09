@@ -1,3 +1,4 @@
+import { useThreadOrganization } from "../home/useThreadOrganization";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -426,6 +427,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   } = props;
   const snoozedRow = props.snoozed === true;
   const pinnedRow = props.pinned === true;
+  const organization = useThreadOrganization(thread);
 
   const pr = useThreadPr(thread);
 
@@ -1020,9 +1022,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                     ? slimMenuActions
                     : swipeActions.secondary === "snooze"
                       ? snoozableCardMenuActions
-                      : cardMenuActions),
+                      : cardMenuActions
+              ).filter((action) => action.id !== "pin" && action.id !== "unpin"),
+              ...organization.actions.filter(
+                (action) => props.pinningSupported || action.id !== "organization-pin",
+              ),
             ]}
-            onPressAction={handleMenuAction}
+            onPressAction={(event) => {
+              if (!organization.handle(event.nativeEvent.event)) handleMenuAction(event);
+            }}
             shouldOpenOnLongPress
           >
             {rowContent(close)}

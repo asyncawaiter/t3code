@@ -1,3 +1,4 @@
+import { MessageActions } from "./ThreadMessageActions";
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
@@ -31,7 +32,7 @@ import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3too
 import { videoMimeType } from "@t3tools/shared/video";
 import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
 import { HeaderHeightContext } from "@react-navigation/elements";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useLinkTo, useNavigation } from "@react-navigation/native";
 import {
   createContext,
   memo,
@@ -138,6 +139,7 @@ import {
   resolveMarkdownLinkPresentation,
 } from "@t3tools/mobile-markdown-text/links";
 import {
+  buildForkSeamHref,
   deriveThreadFeedPresentation,
   isContextCompactionActivityGroup,
   type ThreadFeedEntry,
@@ -1340,6 +1342,8 @@ function renderFeedEntry(
     readonly onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey: string) => void;
     readonly onToggleTurnFold: (turnId: TurnId) => void;
+    readonly onPressForkSeam: () => void;
+    readonly forkSeamLinkable: boolean;
     readonly onPressPreview: (source: FilePreviewSource) => void;
     readonly onPressVideo: (attachment: ChatFileAttachment, sourceIdentifier: string) => void;
     readonly markdownLinkHandlers: MarkdownLinkHandlers;
@@ -1385,6 +1389,30 @@ function renderFeedEntry(
           tintColor={iconSubtleColor}
         />
       </Pressable>
+    );
+  }
+
+  if (entry.type === "fork-seam") {
+    const label = props.forkSeamLinkable
+      ? "Continued from chat"
+      : "Continued from a chat that is no longer available";
+    const content = (
+      <View className="mb-1 min-h-11 flex-row items-center justify-center gap-1.5 px-2">
+        <SymbolView
+          name="arrow.triangle.branch"
+          size={14}
+          tintColor={iconSubtleColor}
+          type="monochrome"
+        />
+        <Text className="font-t3-medium text-sm text-foreground-muted">{label}</Text>
+      </View>
+    );
+    return props.forkSeamLinkable ? (
+      <Pressable accessibilityRole="button" onPress={props.onPressForkSeam} hitSlop={4}>
+        {content}
+      </Pressable>
+    ) : (
+      content
     );
   }
 
@@ -1568,6 +1596,7 @@ function renderFeedEntry(
                 <SymbolView name="pencil" size={14} tintColor={iconSubtleColor} />
               </Pressable>
             ) : null}
+            <MessageActions message={message} />
             {message.text.trim().length > 0 ? (
               <CopyTextButton
                 accessibilityLabel="Copy message"
@@ -1631,6 +1660,7 @@ function renderFeedEntry(
         })}
         {showAssistantMeta ? (
           <View className="mt-1 flex-row items-center gap-1">
+            <MessageActions message={message} />
             <CopyTextButton
               accessibilityLabel="Copy message"
               text={renderedText}
@@ -2428,6 +2458,17 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
     return ids;
   }, [expandedWorkGroups]);
+  // The fork seam, when present, is always the first feed entry (buildThreadFeed).
+  const forkSeamEntry = props.feed[0]?.type === "fork-seam" ? props.feed[0] : null;
+  const forkSeamHref = forkSeamEntry
+    ? buildForkSeamHref(props.environmentId, forkSeamEntry.forkedFrom)
+    : null;
+  const linkTo = useLinkTo();
+  const onPressForkSeam = useCallback(() => {
+    if (forkSeamHref) {
+      linkTo(forkSeamHref);
+    }
+  }, [forkSeamHref, linkTo]);
   const presentedFeed = useMemo(
     () =>
       appendPendingThreadMessages(
@@ -2472,6 +2513,26 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       ),
     [presentedFeed, props.anchorMessageId, anchorTopInset],
   );
+  // anchoredEndSpace above only pins a just-submitted USER message near the
+  // live edge. A fork-seam link (or any other deep link) can target an
+  // assistant message already sitting in history instead — for that case,
+  // do a plain one-shot scroll once the row is in the presented feed.
+  const scrolledAnchorMessageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    scrolledAnchorMessageIdRef.current = null;
+  }, [feedThreadKey]);
+  useEffect(() => {
+    const anchorId = props.anchorMessageId;
+    if (!anchorId || anchoredEndSpace || scrolledAnchorMessageIdRef.current === anchorId) {
+      return;
+    }
+    const index = presentedFeed.findIndex((entry) => entry.id === anchorId);
+    if (index === -1) {
+      return;
+    }
+    scrolledAnchorMessageIdRef.current = anchorId;
+    void props.listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 });
+  }, [anchoredEndSpace, presentedFeed, props.anchorMessageId, props.listRef]);
   const terminalAssistantMessageIds = useMemo(() => {
     const terminalIdsByTurn = new Map<TurnId, string>();
     for (const entry of props.feed) {
@@ -2670,6 +2731,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       }
       switch (entry.type) {
         case "turn-fold":
+        case "fork-seam":
           return TURN_FOLD_HEIGHT;
         case "work-toggle":
         case "thinking":
@@ -2729,6 +2791,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             markdownContentWidth,
             skills: props.skills,
             onUseArtifactTemplate: props.onUseArtifactTemplate,
+            onPressForkSeam,
+            forkSeamLinkable: forkSeamHref !== null,
           })}
         </ThreadMediaVisibility>
       </Animated.View>
@@ -2759,6 +2823,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleTurnFold,
       onToggleWorkGroup,
       onToggleWorkRow,
+      onPressForkSeam,
+      forkSeamHref,
       props.environmentId,
       props.onUseArtifactTemplate,
       props.skills,

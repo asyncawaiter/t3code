@@ -114,6 +114,9 @@ export function applyThreadDetailEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          ...(event.payload.forkedFrom !== undefined
+            ? { forkedFrom: event.payload.forkedFrom }
+            : {}),
         },
       };
 
@@ -553,27 +556,39 @@ export function applyThreadDetailEvent(
     case "thread.reverted": {
       const checkpoints = pipe(
         thread.checkpoints,
-        Arr.filter(
-          (entry) =>
-            entry.checkpointTurnCount !== undefined &&
-            entry.checkpointTurnCount <= event.payload.turnCount,
+        Arr.filter((entry) =>
+          event.payload.removedTurnId
+            ? entry.turnId !== event.payload.removedTurnId
+            : entry.checkpointTurnCount !== undefined &&
+              entry.checkpointTurnCount <= event.payload.turnCount,
         ),
         Arr.sort(checkpointOrder),
       );
 
       const retainedTurnIds = new Set(Arr.map(checkpoints, (entry) => entry.turnId));
-      const messages = retainMessagesAfterRevert(
-        thread.messages,
-        retainedTurnIds,
-        event.payload.turnCount,
-      );
+      const messages = event.payload.sourceMessageId
+        ? thread.messages.slice(
+            0,
+            ((index) => (index < 0 ? thread.messages.length : index))(
+              thread.messages.findIndex((message) => message.id === event.payload.sourceMessageId),
+            ),
+          )
+        : retainMessagesAfterRevert(thread.messages, retainedTurnIds, event.payload.turnCount);
       const proposedPlans = pipe(
         thread.proposedPlans,
-        Arr.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId)),
+        Arr.filter((plan) =>
+          event.payload.removedTurnId
+            ? plan.turnId !== event.payload.removedTurnId
+            : plan.turnId === null || retainedTurnIds.has(plan.turnId),
+        ),
       );
       const activities = pipe(
         thread.activities,
-        Arr.filter((activity) => activity.turnId === null || retainedTurnIds.has(activity.turnId)),
+        Arr.filter((activity) =>
+          event.payload.removedTurnId
+            ? activity.turnId !== event.payload.removedTurnId
+            : activity.turnId === null || retainedTurnIds.has(activity.turnId),
+        ),
       );
       const latestCheckpoint = checkpoints.at(-1) ?? null;
 

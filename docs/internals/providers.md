@@ -107,3 +107,271 @@ current client support.
 
 Model classification has its own [manifest constraints](./model-manifest.md). Assistant-reference
 handling is documented under [citations](./assistant-citations.md).
+
+## Fork provider extensions
+
+Each instance owns a stable profile at
+`<stateDir>/providers/antigravity/<sha256(instanceId)>`.
+[`antigravityAuthSupport.ts`][antigravity-auth-support] sets `GEMINI_HOME` to this directory and
+`AGY_ACP_FORCE_FILE_STORAGE=1` after merging instance environment variables. File storage avoids
+the official macOS keychain entry being shared across instances. Profile directories use mode
+`0700` on POSIX. This is file storage, not an encrypted keychain. Windows uses the host profile's
+filesystem permissions.
+
+The launch environment removes API-key and cloud-billing variables, disables inherited
+environment extension, sets `PYTHONUNBUFFERED=1`, and controls `BROWSER`. A tested Node or
+Electron-as-Node helper prevents the official agent from opening a browser on the environment.
+The same launch factory serves setup, health checks, chat, and text generation.
+
+The official agent prints one non-JSON OAuth line on stdout. Only the exact known prefix is
+filtered before ACP decoding. Fragmented lines are joined and bounded. Other malformed
+protocol output remains fatal. Authorization URLs are validated before use. Native stderr is
+drained without logging because it can contain OAuth data. Normal work rejects an interactive
+login request with a sign-in-required error instead of waiting for consent.
+
+[`AntigravityAuth`][antigravity-auth] owns each sign-in process and deadline in the instance
+scope. Only the initiating T3 auth session receives its URL and flow ID or can complete or
+cancel it. Other clients receive busy state without those values. Subscriptions follow
+controller replacement when settings rebuild an instance.
+
+For remote completion, the client sends the full return URL through the typed setup RPC.
+The server validates the pending loopback origin, port, root path, and single matching state
+before forwarding once to the owned listener. It does not probe the listener or follow
+redirects. Google's process owns PKCE, token exchange, refresh, and storage. Callback HTTP
+success is not authentication success. The controller waits for authenticated session setup
+and catalog discovery. Cancellation closes the process instead of sending a synthetic denial.
+
+Auth RPCs `provider.auth.start`, `complete`, `cancel`, `logout`, and `subscribe` require
+`orchestration:operate`. Install `start`, `cancel`, and `remove` use that scope too.
+`provider.install.subscribe` and public provider snapshots require `orchestration:read`.
+[`providerSetup.ts`][provider-setup] defines the operation IDs, states, and safe errors.
+
+Sign-out closes process admission for the instance, stops provider bindings through
+[`ProviderAuthService`][provider-auth-service], then stops owned startup and helper processes.
+A fresh official process calls `initialize` and native `logout` without authenticating.
+Only then does the provider clear auth, models, commands, skills, and workspace metadata.
+Thread history and native session files remain. Settings sign-out and a text-only `/logout`
+use this same path. The command is handled before model prompting or title generation.
+Disabling an instance closes its processes but keeps credentials. Account replacement is
+explicit sign-out followed by sign-in.
+
+### Sessions, models, and client capabilities
+
+[`AntigravityAdapter`][antigravity-adapter] owns one ACP process per active thread. It uses
+native `session/resume` without transcript replay and reapplies the persisted model and
+permission mode after new or resumed setup. An unavailable explicit model fails instead of
+accepting the native default. Steering cancels the previous prompt, waits for its result and
+event drain, then sends the replacement. Native background commands use T3's existing
+background-task state.
+
+The permission mapping is `approval-required` and `auto` to `default`, `auto-accept-edits` to
+`auto_edit`, and `full-access` to `yolo`. Native requests still need replies in `yolo`.
+`interaction_` requests are user questions, not approvals. T3 keeps opaque option IDs in
+`UserInputQuestion.options[].value` and sets `allowCustomAnswer=false`. Both clients preserve
+these values. Ordinary approval replies use only offered option IDs, including `allow_always`
+only when present. Existing providers keep their prior behavior when the optional fields are
+absent.
+
+`showInteractionModeToggle=false` keeps native `/plan` separate from T3 Plan mode.
+`supportsConversationRollback=false` hides unsupported client actions and makes checkpoint
+revert fail before filesystem changes. Checkpoint capture and diffs remain supported.
+
+Automatic status refreshes, reconnects, and workspace checks do not open catalog sessions.
+Health probes use `initialize` only. Disabled instances do not run background probes.
+An explicit `serverRefreshProviders` request with `refreshModels: true` calls the driver's
+optional `refreshModels` operation. Antigravity opens a short-lived catalog session under the
+instance's process admission guard, uses saved credentials, publishes models and commands,
+then closes the process. An interactive login request fails with sign-in required. Web's
+**Refresh provider status** and mobile's **Refresh models** actions request this operation.
+Account access starts unknown and becomes authenticated after successful session setup,
+including an explicit model refresh.
+The [provider snapshot][antigravity-provider] takes models and commands from setup and native
+updates. It preserves returned Gemini model IDs, labels, order, and thinking-level choices.
+The registry treats a successful empty catalog as authoritative and clears cached metadata
+after sign-out. It must not retain a previous account's models. Cached models do not prove
+current access. The auth response does not supply an email, plan tier, or reliable quota.
+
+Some upstream failures arrive as assistant text followed by `end_turn`. Preserve that message
+without treating model-written text as a structured error or successful task completion.
+
+### Text generation
+
+[`AntigravityTextGeneration`][antigravity-text] implements titles, branch names, commit text,
+and PR text through the same instance and Google sign-in. Each helper uses a temporary empty
+workspace, no injected MCP servers, native `default` mode, and explicit denial of tools and
+questions. Output is bounded, parsed against the existing schemas, and sanitized. Cancellation,
+timeout, and sign-out close the process. Cleanup removes only that helper's verified temporary
+native session files.
+
+The official agent has no verified hard no-tools setting. Global hooks and MCP configuration
+can run before a prompt. Helpers check the profile's `config/hooks.json` and
+`config/mcp_config.json` before launch and reject nonempty, malformed, or oversized
+configuration. `supportsTextGeneration=false` keeps such an instance out of system-model
+pickers. Empty managed profiles are supported. Do not describe prompt-time denial as a native
+sandbox.
+
+## OpenCode server ownership and catalog
+
+Each OpenCode provider instance owns one lazy local server for catalog discovery and
+text-generation helpers through [`OpenCodeServerOwner.ts`][opencode-server-owner]. Concurrent
+borrowers share startup. The server closes 30 seconds after the last borrower releases it, or
+when the provider instance closes. A failed or exited process can be started again on the next
+use. An externally configured OpenCode server remains externally owned.
+
+The local server and its SDK clients use one resolved password. An explicit provider password
+overrides `OPENCODE_SERVER_PASSWORD` in the spawned environment. Without an explicit password,
+the client uses the password from the environment that the process inherits. External servers use
+only their explicit provider password and never inherit the host's local password.
+
+Every server connection must pass the authenticated `/global/health` check before inventory or
+session operations start. The response must contain a valid version at or above 1.14.19. Local
+owners cache this result for the lifetime of the spawned process. External actions check once when
+they create their server connection, not for each model or SDK request.
+
+Chat adapters keep their own server per thread. They register a thread-specific `t3-code` MCP
+connection, while OpenCode stores MCP connections by directory. Sharing these chat servers
+without changing MCP routing would let two threads in one directory replace each other's
+connection.
+
+OpenCode loads its catalog through the HTTP API when an enabled provider instance starts. The
+provider registry keeps the snapshot in memory and persists it in the existing per-instance cache.
+Each `subscribeServerConfig` connection refreshes all providers, so a client reconnect reloads the
+OpenCode catalog from the current helper. The `serverRefreshProviders` request also refreshes it.
+Periodic OpenCode probes remain disabled. OpenCode reads credentials for each inventory request,
+but its native configuration files can remain cached for the lifetime of the helper process. The
+helper closes 30 seconds after its last inventory or text-generation borrower releases it. A
+refresh after that idle period starts a new helper and reads file changes. Repeated refreshes and
+active text-generation work can extend process reuse. Changes to the provider configuration or
+environment replace the instance and start a new discovery. Changes to unrelated settings only
+update snapshot enrichment. Other providers retain their existing refresh policy.
+
+T3 Code does not own an external OpenCode process. Native configuration changes there can require
+an external reload or restart before T3 Code's next refresh sees them.
+
+The shared server's idle shutdown does not clear the catalog. Failed discovery keeps the last
+known models, slash commands, and skills through the registry's existing merge rules. A successful
+empty inventory is authoritative. Existing threads keep their explicit model identifier and
+options when catalog metadata is missing; the catalog is not permission to choose a different
+model for a thread.
+
+## Model manifest
+
+The model picker's legacy section is driven by `apps/server/src/provider/model-manifest.json`, which
+lists the current (non-legacy) model slugs per driver kind. The `ModelManifest` service
+(`apps/server/src/provider/ModelManifest.ts`) refreshes that data from the same file on `main` via
+raw.githubusercontent.com, so moving a model in or out of the legacy section is a commit, not a
+release. Preference order is remote fetch, then the on-disk copy of the last successful fetch (in
+the state directory), then the bundled copy. Fetches are TTL-gated, run concurrently with provider
+probes, respect the `enableProviderUpdateChecks` setting, and never fail a provider check. The
+Codex and Claude drivers apply the classification to every snapshot with `applyModelManifest`;
+driver kinds absent from the manifest have no legacy concept.
+
+## Attachment access
+
+The server stores uploaded attachments in its attachment directory, outside the project workspace.
+`ProviderService` adds the absolute path of each attachment to the turn text, then passes every
+attachment to the provider adapter. Each adapter decides what its provider ingests natively:
+
+- Codex, Claude, Cursor, and Grok send images as native image inputs and skip generic files. For
+  these providers, generic files reach the agent only as file paths in the turn text.
+- Antigravity sends BMP, JPEG, PNG, and WebP images and common audio formats as native blocks,
+  text files as embedded resources, and PDFs as resource links. Other files are rejected with an
+  error instead of being dropped. The session advertises the ACP client file system capability,
+  so workspace reads and writes come back through `fs/read_text_file` and `fs/write_text_file`
+  and are confined to the workspace and the attachments directory.
+- OpenCode sends PNG/JPEG/GIF/WebP images, text files, and PDFs up to 20 MB as native file parts
+  with their real mime type. Everything else (ZIP and other binaries, image formats model APIs
+  reject, oversized files) falls back to the file path in the turn text, like the other providers.
+- Antigravity sends BMP/JPEG/PNG/WebP images as native image blocks, UTF-8 text as embedded
+  resources, and PDFs as local resource links. Text is limited to 1 MiB per file, images to
+  10 MiB each, and all attachments to 50 MiB per turn. Unsupported formats or oversized inputs
+  fail explicitly. Native path permissions still apply to PDFs.
+
+Claude receives the attachment directory as an allowed additional directory. Codex keeps its
+configured sandbox policy, so access depends on that policy and the selected runtime mode. OpenCode
+allows all paths in full-access mode and requests approval for directories outside the workspace in
+restricted modes. Cursor and Grok use their own provider permission rules.
+
+The server does not copy attachments into a project or bypass provider approval rules. If an agent
+cannot read an attachment, the user must approve the access or select a runtime mode that permits it.
+
+Updated attachment schemas tolerate unknown attachment members, but old image-only clients still
+cannot decode messages that contain file attachments. Client file-picking rollouts must account for
+this limit.
+
+Do not run an old image-only server against state that contains file attachments. Replay decodes
+each persisted event before projection. A file-bearing event can make `ProjectionPipeline` bootstrap
+and `OrchestrationEngine` startup fail for the entire environment, not only the affected thread.
+
+## How provider work is requested
+
+Clients never call a provider directly. They dispatch orchestration commands over the RPC method
+`orchestration.dispatchCommand`, defined with the rest of the orchestration surface in
+[`orchestration.ts`][contracts]. The client-dispatchable provider-facing commands are
+`thread.turn.start`, `thread.turn.interrupt`, `thread.approval.respond`,
+`thread.user-input.respond`, `thread.checkpoint.revert`, and `thread.session.stop`, plus the mode
+setters `thread.runtime-mode.set` and `thread.interaction-mode.set`.
+
+The engine persists an event for the command, and a server-side reactor performs the provider call.
+Provider output comes back as internal commands such as `thread.message.assistant.delta` and
+`thread.session.set`, which clients observe through `orchestration.subscribeThread`. See
+[overview.md](./overview.md) for the command/event loop.
+
+### Fork context on the first turn
+
+A forked thread's first turn gets one extra step. [`ProviderCommandReactor`][cmd] checks whether the
+thread has a `forkedFrom` origin and an unconsumed fork context row; if so, it prepends the bounded
+transcript captured from the source thread to the provider input for that turn only, honoring the
+120,000-character input limit by packing the newest entries first and noting how many older entries
+were omitted. Every later turn on that thread sends only the user's own message, exactly as on any
+other thread. The persisted user message is never rewritten, and no adapter needs to know a fork
+happened.
+
+## Server-side workers
+
+Provider work flows through three queue-backed workers. All three are built with
+`makeDrainableWorker` from [`DrainableWorker.ts`][worker] and expose `drain` for deterministic test
+synchronization.
+
+1. [`ProviderRuntimeIngestion`][ingest] consumes provider runtime streams and emits orchestration
+   commands.
+2. [`ProviderCommandReactor`][cmd] reacts to orchestration intent events and dispatches provider
+   calls.
+3. [`CheckpointReactor`][checkpoint] captures workspace checkpoints on turn start and completion, and
+   performs reverts.
+
+### Buffered assistant delivery
+
+A thread in `buffered` assistant delivery mode accumulates assistant text instead of streaming each
+delta. The buffer is not held until turn completion. In [`ProviderRuntimeIngestion`][ingest],
+`MAX_BUFFERED_ASSISTANT_CHARS` is 24,000: the append that would exceed it invalidates the buffer and
+spills the whole accumulated text as one delta. The buffer also flushes at interaction boundaries,
+when a request opens (approval) or user input is requested, via
+`flushBufferedAssistantMessagesForTurn`.
+
+[drivers]: ../../apps/server/src/provider/builtInDrivers.ts
+[codex]: ../../apps/server/src/provider/Drivers/CodexDriver.ts
+[claude]: ../../apps/server/src/provider/Drivers/ClaudeDriver.ts
+[cursor]: ../../apps/server/src/provider/Drivers/CursorDriver.ts
+[grok]: ../../apps/server/src/provider/Drivers/GrokDriver.ts
+[opencode]: ../../apps/server/src/provider/Drivers/OpenCodeDriver.ts
+[antigravity]: ../../apps/server/src/provider/Drivers/AntigravityDriver.ts
+[antigravity-adapter]: ../../apps/server/src/provider/Layers/AntigravityAdapter.ts
+[antigravity-provider]: ../../apps/server/src/provider/Layers/AntigravityProvider.ts
+[antigravity-installation]: ../../apps/server/src/provider/AntigravityInstallation.ts
+[antigravity-release]: ../../apps/server/src/provider/antigravityRelease.ts
+[antigravity-auth]: ../../apps/server/src/provider/AntigravityAuth.ts
+[antigravity-auth-support]: ../../apps/server/src/provider/antigravityAuthSupport.ts
+[antigravity-text]: ../../apps/server/src/textGeneration/AntigravityTextGeneration.ts
+[provider-auth-service]: ../../apps/server/src/provider/Layers/ProviderAuthService.ts
+[provider-setup]: ../../packages/contracts/src/providerSetup.ts
+[opencode-server-owner]: ../../apps/server/src/provider/OpenCodeServerOwner.ts
+[adapter]: ../../apps/server/src/provider/Services/ProviderAdapter.ts
+[instances]: ../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts
+[registry]: ../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts
+[service]: ../../apps/server/src/provider/Layers/ProviderService.ts
+[contracts]: ../../packages/contracts/src/orchestration.ts
+[worker]: ../../packages/shared/src/DrainableWorker.ts
+[ingest]: ../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
+[cmd]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+[checkpoint]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts

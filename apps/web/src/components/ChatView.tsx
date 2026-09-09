@@ -1,3 +1,4 @@
+import { EditMessageDialog } from "./chat/EditMessageDialog";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import {
@@ -93,6 +94,8 @@ import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
+import { assistantMessageIdFromLocation } from "../lib/assistantMessageNavigation";
+import type { AssistantMessageScrollTarget } from "./chat/useAssistantCitationTarget";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -239,7 +242,10 @@ import {
   useClientSettings,
   useClientSettingsHydrated,
   useEnvironmentSettings,
+  usePrimarySettings,
 } from "../hooks/useSettings";
+import { profileForProject } from "@t3tools/contracts";
+import { scopedProjectKey } from "@t3tools/client-runtime/environment";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -298,6 +304,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import {
   requestOlderThreadTurns,
@@ -413,6 +420,7 @@ import {
   startNewThreadForProject,
   codexArtifactTemplatePromptToAppend,
   toolGroupConsumesUpwardNavigation,
+  waitForForkedThreadShell,
   waitForStartedServerThread,
   shouldRefocusComposerOnWindowFocus,
 } from "./ChatView.logic";
@@ -1408,6 +1416,7 @@ export default function ChatView(props: ChatViewProps) {
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
+  const forkThread = useAtomCommand(orchestrationEnvironment.forkThread, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -1508,6 +1517,14 @@ export default function ChatView(props: ChatViewProps) {
       ? { citation, key: citationLocation.key ?? citationLocation.href }
       : null;
   }, [citationLocation.href, citationLocation.key, environmentId, threadId]);
+  // The fork seam links to a bare message id (no quote to anchor a citation
+  // highlight), so it decodes a smaller sibling hash and just scrolls.
+  // `key` mirrors `citationRequest`: without it, clicking the same seam link
+  // twice in a row (same href) would not re-scroll on the second click.
+  const forkSeamMessageTarget = useMemo<AssistantMessageScrollTarget | null>(() => {
+    const messageId = assistantMessageIdFromLocation(citationLocation.href);
+    return messageId ? { messageId, key: citationLocation.key ?? citationLocation.href } : null;
+  }, [citationLocation.href, citationLocation.key]);
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -1613,6 +1630,7 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -1685,6 +1703,7 @@ export default function ChatView(props: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
+  const forkInFlightRef = useRef(false);
   const environmentUnavailableSendToastSlotRef = useRef(0);
   const feedbackUploadsInFlightRef = useRef(new Set<string>());
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
@@ -2334,6 +2353,10 @@ export default function ChatView(props: ChatViewProps) {
       (activeThread.session !== null && activeThread.session.status !== "stopped")),
   );
 
+  const routingProfiles = usePrimarySettings().profiles;
+  const routingProfile = activeProjectRef
+    ? profileForProject(routingProfiles, scopedProjectKey(activeProjectRef))
+    : undefined;
   const loadBalancingSettings = useClientSettings();
   const automaticEnvironment = Boolean(
     clientSettingsHydrated &&
@@ -2349,12 +2372,19 @@ export default function ChatView(props: ChatViewProps) {
   const autoUpdateEnvironments = useMemo(
     () =>
       automaticEnvironment
-        ? logicalProjectEnvironments.flatMap(({ environmentId }) => {
+        ? logicalProjectEnvironments.flatMap(({ environmentId, projectId }) => {
+            if (
+              routingProfile &&
+              !routingProfile.projectKeys.includes(
+                scopedProjectKey(scopeProjectRef(environmentId, projectId)),
+              )
+            )
+              return [];
             const environment = environmentById.get(environmentId);
             return environment ? [environment] : [];
           })
         : [],
-    [automaticEnvironment, logicalProjectEnvironments, environmentById],
+    [automaticEnvironment, logicalProjectEnvironments, environmentById, routingProfile],
   );
   const autoBalanceUpdateBanner = useAutoBalanceUpdateBanner(autoUpdateEnvironments);
   const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
@@ -3215,14 +3245,29 @@ export default function ChatView(props: ChatViewProps) {
       previous?.threadKey === activeThreadKey ? previous.projection : null,
     );
     timelineProjectionRef.current = { threadKey: activeThreadKey, projection };
-    return projection.entries;
+    const forkedFrom = activeThread?.forkedFrom;
+    return forkedFrom && !(routeKind === "server" && threadHasOlderTurns(routeThreadState))
+      ? [
+          {
+            id: `fork-seam:${forkedFrom.threadId}`,
+            kind: "fork-seam" as const,
+            createdAt: forkedFrom.forkedAt,
+            forkedFrom,
+          },
+          ...projection.entries,
+        ]
+      : projection.entries;
   }, [
     timelineProjectionRef,
+    activeThread?.forkedFrom,
+    routeKind,
+    routeThreadState,
     activeThreadKey,
     activeThread?.proposedPlans,
     timelineMessages,
     workLogEntries,
   ]);
+
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
     activeThreadKey !== null && dockedDraftHeroThreadKey === activeThreadKey;
@@ -3390,6 +3435,10 @@ export default function ChatView(props: ChatViewProps) {
               const environment = environmentById.get(candidate.environmentId);
               return (
                 environment?.connection.phase === "connected" &&
+                (!routingProfile ||
+                  routingProfile.projectKeys.includes(
+                    scopedProjectKey(scopeProjectRef(candidate.environmentId, candidate.projectId)),
+                  )) &&
                 (loadBalancingSettings.loadBalancingWeights[candidate.environmentId] ?? 50) > 0 &&
                 environment.serverConfig?.providers.some(
                   (provider) =>
@@ -3411,6 +3460,7 @@ export default function ChatView(props: ChatViewProps) {
       logicalProjectEnvironments,
       environmentById,
       loadBalancingSettings.loadBalancingWeights,
+      routingProfile,
       activeProviderInstanceId,
       selectedProvider,
     ],
@@ -3424,7 +3474,12 @@ export default function ChatView(props: ChatViewProps) {
     const target = logicalProjectEnvironments.find(
       (environment) => environment.environmentId === loadBalancing.environmentId,
     );
-    if (!target) return;
+    if (!target) {
+      if (draftThread?.environmentSelection !== "auto") {
+        setDraftThreadContext(draftId, { environmentSelection: "manual" });
+      }
+      return;
+    }
     setDraftThreadContext(draftId, {
       projectRef: scopeProjectRef(target.environmentId, target.projectId),
       environmentSelection: "auto",
@@ -3434,6 +3489,7 @@ export default function ChatView(props: ChatViewProps) {
     needsLoadBalancing,
     loadBalancing.pending,
     loadBalancing.environmentId,
+    draftThread?.environmentSelection,
     draftId,
     logicalProjectEnvironments,
     setDraftThreadContext,
@@ -5134,6 +5190,7 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
+    setEditingMessage(null);
   }, [activeThread?.id]);
 
   useEffect(() => {
@@ -7706,6 +7763,88 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
   ]);
 
+  // "Fork in a new tab" from an assistant message. Unlike implement-in-new-
+  // thread, forking a running source thread is allowed: the child inherits
+  // context server-side and never touches the source's live turn.
+  const onForkFromMessage = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeThread || !isServerThread || forkInFlightRef.current) {
+        return;
+      }
+      forkInFlightRef.current = true;
+
+      const createdAt = new Date().toISOString();
+      const nextThreadId = newThreadId();
+      const forkResult = await forkThread({
+        environmentId,
+        input: {
+          threadId: nextThreadId,
+          sourceThreadId: activeThread.id,
+          sourceMessageId: messageId,
+          title: activeThread.title,
+          modelSelection: activeThread.modelSelection,
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          createdAt,
+        },
+      });
+      const forkRpcFailure = forkResult._tag === "Failure";
+      let failure: AtomCommandResult<unknown, unknown> | null = forkRpcFailure ? forkResult : null;
+
+      if (failure === null) {
+        const shellResult = await settlePromise(() =>
+          waitForForkedThreadShell(scopeThreadRef(activeThread.environmentId, nextThreadId)),
+        );
+        failure = shellResult._tag === "Failure" ? shellResult : null;
+      }
+
+      if (failure === null) {
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: "/$environmentId/$threadId",
+            params: {
+              environmentId: activeThread.environmentId,
+              threadId: nextThreadId,
+            },
+          }),
+        );
+        failure = navigateResult._tag === "Failure" ? navigateResult : null;
+      }
+
+      if (failure !== null) {
+        if (!forkRpcFailure) {
+          const cleanupResult = await deleteThread({
+            environmentId,
+            input: {
+              threadId: nextThreadId,
+            },
+          });
+          if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
+            console.warn(
+              "Failed to clean up forked thread after start failure.",
+              squashAtomCommandFailure(cleanupResult),
+            );
+          }
+        }
+        if (!isAtomCommandInterrupted(failure)) {
+          const error = squashAtomCommandFailure(failure);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not fork this chat",
+              description:
+                error instanceof Error
+                  ? error.message
+                  : "An error occurred while creating the forked thread.",
+            }),
+          );
+        }
+      }
+      forkInFlightRef.current = false;
+    },
+    [activeThread, deleteThread, environmentId, forkThread, isServerThread, navigate],
+  );
+
   const getModelDisabledReason = useCallback(
     (instanceId: ProviderInstanceId, model: string): string | null => {
       if (!activeThread) {
@@ -7863,6 +8002,15 @@ export default function ChatView(props: ChatViewProps) {
   // reference is fully stable and never busts TimelineRowCtx identity.
   const onRevertToTurnCountRef = useRef(onRevertToTurnCount);
   onRevertToTurnCountRef.current = onRevertToTurnCount;
+  const latestEditableMessage =
+    serverMessages?.findLast((message) => message.role === "user") ?? null;
+  const onEditUserMessage = useCallback(
+    (messageId: MessageId) => {
+      const message = serverMessages?.find((entry) => entry.id === messageId);
+      if (message) setEditingMessage(message);
+    },
+    [serverMessages],
+  );
   const onRevertTimelineTurn = useCallback((targetTurnCount: number) => {
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
@@ -8062,6 +8210,31 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+      {editingMessage && activeThread ? (
+        <EditMessageDialog
+          key={`${environmentId}:${editingMessage.id}`}
+          message={editingMessage}
+          thread={activeThread}
+          environmentId={environmentId}
+          connected={!activeEnvironmentUnavailable}
+          supported={conversationProviderStatus?.supportsMessageEditing === true}
+          maxFileBytes={serverConfig?.environment.capabilities.fileAttachments?.maxUploadBytes ?? 0}
+          hasComposerDraft={composerHasUnsentContent}
+          onClose={() => setEditingMessage(null)}
+          onRecoverDraft={(text, attachments) => {
+            setComposerDraftPrompt(composerDraftTarget, text);
+            addComposerDraftImages(
+              composerDraftTarget,
+              attachments.filter((attachment) => attachment.type === "image"),
+            );
+            addComposerDraftFiles(
+              composerDraftTarget,
+              attachments.filter((attachment) => attachment.type === "file"),
+            );
+            composerRef.current?.focusAt(text.length);
+          }}
+        />
+      ) : null}
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
         className={cn(
@@ -8177,6 +8350,14 @@ export default function ChatView(props: ChatViewProps) {
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
+                editableMessageId={
+                  serverConfig?.environment.capabilities.messageEditing
+                    ? (latestEditableMessage?.id ?? null)
+                    : null
+                }
+                onEditUserMessage={onEditUserMessage}
+                onForkFromMessage={onForkFromMessage}
+                messageScrollTarget={forkSeamMessageTarget}
                 supportsConversationRollback={supportsConversationRollback}
                 onRevertToTurnCount={onRevertTimelineTurn}
                 onUseArtifactTemplate={useArtifactTemplate}

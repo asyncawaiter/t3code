@@ -837,7 +837,13 @@ const spawnAndCollectOutput = Effect.fn("spawnAndCollectOutput")(function* (
   return { stdout, stderr, exitCode } as const;
 });
 
-const resolveGitCommitHash = Effect.fn("resolveGitCommitHash")(function* (repoRoot: string) {
+export const resolveGitCommitHash = Effect.fn("resolveGitCommitHash")(function* (repoRoot: string) {
+  const status = yield* spawnAndCollectOutput(
+    ChildProcess.make("git", ["status", "--porcelain", "--untracked-files=normal"], {
+      cwd: repoRoot,
+    }),
+  ).pipe(Effect.orElseSucceed(() => ({ stdout: "", stderr: "", exitCode: 1 })));
+  if (status.exitCode !== 0 || status.stdout.trim()) return "unknown";
   const result = yield* spawnAndCollectOutput(
     ChildProcess.make("git", ["rev-parse", "--short=12", "HEAD"], {
       cwd: repoRoot,
@@ -2723,7 +2729,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           schemes: ["t3code", "t3code-dev"],
         },
       ],
-      ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      ...(signed
+        ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") }
+        : { identity: "-", hardenedRuntime: false }),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,

@@ -17,6 +17,11 @@ Terms whose meaning matters across T3 Code. Architecture and lifecycle constrain
 | Activity       | A non-message timeline item, such as a tool action, approval, or failure.                         |
 | T3 home        | The base data directory. Runtime state normally lives under its `userdata` directory.             |
 
+| Profile | A named group of projects synchronized between environments. The selected profile belongs to each client. |
+| Space | A group of chats within a profile, with optional launch defaults. |
+| Dashboard | Cross-project threads grouped into Needs you, Running, Monitoring, and Done. |
+| Fork | A new thread continued from a source message with bounded inherited context. |
+
 ## Orchestration
 
 | Term                    | Meaning                                                                                      |

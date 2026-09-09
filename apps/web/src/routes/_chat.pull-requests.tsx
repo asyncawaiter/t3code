@@ -1,6 +1,17 @@
+import {
+  ALL_PROFILE,
+  ALL_PROFILE_ID,
+  findProfile,
+  resolveProfiles,
+  isProjectInProfile,
+} from "@t3tools/contracts";
+import { scopeProjectRef, scopedProjectKey } from "@t3tools/client-runtime/environment";
+import { useUiStateStore } from "../uiStateStore";
+import { usePrimarySettings } from "../hooks/useSettings";
+
+import { pullRequestHostOf, resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { Spinner } from "~/components/ui/spinner";
-import { pullRequestHostOf, resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   ProjectId,
@@ -334,6 +345,12 @@ function PullRequestsRouteView() {
   const capabilityKnown = environments.some((environment) => environment.serverConfig !== null);
   const pullRequestsSupported = environmentIds.length > 0;
   const allProjects = useProjects();
+  const rawProfiles = usePrimarySettings((settings) => settings.profiles);
+  const activeProfileId = useUiStateStore((state) => state.activeProfileId);
+  const activeProfile = useMemo(
+    () => findProfile(resolveProfiles(rawProfiles), activeProfileId) ?? ALL_PROFILE,
+    [rawProfiles, activeProfileId],
+  );
   // Whether the workspace has said what it holds yet. Until it has, an empty project list is
   // "not loaded" rather than "none", and telling a reader to add a project they already have is
   // the one wrong answer the empty state can give.
@@ -341,8 +358,16 @@ function PullRequestsRouteView() {
   // Only the projects the page can actually read: one on an environment that cannot list pull
   // requests could neither be listed nor acted on.
   const projects = useMemo(
-    () => allProjects.filter((project) => environmentIds.includes(project.environmentId)),
-    [allProjects, environmentIds],
+    () =>
+      allProjects.filter(
+        (project) =>
+          environmentIds.includes(project.environmentId) &&
+          isProjectInProfile(
+            activeProfile,
+            scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
+          ),
+      ),
+    [allProjects, environmentIds, activeProfile],
   );
   const environmentLabels = useMemo(
     () =>
@@ -427,16 +452,30 @@ function PullRequestsRouteView() {
     selectSelectedRightPanelSurface(state.byThreadKey, rightPanelRef),
   );
   const selectedPullRequestSurface =
-    selectedRightPanelSurface?.kind === "pull-request" ? selectedRightPanelSurface : null;
+    selectedRightPanelSurface?.kind === "pull-request" &&
+    projects.some(
+      (project) =>
+        project.environmentId === selectedRightPanelSurface.environmentId &&
+        project.id === selectedRightPanelSurface.projectId,
+    )
+      ? selectedRightPanelSurface
+      : null;
   const activePullRequestSurface = rightPanelState.isOpen ? selectedPullRequestSurface : null;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const rightPanelPresenceValue = useMemo(
     () => ({
       activeSurface: selectedPullRequestSurface,
-      surfaces: rightPanelState.surfaces,
+      surfaces: rightPanelState.surfaces.filter(
+        (surface) =>
+          surface.kind === "pull-request" &&
+          projects.some(
+            (project) =>
+              project.environmentId === surface.environmentId && project.id === surface.projectId,
+          ),
+      ),
     }),
-    [rightPanelState.surfaces, selectedPullRequestSurface],
+    [rightPanelState.surfaces, selectedPullRequestSurface, projects],
   );
   const rightPanelPresence = usePanelPresence(
     rightPanelState.isOpen && selectedPullRequestSurface !== null,
@@ -578,7 +617,8 @@ function PullRequestsRouteView() {
     readonly projectIds?: ReadonlyArray<ProjectId>;
   }> => {
     const plain = queryEnvironmentIds.map((environmentId) => ({ environmentId }));
-    if (!projectsKnown || scopedProjectId !== undefined) return plain;
+    if (!projectsKnown) return activeProfile.id === ALL_PROFILE_ID ? plain : [];
+    if (scopedProjectId !== undefined) return plain;
     const assignment = assignProjectsToEnvironments(
       projects,
       queryEnvironmentIds,
@@ -593,10 +633,14 @@ function PullRequestsRouteView() {
       if (projectIds === undefined) return [];
       // It lists everything it holds anyway, so the filter is left off and a one-server workspace
       // asks exactly the question it asked before.
-      if (projectIds.length === (totals.get(environmentId) ?? 0)) return [{ environmentId }];
+      if (
+        activeProfile.id === ALL_PROFILE_ID &&
+        projectIds.length === (totals.get(environmentId) ?? 0)
+      )
+        return [{ environmentId }];
       return [{ environmentId, projectIds }];
     });
-  }, [projects, projectsKnown, queryEnvironmentIds, scopedProjectId]);
+  }, [projects, projectsKnown, queryEnvironmentIds, scopedProjectId, activeProfile.id]);
   // Part of the scope, since a different split is a different question and its answers must not
   // be filed under the same page state.
   const assignmentKey = useMemo(
@@ -613,7 +657,7 @@ function PullRequestsRouteView() {
     .map(([environmentId, revision]) => `${environmentId}:${revision}`)
     .join("|");
   // Page size is view state, not a URL concern: a shared link should open the first page.
-  const scopeKey = `${environmentKey}:${assignmentKey}:${search.state}:${search.involvement}:${scopedProjectId ?? ""}:${search.host ?? ""}:${search.draft ?? ""}:${search.review ?? ""}:${search.checks ?? ""}:${search.author ?? ""}:${search.labels?.join("\u0000") ?? ""}`;
+  const scopeKey = `${activeProfile.id}:${environmentKey}:${assignmentKey}:${search.state}:${search.involvement}:${scopedProjectId ?? ""}:${search.host ?? ""}:${search.draft ?? ""}:${search.review ?? ""}:${search.checks ?? ""}:${search.author ?? ""}:${search.labels?.join("\u0000") ?? ""}`;
   const filterKey = `${scopeKey}:${sentQuery}`;
   const statsScopeRef = useRef<PullRequestStatsScope>({ key: filterKey, policy: statsPolicy });
   statsScopeRef.current = { key: filterKey, policy: statsPolicy };
@@ -1116,10 +1160,21 @@ function PullRequestsRouteView() {
         [
           ...(facetQuery.data?.entries ?? []),
           ...(baselineQuery.data?.entries ?? listData?.entries ?? []),
-        ],
+        ].filter((entry) =>
+          projects.some(
+            (project) =>
+              project.environmentId === entry.environmentId && project.id === entry.projectId,
+          ),
+        ),
         search.state,
       ),
-    [baselineQuery.data?.entries, facetQuery.data?.entries, listData?.entries, search.state],
+    [
+      baselineQuery.data?.entries,
+      facetQuery.data?.entries,
+      listData?.entries,
+      search.state,
+      projects,
+    ],
   );
 
   /** The hosts that narrowed the listing themselves, so their answer is not narrowed again. */
@@ -1135,7 +1190,16 @@ function PullRequestsRouteView() {
 
   const entries = useMemo(() => {
     const known = ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? []);
-    const involvementEntries = filterPullRequestsByInvolvement(known, viewers, search.involvement);
+    const involvementEntries = filterPullRequestsByInvolvement(
+      known.filter((entry) =>
+        projects.some(
+          (project) =>
+            project.environmentId === entry.environmentId && project.id === entry.projectId,
+        ),
+      ),
+      viewers,
+      search.involvement,
+    );
     // The hosts search more than the row shows — a body, a review, a commit message — so once
     // their answer is in, narrowing it again here would throw away matches the reader asked for.
     // The local pass stands in for the answer that has not arrived yet, and for the hosts that
@@ -1164,6 +1228,7 @@ function PullRequestsRouteView() {
         matchesPullRequestQuery(entry, typedParsed.text),
     );
   }, [
+    projects,
     filterKey,
     hasLocalFilters,
     localFilters,
@@ -1518,11 +1583,16 @@ function PullRequestsRouteView() {
   );
 
   const searchInput = (
-    <PullRequestSearchInput
-      value={search.q ?? ""}
-      busy={typedQuery.length > 0 && (!querySettled || showingCarried)}
-      onChange={(query) => updateListScope({ q: query || undefined })}
-    />
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      {activeProfile.id !== ALL_PROFILE_ID ? (
+        <span className="shrink-0 text-xs text-muted-foreground">{activeProfile.name}</span>
+      ) : null}
+      <PullRequestSearchInput
+        value={search.q ?? ""}
+        busy={typedQuery.length > 0 && (!querySettled || showingCarried)}
+        onChange={(query) => updateListScope({ q: query || undefined })}
+      />
+    </div>
   );
   const panelToggleControls = (
     <PanelLayoutControls

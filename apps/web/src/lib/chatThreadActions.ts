@@ -83,6 +83,25 @@ export function resolveThreadActionProjectRef(
   return context.defaultProjectRef;
 }
 
+/** Limit implicit creation to the selected profile without changing the open thread. */
+export function scopeNewThreadContext(
+  context: ChatThreadActionContext,
+  projectRefs: ReadonlyArray<ScopedProjectRef>,
+): ChatThreadActionContext {
+  const includes = (thread: ThreadContextLike | null | undefined) =>
+    thread != null &&
+    projectRefs.some(
+      (project) =>
+        project.environmentId === thread.environmentId && project.projectId === thread.projectId,
+    );
+  return {
+    ...context,
+    activeThread: includes(context.activeThread) ? context.activeThread : undefined,
+    activeDraftThread: includes(context.activeDraftThread) ? context.activeDraftThread : null,
+    defaultProjectRef: projectRefs[0] ?? null,
+  };
+}
+
 // New threads inherit only the *project* from the current context. Branch,
 // worktree, and env mode always come from the user's configured defaults —
 // carrying them over from the viewed thread meant "new thread" silently

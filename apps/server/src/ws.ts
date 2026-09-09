@@ -1,3 +1,4 @@
+import { dispatchAndWaitForMessageEdit } from "./orchestration/awaitMessageEdit.ts";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -38,6 +39,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
+  OrchestrationForkThreadError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
@@ -95,6 +97,7 @@ import {
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
+import { ThreadForkService } from "./orchestration/Layers/ThreadForkService.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -138,6 +141,7 @@ import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
+import * as UsageLimitsService from "./usage/UsageLimitsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -157,6 +161,7 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isOrchestrationForkThreadError = Schema.is(OrchestrationForkThreadError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -508,6 +513,7 @@ const makeWsRpcLayer = (
         }
       };
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+      const threadForkService = yield* ThreadForkService;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
@@ -611,6 +617,7 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
+      const usageLimits = yield* UsageLimitsService.UsageLimitsService;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -1327,9 +1334,16 @@ const makeWsRpcLayer = (
                     ),
                   )
                 : false;
-              const result = yield* dispatchNormalizedCommand(normalizedCommand).pipe(
-                Effect.tapError(() => cleanupFailedUploadedAttachments(command, normalizedCommand)),
-              );
+              const dispatch = () =>
+                dispatchNormalizedCommand(normalizedCommand).pipe(
+                  Effect.tapError(() =>
+                    cleanupFailedUploadedAttachments(command, normalizedCommand),
+                  ),
+                );
+              const result = yield* normalizedCommand.type === "thread.checkpoint.revert" &&
+              normalizedCommand.edit
+                ? dispatchAndWaitForMessageEdit(normalizedCommand, dispatch)
+                : dispatch();
               yield* recordClientCommandAnalytics(normalizedCommand);
               if (archiveCommand) {
                 if (shouldStopSessionAfterCommand) {
@@ -1408,6 +1422,22 @@ const makeWsRpcLayer = (
                     message: "Failed to load full thread diff",
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.forkThread]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.forkThread,
+            threadForkService.forkThread(input).pipe(
+              Effect.mapError((cause) =>
+                isOrchestrationForkThreadError(cause)
+                  ? cause
+                  : new OrchestrationForkThreadError({
+                      reason: "source-not-found",
+                      message: "Failed to fork the thread",
+                      cause,
+                    }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },
@@ -1991,11 +2021,11 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
-        [WS_METHODS.serverUpdateSettings]: ({ patch }) =>
+        [WS_METHODS.serverUpdateSettings]: ({ patch, baseProfiles, expectedProfileSourceId }) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateSettings,
             serverSettings
-              .updateSettings(patch)
+              .updateSettings(patch, baseProfiles, expectedProfileSourceId)
               .pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
             {
               "rpc.aggregate": "server",
@@ -2052,6 +2082,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverRefreshUsageRates, usage.refreshRates, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverConsumeUsageLimitReset]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverConsumeUsageLimitReset,
+            usageLimits.consumeReset(input),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
@@ -2893,6 +2929,16 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeResourceTelemetry,
             Stream.unwrap(
               Effect.map(resourceTelemetry.subscribe, ({ latest, changes }) =>
+                Stream.concat(Stream.make(latest), changes),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscribeUsageLimits]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeUsageLimits,
+            Stream.unwrap(
+              Effect.map(usageLimits.subscribe, ({ latest, changes }) =>
                 Stream.concat(Stream.make(latest), changes),
               ),
             ),

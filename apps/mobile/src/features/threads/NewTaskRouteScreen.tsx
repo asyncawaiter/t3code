@@ -1,3 +1,4 @@
+import { NewTaskOrganization } from "./NewTaskOrganization";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
@@ -177,6 +178,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
+      <NewTaskOrganization />
       {Platform.OS === "android" ? (
         <>
           {/* Android renders its own in-screen header instead of the native bar. */}

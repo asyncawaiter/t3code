@@ -1048,6 +1048,15 @@ export function createServerEnvironmentAtoms<R, E>(
       staleTimeMs: 60_000,
       refreshTrigger: ({ environmentId }) => usagePricesAtom(environmentId),
     }),
+    usageLimits: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:usage-limits",
+      tag: WS_METHODS.subscribeUsageLimits,
+      idleTtlMs: 0,
+    }),
+    consumeUsageLimitReset: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:consume-usage-limit-reset",
+      tag: WS_METHODS.serverConsumeUsageLimitReset,
+    }),
     configProjection,
     welcome,
     consumeResetCredit: createEnvironmentRpcCommand(runtime, {
@@ -1097,6 +1106,10 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverUpdateSettings,
       scheduler: configScheduler,
       concurrency: configConcurrency,
+    }),
+    settings: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:settings-read",
+      tag: WS_METHODS.serverGetSettings,
     }),
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",

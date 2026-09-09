@@ -1,4 +1,5 @@
 import { createThreadMovePlanner } from "../threads/threadOrder";
+import { profileRevealAtom, useProfiles, selectSpace } from "../../state/profiles";
 import {
   LegendList,
   type LegendListRef,
@@ -22,7 +23,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, Pressable, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, Pressable, ScrollView, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -79,6 +80,7 @@ import {
   type HomeProjectSortOrder,
 } from "./homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
+import { ProfilesPanel } from "./ProfilesPanel";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -210,6 +212,10 @@ function HomeTopContentSpacer() {
 /* ─── Main screen ────────────────────────────────────────────────────── */
 
 export function HomeScreen(props: HomeScreenProps) {
+  const reveal = useAtomValue(profileRevealAtom);
+  const organization = useProfiles();
+  const v2ListRef = useRef<FlatList<ThreadListV2ListItem>>(null);
+  const revealedRequest = useRef<number | null>(null);
   const [groupDisplayStates, setGroupDisplayStates] = useState<
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
@@ -419,9 +425,9 @@ export function HomeScreen(props: HomeScreenProps) {
         : buildHomeListLayout({
             groups: projectGroups,
             displayStates: effectiveGroupDisplayStates,
-            showAllThreads: hasSearchQuery,
+            showAllThreads: hasSearchQuery || reveal !== null,
           }),
-    [threadListV2Enabled, projectGroups, effectiveGroupDisplayStates, hasSearchQuery],
+    [threadListV2Enabled, projectGroups, effectiveGroupDisplayStates, hasSearchQuery, reveal],
   );
 
   const projectByKey = useMemo(() => {
@@ -702,12 +708,13 @@ export function HomeScreen(props: HomeScreenProps) {
       now: new Date().toISOString(),
       snoozedShelfExpanded,
       settledShelfExpanded,
-      selectedThreadKey: null,
+      selectedThreadKey: reveal?.threadKey ?? null,
     });
   }, [
     pendingOrder,
     queuedThreadKeys,
     nowMinute,
+    reveal,
     snoozeWakeTick,
     snoozedShelfExpanded,
     settledShelfExpanded,
@@ -768,7 +775,7 @@ export function HomeScreen(props: HomeScreenProps) {
         settledShelfHeaderIndex: threadListV2Layout.settledShelfHeaderIndex,
         snoozeLabelNow: `${nowMinute}:00.000Z`,
       }),
-    [settledShelfExpanded, snoozedShelfExpanded, threadListV2Layout, v2PendingTasks],
+    [nowMinute, settledShelfExpanded, snoozedShelfExpanded, threadListV2Layout, v2PendingTasks],
   );
 
   const renderV2Item = useCallback(
@@ -828,6 +835,7 @@ export function HomeScreen(props: HomeScreenProps) {
         <ThreadListV2Row
           onNewThreadOnBranch={props.onNewThreadOnBranch}
           thread={thread}
+          selected={`${thread.environmentId}:${thread.id}` === reveal?.threadKey}
           variant={item.item.variant}
           hasQueuedMessages={queuedThreadKeys.has(movedId)}
           snoozed={item.item.snoozed}
@@ -883,6 +891,7 @@ export function HomeScreen(props: HomeScreenProps) {
       );
     },
     [
+      reveal,
       handleDeleteThread,
       activeReorderEnvironmentIds,
       threadMovePlanners,
@@ -998,6 +1007,7 @@ export function HomeScreen(props: HomeScreenProps) {
           return (
             <ThreadListRow
               onNewThreadOnBranch={props.onNewThreadOnBranch}
+              selected={`${item.thread.environmentId}:${item.thread.id}` === reveal?.threadKey}
               variant="compact"
               thread={thread}
               hasQueuedMessages={queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)}
@@ -1036,6 +1046,7 @@ export function HomeScreen(props: HomeScreenProps) {
       }
     },
     [
+      reveal?.threadKey,
       handleSwipeableClose,
       handleSwipeableWillOpen,
       handleRegenerateThreadTitle,
@@ -1079,34 +1090,104 @@ export function HomeScreen(props: HomeScreenProps) {
     projectCount: props.projects.length,
   });
 
+  const revealCurrent = () => {
+    if (
+      !reveal ||
+      revealedRequest.current === reveal.request ||
+      props.searchQuery ||
+      props.selectedProjectKey ||
+      props.selectedEnvironmentId
+    )
+      return;
+    if (threadListV2Enabled) {
+      const index = threadListV2Items.findIndex(
+        (item) =>
+          item.type === "v2-thread" &&
+          `${item.item.thread.environmentId}:${item.item.thread.id}` === reveal.threadKey,
+      );
+      if (index >= 0 && v2ListRef.current) {
+        revealedRequest.current = reveal.request;
+        v2ListRef.current.scrollToIndex({ index, animated: false, viewPosition: 0.3 });
+      }
+    } else {
+      const index = listLayout.items.findIndex(
+        (item) =>
+          item.type === "thread" &&
+          `${item.thread.environmentId}:${item.thread.id}` === reveal.threadKey,
+      );
+      if (index >= 0 && listRef.current) {
+        revealedRequest.current = reveal.request;
+        void listRef.current.scrollToIndex({ index, animated: false, viewPosition: 0.3 });
+      }
+    }
+  };
+
+  useEffect(() => {
+    revealCurrent();
+  }, [
+    reveal,
+    threadListV2Items,
+    listLayout.items,
+    props.searchQuery,
+    props.selectedProjectKey,
+    props.selectedEnvironmentId,
+  ]);
   if (!hasAnyThreads) {
     return (
-      <View
-        className="flex-1 items-center justify-center bg-screen px-8"
-        style={{
-          paddingBottom: Math.max(insets.bottom, 24) + iosBottomToolbarClearance,
-          paddingTop: NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 72 : 0,
-        }}
-      >
-        <View className="w-full max-w-[430px]">
-          <EmptyState
-            title={emptyState.title}
-            detail={emptyState.detail}
-            actionLabel={!props.catalogState.hasReadyEnvironment ? "Add environment" : undefined}
-            onAction={!props.catalogState.hasReadyEnvironment ? props.onAddConnection : undefined}
-            variant="plain"
-          />
-          {emptyState.loading ? (
-            <View className="mt-4 items-center">
-              <ActivityIndicator colorClassName={"accent-icon-muted"} />
-            </View>
-          ) : null}
+      <ScrollView className="flex-1 bg-screen" contentInsetAdjustmentBehavior="automatic">
+        <ProfilesPanel />
+        <View
+          className="flex-1 items-center justify-center bg-screen px-8"
+          style={{
+            paddingBottom: Math.max(insets.bottom, 24) + iosBottomToolbarClearance,
+            paddingTop: NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 72 : 0,
+          }}
+        >
+          <View className="w-full max-w-[430px]">
+            <EmptyState
+              title={
+                props.catalogState.hasReadyEnvironment && organization.profile.id !== "all"
+                  ? "No chats in this view"
+                  : emptyState.title
+              }
+              detail={
+                props.catalogState.hasReadyEnvironment && organization.profile.id !== "all"
+                  ? "Start a chat here, or show all chats in this profile."
+                  : emptyState.detail
+              }
+              actionLabel={
+                !props.catalogState.hasReadyEnvironment
+                  ? "Add environment"
+                  : organization.spaceId !== null
+                    ? "Show all chats"
+                    : undefined
+              }
+              onAction={
+                !props.catalogState.hasReadyEnvironment
+                  ? props.onAddConnection
+                  : organization.spaceId !== null
+                    ? () => selectSpace(null)
+                    : undefined
+              }
+              variant="plain"
+            />
+            {emptyState.loading ? (
+              <View className="mt-4 items-center">
+                <ActivityIndicator colorClassName={"accent-icon-muted"} />
+              </View>
+            ) : null}
+          </View>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
-  const listHeader = Platform.OS === "ios" ? null : <HomeTopContentSpacer />;
+  const listHeader = (
+    <>
+      {Platform.OS !== "ios" && <HomeTopContentSpacer />}
+      <ProfilesPanel />
+    </>
+  );
 
   // Project scoping lives in the header filter menu (no inline chip row on
   // mobile — the menu is the one filter surface).
@@ -1148,6 +1229,15 @@ export function HomeScreen(props: HomeScreenProps) {
       <View className="flex-1 bg-screen">
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <FlatList
+            ref={v2ListRef}
+            onContentSizeChange={revealCurrent}
+            onScrollToIndexFailed={({ index, averageItemLength }) => {
+              revealedRequest.current = null;
+              v2ListRef.current?.scrollToOffset({
+                offset: index * averageItemLength,
+                animated: false,
+              });
+            }}
             data={threadListV2Items}
             renderItem={renderV2Item}
             keyExtractor={v2KeyExtractor}
@@ -1200,6 +1290,7 @@ export function HomeScreen(props: HomeScreenProps) {
       <SwipeableScrollGateProvider enabled={swipeEnabled}>
         <LegendList
           ref={listRef}
+          onContentSizeChange={revealCurrent}
           data={listLayout.items}
           renderItem={renderItem}
           keyExtractor={keyExtractor}

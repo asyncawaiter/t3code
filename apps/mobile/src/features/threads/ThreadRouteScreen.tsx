@@ -1,3 +1,6 @@
+import { revealProfileThread, useProfiles } from "../../state/profiles";
+import { profileForProject, spaceForThread } from "@t3tools/contracts";
+import { ThreadMessageActionsProvider } from "./ThreadMessageActions";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
@@ -115,6 +118,7 @@ function OpeningThreadLoadingScreen() {
 type ThreadRouteScreenRouteProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
+  readonly anchorMessageId?: string;
 }>;
 
 interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
@@ -236,6 +240,7 @@ function ThreadRouteContent(
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
   const threadId = firstRouteParam(params.threadId);
+  const routeAnchorMessageId = firstRouteParam(params.anchorMessageId);
   const routeThreadIdentity =
     environmentIdRaw !== null && threadId !== null ? `${environmentIdRaw}:${threadId}` : null;
   const [inspectorSelection, setInspectorSelection] = useState<ThreadInspectorSelection | null>(
@@ -315,7 +320,33 @@ function ThreadRouteContent(
 
   /* ─── Native header theming ──────────────────────────────────────── */
   const usesNativeHeaderGlass = NATIVE_LIQUID_GLASS_SUPPORTED;
+  const { profiles } = useProfiles();
+  const parentProfile = selectedThread
+    ? profileForProject(profiles, `${selectedThread.environmentId}:${selectedThread.projectId}`)
+    : undefined;
+  const parentSpace =
+    parentProfile && selectedThread
+      ? spaceForThread(
+          parentProfile,
+          `${selectedThread.environmentId}:${selectedThread.id}`,
+          `${selectedThread.environmentId}:${selectedThread.projectId}`,
+        )
+      : undefined;
+  const showInList = useCallback(() => {
+    if (!selectedThread) return;
+    revealProfileThread(selectedThread);
+    if (layout.usesSplitView) {
+      if (!panes.primarySidebarVisible) togglePrimarySidebar();
+    } else navigation.dispatch(StackActions.popTo("Home"));
+  }, [
+    selectedThread,
+    layout.usesSplitView,
+    panes.primarySidebarVisible,
+    togglePrimarySidebar,
+    navigation,
+  ]);
   const headerSubtitle = [
+    parentProfile ? `${parentProfile.name}${parentSpace ? ` / ${parentSpace.name}` : ""}` : null,
     selectedThreadProject?.title ?? null,
     selectedEnvironmentConnection?.environmentLabel ?? null,
   ]
@@ -840,56 +871,64 @@ function ThreadRouteContent(
       <GitActionProgressOverlay progress={gitActionProgress} onDismiss={dismissGitActionResult} />
 
       <View className="flex-1 bg-screen">
-        <ThreadDetailScreen
-          selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
-          contentPresentation={contentPresentation}
-          screenTone={connectionTone(routeConnectionState)}
-          connectionError={routeConnectionError}
-          environmentLabel={selectedEnvironmentConnection?.environmentLabel ?? null}
-          feedbackSubmissions={composer.feedbackSubmissions}
-          onDismissFeedback={composer.dismissFeedback}
-          selectedThreadFeed={composer.selectedThreadFeed}
-          activeWorkStartedAt={composer.activeWorkStartedAt}
-          isCompacting={composer.isCompacting}
-          creationState={creationState}
-          activePendingApproval={requests.activePendingApproval}
-          respondingApprovalId={requests.respondingApprovalId}
-          activePendingUserInput={requests.activePendingUserInput}
-          activePendingUserInputDrafts={requests.activePendingUserInputDrafts}
-          activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
-          respondingUserInputId={requests.respondingUserInputId}
-          draftMessage={composer.draftMessage}
-          draftAttachments={composer.draftAttachments}
-          connectionStateLabel={routeConnectionState}
-          threadSyncStatus={selectedThreadDetailState.status}
-          loadEarlier={loadEarlierTurns}
+        <ThreadMessageActionsProvider
+          thread={selectedThreadDetail}
           environmentId={selectedThread.environmentId}
-          projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
-          threadCwd={selectedThreadCwd}
-          selectedThreadQueueCount={composer.selectedThreadQueueCount}
-          queuedMessages={composer.selectedThreadQueuedMessages}
-          dispatchingMessageId={composer.dispatchingQueuedMessageId}
-          layoutVariant={layout.variant}
-          usesAutomaticContentInsets={usesNativeHeaderGlass}
-          onOpenConnectionEditor={handleOpenConnectionEditor}
-          onChangeDraftMessage={composer.onChangeDraftMessage}
-          onPickDraftMedia={composer.onPickDraftMedia}
-          onPickDraftFiles={composer.onPickDraftFiles}
-          onNativePasteImages={composer.onNativePasteImages}
-          onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
-          onStopThread={handleStopThread}
-          onSendMessage={composer.onSendMessage}
-          onReconnectEnvironment={handleReconnectEnvironment}
-          onUpdateThreadModelSelection={composer.onUpdateModelSelection}
-          onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}
-          onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}
-          onRespondToApproval={requests.onRespondToApproval}
-          onSelectUserInputOption={requests.onSelectUserInputOption}
-          onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}
-          onSubmitUserInput={requests.onSubmitUserInput}
-          onDismissUserInput={requests.onDismissUserInput}
-        />
+          connected={routeConnectionState === "connected"}
+        >
+          <ThreadDetailScreen
+            selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
+            contentPresentation={contentPresentation}
+            screenTone={connectionTone(routeConnectionState)}
+            connectionError={routeConnectionError}
+            environmentLabel={selectedEnvironmentConnection?.environmentLabel ?? null}
+            feedbackSubmissions={composer.feedbackSubmissions}
+            onDismissFeedback={composer.dismissFeedback}
+            selectedThreadFeed={composer.selectedThreadFeed}
+            activeWorkStartedAt={composer.activeWorkStartedAt}
+            isCompacting={composer.isCompacting}
+            creationState={creationState}
+            activePendingApproval={requests.activePendingApproval}
+            respondingApprovalId={requests.respondingApprovalId}
+            activePendingUserInput={requests.activePendingUserInput}
+            activePendingUserInputDrafts={requests.activePendingUserInputDrafts}
+            activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
+            respondingUserInputId={requests.respondingUserInputId}
+            draftMessage={composer.draftMessage}
+            draftAttachments={composer.draftAttachments}
+            connectionStateLabel={routeConnectionState}
+            threadSyncStatus={selectedThreadDetailState.status}
+            loadEarlier={loadEarlierTurns}
+            environmentId={selectedThread.environmentId}
+            initialAnchorMessageId={routeAnchorMessageId}
+            projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
+            threadCwd={selectedThreadCwd}
+            selectedThreadQueueCount={composer.selectedThreadQueueCount}
+            queuedMessages={composer.selectedThreadQueuedMessages}
+            dispatchingMessageId={composer.dispatchingQueuedMessageId}
+            layoutVariant={layout.variant}
+            usesAutomaticContentInsets={usesNativeHeaderGlass}
+            onOpenConnectionEditor={handleOpenConnectionEditor}
+            onChangeDraftMessage={composer.onChangeDraftMessage}
+            onPickDraftMedia={composer.onPickDraftMedia}
+            onPickDraftFiles={composer.onPickDraftFiles}
+            onNativePasteImages={composer.onNativePasteImages}
+            onRemoveDraftImage={composer.onRemoveDraftImage}
+            serverConfig={serverConfig}
+            onStopThread={handleStopThread}
+            onSendMessage={composer.onSendMessage}
+            onReconnectEnvironment={handleReconnectEnvironment}
+            onUpdateThreadModelSelection={composer.onUpdateModelSelection}
+            onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}
+            onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}
+            onRespondToApproval={requests.onRespondToApproval}
+            onSelectUserInputOption={requests.onSelectUserInputOption}
+            onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}
+            onSubmitUserInput={requests.onSubmitUserInput}
+            onDismissUserInput={requests.onDismissUserInput}
+          />
+        </ThreadMessageActionsProvider>
       </View>
     </>
   );
@@ -928,7 +967,16 @@ function ThreadRouteContent(
           // reserved for future breadcrumbs/status).
           unstable_headerRightItems:
             Platform.OS === "ios"
-              ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
+              ? () => [
+                  withNativeGlassHeaderItem({
+                    type: "button",
+                    identifier: "show-in-list",
+                    accessibilityLabel: "Show in list",
+                    icon: { name: "scope", type: "sfSymbol" },
+                    onPress: showInList,
+                  }),
+                  ...(layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems),
+                ]
               : undefined,
           unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
         }}

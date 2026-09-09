@@ -13,6 +13,7 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
+  mergeProfileEdits,
   type EnvironmentId,
   ServerSettings,
   type ServerSettingsPatch,
@@ -43,10 +44,16 @@ import {
 import * as Struct from "effect/Struct";
 import { toastManager } from "~/components/ui/toast";
 import { isHostedStaticApp } from "~/hostedPairing";
-import { primaryServerSettingsAtom, serverEnvironment } from "~/state/server";
+import {
+  primaryServerConfigAtom,
+  primaryServerSettingsAtom,
+  serverEnvironment,
+} from "~/state/server";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useTheme } from "./useTheme";
+import { useSaveProfiles } from "./useProfileSync";
+export { useProfilesLoaded } from "./useProfileSync";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
@@ -397,14 +404,28 @@ export function usePrimarySettings<T = UnifiedSettings>(
   return useMergedSettings(useAtomValue(primaryServerSettingsAtom), selector);
 }
 
+/**
+ * Whether `usePrimarySettings` is backed by a real, loaded server config
+ * rather than `DEFAULT_SERVER_SETTINGS`. Shared keys (like worktree defaults) fan
+ * out a write to every connected environment, so writing from the
+ * pre-load default snapshot would overwrite real values everywhere.
+ * Callers that write shared keys must gate on this, not just render with it.
+ */
+export function usePrimarySettingsLoaded(): boolean {
+  return useAtomValue(primaryServerConfigAtom) !== null;
+}
+
 export const PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE =
   "This setting is saved on a server, and the hosted app is not anchored to one. Change it from the desktop app or from the server's own address.";
 
 /**
  * Whether primary-scoped server settings have a server to live on. The
  * hosted app connects to every environment as a remote, so it has no primary:
- * `usePrimarySettings` reads schema defaults there and writes have nowhere
- * to go. Desktop and server-served web always have one.
+ * `usePrimarySettings` reads schema defaults there. Shared keys (like
+ * worktree defaults) still fan a write out to every connected environment in that
+ * case, which is exactly why writes from an unloaded primary must be gated
+ * separately with `usePrimarySettingsLoaded`. Desktop and server-served web
+ * always have a primary.
  */
 export function usePrimarySettingsAvailable(): boolean {
   const primaryEnvironment = usePrimaryEnvironment();
@@ -421,6 +442,8 @@ export function usePrimarySettingsAvailable(): boolean {
  * through client persistence.
  */
 function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
+  const saveProfiles = useSaveProfiles();
+  const displayedProfiles = useAtomValue(primaryServerSettingsAtom).profiles;
   const persistServerSettings = useAtomCommand(
     serverEnvironment.updateSettings,
     "server settings update",
@@ -428,7 +451,20 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
   const { environments } = useEnvironments();
   const updateSettings = useCallback(
     (patch: UnifiedSettingsPatch) => {
-      const { serverPatch, clientPatch } = splitPatch(patch);
+      const { profiles, ...otherPatch } = patch;
+      if (profiles) {
+        void saveProfiles((current) =>
+          mergeProfileEdits(current, displayedProfiles, profiles),
+        ).catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Profile changes not saved",
+            description:
+              error instanceof Error ? error.message : "Reconnect the profile source and retry.",
+          });
+        });
+      }
+      const { serverPatch, clientPatch } = splitPatch(otherPatch);
 
       if (Object.keys(serverPatch).length > 0) {
         const { sharedPatch, localPatch } = splitSharedServerPatch(serverPatch);
@@ -487,7 +523,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
         void persistClientSettingsPatch(clientPatch);
       }
     },
-    [environmentId, environments, persistServerSettings],
+    [environments, environmentId, persistServerSettings, saveProfiles, displayedProfiles],
   );
 
   return updateSettings;

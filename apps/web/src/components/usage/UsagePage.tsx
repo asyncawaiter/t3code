@@ -1,10 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
-import {
-  USAGE_CONTRACT_VERSION,
-  type EnvironmentId,
-  type UsageProviderKind,
-} from "@t3tools/contracts";
+import { USAGE_CONTRACT_VERSION, type EnvironmentId } from "@t3tools/contracts";
 import {
   CircleAlertIcon,
   ChevronDownIcon,
@@ -61,7 +57,12 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
-import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
+import {
+  PROVIDER_ORDER,
+  PROVIDER_PRESENTATION,
+  ProviderMark,
+  providersWithUsage,
+} from "./usageProviders";
 import {
   readUsagePagePreferences,
   saveUsagePagePreferences,
@@ -595,18 +596,6 @@ export function UsagePage() {
       </div>
     </SidebarInset>
   );
-}
-
-/** Brand mark for the harness a row belongs to. */
-function ProviderMark({
-  provider,
-  className,
-}: {
-  readonly provider: UsageProviderKind;
-  readonly className: string;
-}) {
-  const Mark = PROVIDER_PRESENTATION[provider].mark;
-  return <Mark className={cn("shrink-0", className)} aria-hidden />;
 }
 
 function Metric({ label, value }: { readonly label: string; readonly value: string }) {

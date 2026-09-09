@@ -1228,7 +1228,7 @@ export function makeCursorAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: { supportsConversationRollback: false, sessionModelSwitch: "in-session" },
       compaction: { type: "slash-command", command: "/compress" },
       startSession,
       sendTurn,

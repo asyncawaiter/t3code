@@ -33,6 +33,7 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../orchestration/Layers/ProjectionPipeline.ts";
+import { ThreadForkContextRepositoryLive } from "../persistence/Layers/ThreadForkContext.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { ProviderCommandReactorLive } from "../orchestration/Layers/ProviderCommandReactor.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
@@ -566,6 +567,7 @@ const integrationLayer = Layer.mergeAll(
   ),
   OrchestrationProjectionSnapshotQueryLive,
   integrationRuntimeRepository,
+  ThreadForkContextRepositoryLive.pipe(Layer.provide(SqlitePersistenceMemory)),
   ProviderSessionDirectoryLive.pipe(Layer.provide(integrationRuntimeRepository)),
   Layer.succeed(AgentSessionScanner.AgentSessionScanner, integrationScanner),
 ).pipe(

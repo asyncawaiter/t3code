@@ -35,6 +35,7 @@ import {
   requireThreadArchived,
   requireThreadAbsent,
   requireThreadNotArchived,
+  requireThreadNotDeleted,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
@@ -360,6 +361,46 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      let title = command.title;
+      const forkedFrom = command.forkedFrom;
+      if (forkedFrom) {
+        const sourceThread = yield* requireThreadNotDeleted({
+          readModel,
+          command,
+          threadId: forkedFrom.threadId,
+        });
+        if (sourceThread.projectId !== command.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Fork source thread '${forkedFrom.threadId}' belongs to project '${sourceThread.projectId}', not '${command.projectId}'.`,
+          });
+        }
+        if (title === sourceThread.title) {
+          const baseTitle = title.replace(/ \(fork \d+\)$/, "");
+          let number = 1;
+          const prefix = `${baseTitle} (fork `;
+          for (const thread of readModel.threads) {
+            if (thread.projectId !== command.projectId) continue;
+            if (thread.forkedFrom?.threadId === sourceThread.id) number += 1;
+          }
+          for (const thread of readModel.threads) {
+            if (thread.projectId !== command.projectId || !thread.title.startsWith(prefix))
+              continue;
+            const suffix = thread.title.slice(prefix.length);
+            if (!/^\d+\)$/.test(suffix)) continue;
+            const previous = Number(suffix.slice(0, -1));
+            if (Number.isSafeInteger(previous)) number = Math.max(number, previous + 1);
+          }
+          title = `${baseTitle} (fork ${number})`;
+        }
+        // No check that forkedFrom.messageId exists on sourceThread here: the
+        // command read model never carries historical messages (see
+        // ProjectionSnapshotQuery.getCommandReadModel), so sourceThread.messages
+        // is always empty and any such check would reject every fork whose
+        // source message predates this server process. Message existence (and
+        // that it's an assistant message) is validated by ThreadForkService,
+        // which reads the full thread-detail projection before dispatching.
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -372,7 +413,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           projectId: command.projectId,
-          title: command.title,
+          title,
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
@@ -380,6 +421,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
+          ...(forkedFrom !== undefined ? { forkedFrom } : {}),
         },
       };
     }
@@ -1420,11 +1462,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.checkpoint.revert": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (
+        command.edit &&
+        (thread.archivedAt !== null ||
+          thread.session?.status === "running" ||
+          thread.session?.status === "starting" ||
+          thread.latestTurn?.state === "running")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Stop the current turn before editing an active chat.",
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -1436,6 +1490,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          ...(command.edit ? { edit: command.edit } : {}),
           createdAt: command.createdAt,
         },
       };
@@ -1738,6 +1793,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          ...(command.sourceMessageId ? { sourceMessageId: command.sourceMessageId } : {}),
+          ...(command.removedTurnId ? { removedTurnId: command.removedTurnId } : {}),
+          ...(command.requestId ? { requestId: command.requestId } : {}),
+          ...(command.resending !== undefined ? { resending: command.resending } : {}),
         },
       };
     }
