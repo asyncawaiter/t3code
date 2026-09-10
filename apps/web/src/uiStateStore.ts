@@ -343,7 +343,16 @@ export function setActiveProfileId(state: UiState, id: string | null): UiState {
     ...state,
     activeProfileId: id,
     spaceSelection: undefined,
+    sidebarProjectScopeKey: null,
   };
+}
+
+export function selectSidebarSpace(
+  state: UiState,
+  profileId: string,
+  filter: string | null,
+): UiState {
+  return { ...state, spaceSelection: { profileId, filter }, sidebarProjectScopeKey: null };
 }
 
 function setPullRequestMergeMethod(state: UiState, method: PullRequestMergeMethod): UiState {

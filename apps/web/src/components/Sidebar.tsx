@@ -16,7 +16,8 @@ import {
   type Profile,
   type ProfileSpace,
 } from "@t3tools/contracts";
-import { SpaceToolbar, SpaceTile, SPACE_THREAD_DRAG } from "./sidebar/Spaces";
+import { SpaceToolbar, SpaceTile, DefaultSpaceTile, SPACE_THREAD_DRAG } from "./sidebar/Spaces";
+import { profileSpaceCounts, profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
@@ -55,7 +56,6 @@ import {
   resolveEnvironmentMachineKind,
   resolveProfiles,
   type EnvironmentMachineKind,
-  type ProjectIconOverride,
   type ScopedThreadRef,
   type ScopedProjectRef,
   type ThreadId,
@@ -134,7 +134,11 @@ import {
   buildSidebarProjectSnapshots,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import {
+  legacyProjectCwdPreferenceKey,
+  selectSidebarSpace,
+  useUiStateStore,
+} from "../uiStateStore";
 import {
   getThreadKeysToDeselectAfterDelete,
   useThreadSelectionStore,
@@ -782,14 +786,14 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         tabIndex={0}
         data-testid="sidebar-draft-row"
         className={cn(
-          "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left text-sidebar-foreground outline-none select-none",
+          "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-lg border border-sidebar-border/60 text-left text-sidebar-foreground outline-none select-none focus-visible:ring-2 focus-visible:ring-ring",
           props.isActive ? "bg-sidebar-row-active" : draftSurfaceClassName,
         )}
         onClick={handleActivate}
         onKeyDown={handleKeyDown}
       >
-        <div className="relative z-10 px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
-          <div className="flex h-5 min-w-0 items-center gap-1.5">
+        <div className="relative z-10 px-2.5 py-1.5">
+          <div className="flex h-4.5 min-w-0 items-center gap-1.5">
             <SquarePenIcon aria-hidden className={draftPenClassName} />
             {props.project ? (
               <ProjectFavicon project={props.project} className="size-4 shrink-0" />
@@ -1769,8 +1773,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       {...sortableRootProps}
       data-current-thread={props.isActive || undefined}
       className={cn(
-        // Matches the h-[4.875rem] content box; the py-0.5 padding is added on top.
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
+        // The 72px content and 2px border keep the original compact card height.
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_74px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
@@ -1791,8 +1795,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
-            <div className="flex h-5 min-w-0 items-center gap-1.5">
+          <div className="relative z-10 h-18 px-2.5 py-1.5">
+            <div className="flex h-4.5 min-w-0 items-center gap-1.5">
               {draftIndicator}
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
@@ -1963,7 +1967,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
-                  <span className="min-w-0 flex-1 truncate whitespace-nowrap text-muted-foreground/40">
+                  <span className="min-w-0 flex-1 truncate border-l border-sidebar-border/70 pl-1.5 whitespace-nowrap">
                     {thread.branch}
                   </span>
                 </>
@@ -2222,6 +2226,10 @@ export default function Sidebar() {
   const { getPinMenu, handlePinScope } = useThreadPinMenu();
   const pinIndex = useMemo(() => indexProfilePins(rawProfiles), [rawProfiles]);
   const spaceIndex = useMemo(() => indexProfileSpaces(rawProfiles), [rawProfiles]);
+  const spaceCounts = useMemo(
+    () => profileSpaceCounts(rawProfiles, activeProfile.id, threads),
+    [rawProfiles, activeProfile.id, threads],
+  );
   const defaultSpaceFilter = activeProfile.id === ALL_PROFILE_ID ? null : OUTSIDE_SPACES;
   const spaceSelection = useUiStateStore((state) => state.spaceSelection);
   const spaceFilter = resolveSidebarSpaceFilter(
@@ -2230,7 +2238,7 @@ export default function Sidebar() {
   );
   const setSelectedSpaceId = useCallback(
     (filter: string | null) => {
-      useUiStateStore.setState({ spaceSelection: { profileId: activeProfile.id, filter } });
+      useUiStateStore.setState((state) => selectSidebarSpace(state, activeProfile.id, filter));
     },
     [activeProfile.id],
   );
@@ -2685,6 +2693,7 @@ export default function Sidebar() {
     snoozedThreads,
     settledThreads,
     snoozeNow,
+    spaceAttention,
   } = useMemo(() => {
     // Snooze classification uses a REAL clock, not the quantized minute:
     // wake times are second-precise and a woken thread must not linger on
@@ -2757,7 +2766,13 @@ export default function Sidebar() {
     // Server capability only gates DRAGGING — it must not influence the
     // sort, or mixed-version fleets would render different pinned orders on
     // web and mobile from the same data.
-    const sortedPinned = sortPinnedThreadsForSidebar(pinned).toSorted(
+    const inSpace = profileThreadFilter(rawProfiles, activeProfile.id, spaceFilter);
+    const spaceAttention = new Set(
+      buildDashboard([...pinned, ...active], preciseNow).lanes["needs-you"].map((entry) =>
+        scopedThreadKey(scopeThreadRef(entry.shell.environmentId, entry.shell.id)),
+      ),
+    );
+    const sortedPinned = sortPinnedThreadsForSidebar(pinned.filter(inSpace)).toSorted(
       (left, right) =>
         Number(
           Boolean(
@@ -2770,7 +2785,7 @@ export default function Sidebar() {
           ),
         ),
     );
-    const sortedActive = sortThreadsForSidebar(active);
+    const sortedActive = sortThreadsForSidebar(active.filter(inSpace));
     return {
       pinnedThreads:
         optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
@@ -2791,12 +2806,15 @@ export default function Sidebar() {
               getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
             }),
       // Soonest wake first: "what comes back next" is the shelf's question.
-      snoozedThreads: snoozed.toSorted(
-        (left, right) =>
-          firstValidTimestampMs(left.snoozedUntil ?? null) -
-          firstValidTimestampMs(right.snoozedUntil ?? null),
-      ),
-      settledThreads: sortSettledThreadsForSidebar(settled),
+      snoozedThreads: snoozed
+        .filter(inSpace)
+        .toSorted(
+          (left, right) =>
+            firstValidTimestampMs(left.snoozedUntil ?? null) -
+            firstValidTimestampMs(right.snoozedUntil ?? null),
+        ),
+      settledThreads: sortSettledThreadsForSidebar(settled.filter(inSpace)),
+      spaceAttention,
       snoozeNow: preciseNow,
     };
   }, [
@@ -2808,17 +2826,10 @@ export default function Sidebar() {
     threads,
     pinIndex,
     activeProfile.id,
+    rawProfiles,
+    spaceFilter,
   ]);
 
-  const spaceAttention = useMemo(
-    () =>
-      new Set(
-        buildDashboard([...pinnedThreads, ...activeThreads], snoozeNow).lanes["needs-you"].map(
-          (entry) => scopedThreadKey(scopeThreadRef(entry.shell.environmentId, entry.shell.id)),
-        ),
-      ),
-    [pinnedThreads, activeThreads, snoozeNow],
-  );
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
@@ -2943,34 +2954,8 @@ export default function Sidebar() {
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
   const orderedThreads = useMemo(
-    () =>
-      [
-        ...pinnedThreads,
-        ...activeThreads,
-        ...visibleSnoozedThreads,
-        ...(spaceFilter !== null && settledShelfExpanded ? settledThreads : renderedSettledThreads),
-      ].filter((thread) => {
-        const space = spaceIndex.get(
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        )?.space;
-        return (
-          matchesSidebarSpace(space?.id, spaceFilter) ||
-          (thread.pinnedAt != null &&
-            !pinIndex.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
-              ?.spaceId)
-        );
-      }),
-    [
-      pinIndex,
-      pinnedThreads,
-      activeThreads,
-      visibleSnoozedThreads,
-      renderedSettledThreads,
-      spaceFilter,
-      spaceIndex,
-      settledShelfExpanded,
-      settledThreads,
-    ],
+    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
+    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -3535,10 +3520,7 @@ export default function Sidebar() {
       items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
     }
     items.push({ kind: "marker", marker: "settled-header" });
-    const settledRows = rowsOf(
-      spaceFilter !== null && settledShelfExpanded ? settledThreads : renderedSettledThreads,
-      "settled",
-    );
+    const settledRows = rowsOf(renderedSettledThreads, "settled");
     items.push({ kind: "marker", marker: "settled-placeholder" });
     items.push(...settledRows);
     return items;
@@ -3550,9 +3532,6 @@ export default function Sidebar() {
     snoozedThreads.length,
     visibleSnoozedThreads,
     threadByKey,
-    spaceFilter,
-    settledShelfExpanded,
-    settledThreads,
   ]);
   useEffect(() => {
     if (
@@ -4730,13 +4709,17 @@ export default function Sidebar() {
               />
             }
           >
-            <span className="text-[10px] text-sidebar-muted-foreground">Project</span>
             <span className="min-w-0 flex-1 truncate">
-              {scopedProjectGroup?.displayName ?? "All projects"}
+              {scopedProjectGroup
+                ? `Project: ${scopedProjectGroup.displayName}`
+                : "Filter chats by project"}
             </span>
             <ChevronDownIcon className="size-3 shrink-0 text-sidebar-muted-foreground" />
           </ComboboxTrigger>
           <ComboboxPopup align="start" className="w-(--anchor-width) min-w-0 overflow-hidden">
+            <p className="px-3 pt-2 text-[11px] text-muted-foreground">
+              Narrow this view to one project.
+            </p>
             <div className="shrink-0 px-3 pt-2.5">
               <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
                 <SearchIcon
@@ -4829,6 +4812,17 @@ export default function Sidebar() {
             </ComboboxList>
           </ComboboxPopup>
         </Combobox>
+        {scopedProjectGroup ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Clear project filter"
+            title="Show chats from all projects in this view"
+            onClick={() => setProjectScopeKey(null)}
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -5289,79 +5283,76 @@ export default function Sidebar() {
                         />
                       );
                       const items: ReactNode[] = [];
-                      if (activeProfile.id !== ALL_PROFILE_ID) {
-                        items.push(
-                          <li
-                            key="spaces"
-                            className="mx-1 mb-2 list-none rounded-2xl bg-sidebar-foreground/[0.025] p-1.5"
-                            role="group"
-                            aria-label={`Spaces in ${activeProfile.name}`}
-                          >
-                            <SpaceToolbar
-                              onCreated={setNewSpaceSetupId}
-                              key={activeProfile.id}
-                              profile={activeProfile}
-                              onChange={changeSpaces}
-                              selectedSpaceId={spaceFilter}
-                              onFilterChange={setSelectedSpaceId}
-                              disabled={!primarySettingsLoaded}
+                      items.push(
+                        <li
+                          key="spaces"
+                          className="mx-1 mb-2 list-none rounded-2xl bg-sidebar-foreground/[0.025] p-1.5"
+                          role="group"
+                          aria-label={`Spaces in ${activeProfile.name}`}
+                        >
+                          <SpaceToolbar
+                            onCreated={setNewSpaceSetupId}
+                            key={activeProfile.id}
+                            profile={activeProfile}
+                            onChange={changeSpaces}
+                            selectedSpaceId={spaceFilter}
+                            onFilterChange={setSelectedSpaceId}
+                            disabled={!primarySettingsLoaded}
+                          />
+                          <ul aria-label="Spaces" className="mt-1 grid grid-cols-2 gap-1.5">
+                            <DefaultSpaceTile
+                              count={spaceCounts.get(OUTSIDE_SPACES) ?? 0}
+                              selected={spaceFilter === OUTSIDE_SPACES}
+                              onSelect={() => setSelectedSpaceId(OUTSIDE_SPACES)}
+                              onNewChat={() => {
+                                setSelectedSpaceId(OUTSIDE_SPACES);
+                                openChatCreation();
+                              }}
                             />
-                            {activeProfile.spaces?.length ? (
-                              <ul aria-label="Spaces" className="mt-1 grid grid-cols-2 gap-1.5">
-                                {activeProfile.spaces.map((space) => (
-                                  <SpaceTile
-                                    offerSetup={newSpaceSetupId === space.id}
-                                    key={space.id}
-                                    profile={activeProfile}
-                                    space={space}
-                                    count={
-                                      [
-                                        ...pinnedThreads,
-                                        ...activeThreads,
-                                        ...snoozedThreads,
-                                        ...settledThreads,
-                                      ].filter((thread) => threadSpace(thread)?.id === space.id)
-                                        .length
-                                    }
-                                    attention={threads.some(
-                                      (thread) =>
-                                        threadSpace(thread)?.id === space.id &&
-                                        spaceAttention.has(
-                                          scopedThreadKey(
-                                            scopeThreadRef(thread.environmentId, thread.id),
-                                          ),
-                                        ),
-                                    )}
-                                    selected={selectedSpace?.id === space.id}
-                                    onSelect={() =>
-                                      setSelectedSpaceId(
-                                        selectedSpace?.id === space.id ? OUTSIDE_SPACES : space.id,
-                                      )
-                                    }
-                                    onChange={changeSpaces}
-                                    onMove={moveSpaceThreads}
-                                    onLaunch={async (projectRef, defaults) => {
-                                      const opened = await handleNewThreadRef.current(projectRef, {
-                                        forceNew: true,
-                                        spaceId: space.id,
-                                        useProjectDefaults: true,
-                                        ...(defaults.modelSelection
-                                          ? { modelSelection: defaults.modelSelection }
-                                          : {}),
-                                        ...(defaults.envMode ? { envMode: defaults.envMode } : {}),
-                                      });
-                                      if (!opened)
-                                        throw new Error("Could not open the draft. Try again.");
-                                      setProjectScopeKey(null);
-                                    }}
-                                    disabled={!primarySettingsLoaded}
-                                  />
-                                ))}
-                              </ul>
-                            ) : null}
-                          </li>,
-                        );
-                      }
+                            {activeProfile.spaces?.map((space) => (
+                              <SpaceTile
+                                offerSetup={newSpaceSetupId === space.id}
+                                key={space.id}
+                                profile={activeProfile}
+                                space={space}
+                                count={spaceCounts.get(space.id) ?? 0}
+                                attention={threads.some(
+                                  (thread) =>
+                                    threadSpace(thread)?.id === space.id &&
+                                    spaceAttention.has(
+                                      scopedThreadKey(
+                                        scopeThreadRef(thread.environmentId, thread.id),
+                                      ),
+                                    ),
+                                )}
+                                selected={selectedSpace?.id === space.id}
+                                onSelect={() =>
+                                  setSelectedSpaceId(
+                                    selectedSpace?.id === space.id ? OUTSIDE_SPACES : space.id,
+                                  )
+                                }
+                                onChange={changeSpaces}
+                                onMove={moveSpaceThreads}
+                                onLaunch={async (projectRef, defaults) => {
+                                  const opened = await handleNewThreadRef.current(projectRef, {
+                                    forceNew: true,
+                                    spaceId: space.id,
+                                    useProjectDefaults: true,
+                                    ...(defaults.modelSelection
+                                      ? { modelSelection: defaults.modelSelection }
+                                      : {}),
+                                    ...(defaults.envMode ? { envMode: defaults.envMode } : {}),
+                                  });
+                                  if (!opened)
+                                    throw new Error("Could not open the draft. Try again.");
+                                  setProjectScopeKey(null);
+                                }}
+                                disabled={!primarySettingsLoaded}
+                              />
+                            ))}
+                          </ul>
+                        </li>,
+                      );
                       if (sidebarProjectFilter)
                         items.push(
                           <li key="project-filter" className="mb-2 list-none">

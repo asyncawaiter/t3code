@@ -79,6 +79,32 @@ export function saveSharedProfiles(
 }
 
 export const OUTSIDE_SPACES = "\0outside-spaces";
+
+/** Counts every chat in the profile, independently of the selected Space or project filter. */
+export function profileSpaceCounts(
+  profiles: ReadonlyArray<Profile>,
+  profileId: string | null,
+  threads: ReadonlyArray<{
+    environmentId: string;
+    id: string;
+    projectId: string;
+    archivedAt?: string | null;
+  }>,
+) {
+  const profile = profiles.find((entry) => entry.id === profileId);
+  const projects = profile && profile.id !== ALL_PROFILE_ID ? new Set(profile.projectKeys) : null;
+  const spaces = indexProfileSpaces(profiles);
+  const counts = new Map<string, number>();
+  for (const thread of threads) {
+    const projectKey = `${thread.environmentId}:${thread.projectId}`;
+    if (thread.archivedAt || (projects && !projects.has(projectKey))) continue;
+    const placement = spaces.get(`${thread.environmentId}:${thread.id}`);
+    const spaceId = placement?.projectKey === projectKey ? placement.space.id : OUTSIDE_SPACES;
+    counts.set(spaceId, (counts.get(spaceId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 export function profileThreadFilter(
   profiles: ReadonlyArray<Profile>,
   profileId: string | null,
@@ -92,9 +118,9 @@ export function profileThreadFilter(
     environmentId: string;
     id: string;
     projectId: string;
-    pinnedAt?: string | null;
+    pinnedAt?: string | null | undefined;
   }) => {
-    if (!profile || profileId === ALL_PROFILE_ID) return true;
+    const allProfiles = !profile || profileId === ALL_PROFILE_ID;
     const key = `${thread.environmentId}:${thread.id}`;
     const projectKey = `${thread.environmentId}:${thread.projectId}`;
     if (thread.pinnedAt) {
@@ -102,7 +128,7 @@ export function profileThreadFilter(
       if (!pin) return true;
       if (pin.profileId === profileId && pin.spaceId === null) return true;
     }
-    if (!projectKeys?.has(projectKey)) return false;
+    if (!allProfiles && !projectKeys?.has(projectKey)) return false;
     const placement = spaces.get(key);
     const assigned = placement?.projectKey === projectKey ? placement.space.id : undefined;
     return spaceId === null || (spaceId === OUTSIDE_SPACES ? !assigned : assigned === spaceId);

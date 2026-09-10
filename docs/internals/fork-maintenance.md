@@ -1,6 +1,6 @@
 # Nightly fork maintenance
 
-The release review heartbeat runs daily at 09:00 America/Toronto. Review the
+The release review heartbeat runs every three days at 09:00 America/Toronto. Review the
 newest published non-draft nightly from `pingdotgg/t3code`, including nightly
 prereleases, without a waiting period. Also flag significant stable releases
 or stable releases that supersede a reviewed baseline. Ignore unrelated
@@ -57,7 +57,7 @@ cannot replace the custom build.
   Connected devices share organization while keeping local selections independent.
   Switching supports sidebar controls, deliberate smooth trackpad swipes,
   keybindings, and the command palette.
-- Preserve equal Space tiles, the compact matte neutral UI, outside-spaces and all
+- Preserve equal Space tiles, the permanent Default tile for unassigned chats, the compact matte neutral UI, and all
   views, nearby device/path previews, arbitrary-folder browsing, Space launch
   defaults, reliable standard new-chat entry points, and same-profile assignment.
 - One pin menu offers global, owning-profile, and assigned-space scopes. Space
@@ -71,6 +71,10 @@ cannot replace the custom build.
   and limitations, including detached-session edits and resend recovery.
 - Provider-only user-turn metadata preserves submission, delivery, previous-user
   time and elapsed gap, plus original dates in newly created fork context.
+- Preserve the composer account-usage indicator and its detailed quota/reset popup,
+  including compact composer mode. Show each quota window directly, including Claude overall
+  and Fable, and keep the granular Accounts view as the Usage default. The context meter, Usage page and `/usage-limits`
+  report are separate entry points and do not replace it.
 - Preserve in-progress iOS organization, dashboard, draft, edit/rewind, fork and
   per-device PR flows. Shared contracts and remote behavior must remain compatible
   across clients. Distinguish implemented code, native validation, and delivery.

@@ -1,3 +1,4 @@
+import { ComposerUsageLimits } from "../usage/UsageLimitsSection";
 import { NewTaskOrganization, useTaskOrganization } from "./NewTaskOrganization";
 import { useAtomValue } from "@effect/atom-react";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
@@ -1301,6 +1302,8 @@ export function NewTaskDraftScreen(props: {
           <Text className="text-xs text-foreground">Model unavailable. Open model settings.</Text>
         </Pressable>
       ) : null}
+
+      <ComposerUsageLimits provider={flow.selectedProviderStatus} />
 
       <ComposerSurface
         style={{

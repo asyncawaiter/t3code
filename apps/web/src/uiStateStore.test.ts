@@ -14,6 +14,8 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
   setSidebarProjectScopeKey,
+  setActiveProfileId,
+  selectSidebarSpace,
   setThreadChangedFilesExpanded,
   type UiState,
 } from "./uiStateStore";
@@ -33,6 +35,18 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
 }
 
 describe("uiStateStore pure functions", () => {
+  it("clears the project filter when switching profiles so Default shows every unassigned chat", () => {
+    const state = makeUiState({ activeProfileId: "work", sidebarProjectScopeKey: "old-project" });
+    expect(setActiveProfileId(state, "personal").sidebarProjectScopeKey).toBeNull();
+  });
+  it("clears a project filter when selecting any Space, including Default again", () => {
+    const state = makeUiState({ activeProfileId: "work", sidebarProjectScopeKey: "old-project" });
+    for (const filter of ["\0outside-spaces", "build", null]) {
+      const selected = selectSidebarSpace(state, "work", filter);
+      expect(selected.spaceSelection).toEqual({ profileId: "work", filter });
+      expect(selected.sidebarProjectScopeKey).toBeNull();
+    }
+  });
   it("stores server timestamps without moving visit state backwards", () => {
     const threadId = ThreadId.make("thread-1");
     const initialState = makeUiState();

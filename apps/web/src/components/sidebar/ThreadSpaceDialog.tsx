@@ -89,7 +89,7 @@ export function ThreadSpaceDialog({
           </div>
           {profile ? (
             <div className="space-y-1" role="group" aria-label={`Spaces in ${profile.name}`}>
-              {[{ id: null, name: "Outside spaces" }, ...(profile.spaces ?? [])].map((space) => (
+              {[{ id: null, name: "Default" }, ...(profile.spaces ?? [])].map((space) => (
                 <Button
                   key={space.id ?? "root"}
                   variant="ghost"

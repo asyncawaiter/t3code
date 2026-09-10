@@ -257,12 +257,11 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                     aria-label="Chat space"
                   >
                     <SelectValue>
-                      {profile?.spaces?.find((space) => space.id === spaceId)?.name ??
-                        "Outside spaces"}
+                      {profile?.spaces?.find((space) => space.id === spaceId)?.name ?? "Default"}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
-                    <SelectItem value="outside">Outside spaces</SelectItem>
+                    <SelectItem value="outside">Default</SelectItem>
                     {profile?.spaces?.map((space) => (
                       <SelectItem key={space.id} value={space.id}>
                         {space.name}

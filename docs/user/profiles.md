@@ -6,7 +6,7 @@ that matter right now.
 
 Use **Show current chat** beside the new-chat button to return the sidebar to the open chat.
 It selects that chat's profile and space, clears search and project filters, and scrolls to
-the highlighted chat. Chats without a space select **Outside spaces**; projects without a
+the highlighted chat. Chats without a space select **Default**; projects without a
 profile select **All**.
 
 **All** always exists and shows every project regardless of profile. It cannot be renamed, recolored,
@@ -92,20 +92,23 @@ field or placement are rejected with a retry message instead of silently overwri
 ## Spaces
 
 Spaces organize threads within a profile. Click **New space** beside the Spaces heading,
-enter a name, and press Enter. Each named tile shows its thread count. Select a tile to
-show its threads below the grid. Click the selected tile again to return to **Outside spaces**.
-No space is selected when you open the app or switch profiles. The default view shows chats
-outside spaces. Creating a space does not select it or hide those chats.
-The view picker beside Spaces offers **All threads** and **Outside spaces**, which shows only
-chats without a space. An empty selected view also offers **Show all threads**.
+enter a name, and press Enter. Each tile shows its chat count. **Default** is always the
+first tile and contains chats without a Space assignment. It also appears in **All**, where
+it collects unassigned chats across profiles. Default cannot be renamed or deleted.
+Select a named tile to show its chats. Click it again to return to Default. Switching to
+a profile selects Default. Creating a Space does not select it or hide unassigned chats.
+Use **All chats** beside the Spaces heading to include both assigned and unassigned chats.
+An empty selected view also offers **Show all threads**.
+On web and desktop, **Filter chats by project** narrows the selected view. Its clear button
+restores all projects. Choosing a Space or switching profiles clears that project filter.
 Assigning a project to a profile does not assign its chats to a same-named space.
 Profile pins stay above the grid. A dot on a tile indicates work that needs attention.
 
 Use the tag button on a chat row or its **Move to space** context-menu action to choose
-a space. These work in All as well as a specific profile. Choose **Outside spaces** to
+a space. These work in All as well as a specific profile. Choose **Default** to
 remove a space assignment. If the project has no profile, the dialog lets you choose one
 first and explains that moving a project changes the profile of all its chats.
-On web and desktop, drag the tag icon to a Space tile to assign selected chats.
+On web and desktop, drag the tag icon to a named Space tile to assign selected chats.
 Drag the row itself to reorder it or move it between Pinned, Active, and Settled.
 The **Pin** submenu offers one scope at a time: **Global** appears across profiles and
 spaces, **Profile** stays above the owning profile's grid, and **Space** stays in the
@@ -156,7 +159,7 @@ it is available again or you choose another destination.
 The sidebar pencil and the New thread shortcut open the same compact chooser, even
 with one project. It starts with your current device and folder. Press Enter to open,
 or change the location, profile or space first. A selected space is preselected;
-**Outside spaces** keeps the chat directly under its profile. Shift-click keeps the
+**Default** keeps the chat directly under its profile. Shift-click keeps the
 shortcut for creating in the current project.
 
 The device selector includes devices without saved projects. Browse folders with a

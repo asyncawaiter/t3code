@@ -8,7 +8,11 @@ import {
   PROFILE_NAME_MAX_LENGTH,
   PROFILE_MAX_COUNT,
 } from "@t3tools/contracts";
-import { OUTSIDE_SPACES, moveProjectToProfile } from "@t3tools/client-runtime/state/profiles";
+import {
+  OUTSIDE_SPACES,
+  moveProjectToProfile,
+  profileSpaceCounts,
+} from "@t3tools/client-runtime/state/profiles";
 import { useNavigation } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 import {
@@ -338,19 +342,8 @@ export function ProfilesPanel() {
     ]);
   };
   const counts = useMemo(
-    () =>
-      new Map(
-        (state.profile.spaces ?? []).map((space) => {
-          const keys = new Set(space.threads.map((thread) => thread.threadKey));
-          return [
-            space.id,
-            threads.filter(
-              (thread) => !thread.archivedAt && keys.has(`${thread.environmentId}:${thread.id}`),
-            ).length,
-          ];
-        }),
-      ),
-    [state.profile.spaces, threads],
+    () => profileSpaceCounts(state.profiles, state.profile.id, threads),
+    [state.profiles, state.profile.id, threads],
   );
   const submit = async () => {
     if (!editor || busy) return;
@@ -453,10 +446,18 @@ export function ProfilesPanel() {
           </Text>
         </Pressable>
       )}
-      {state.profile.id !== ALL_PROFILE.id && (
-        <View className="gap-2 rounded-2xl bg-subtle p-2">
-          <View className="flex-row items-center justify-between pl-2">
-            <Text className="text-sm text-foreground-muted">{state.profile.name} / Spaces</Text>
+      <View className="gap-2 rounded-2xl bg-subtle p-2">
+        <View className="flex-row items-center justify-between pl-2">
+          <Text className="text-sm text-foreground-muted">{state.profile.name} / Spaces</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: state.spaceId === null }}
+            onPress={() => selectSpace(null)}
+            className="min-h-11 justify-center px-2"
+          >
+            <Text className="text-xs text-foreground-muted">All chats</Text>
+          </Pressable>
+          {state.profile.id !== ALL_PROFILE.id ? (
             <Pressable
               disabled={!state.writable}
               accessibilityLabel="New space"
@@ -466,163 +467,191 @@ export function ProfilesPanel() {
             >
               <SymbolView name="plus" size={18} tintColorClassName="accent-icon-muted" />
             </Pressable>
-          </View>
-          <View className="flex-row gap-2">
-            {[
-              { id: OUTSIDE_SPACES, title: "Outside spaces" },
-              { id: null, title: "All threads" },
-            ].map((item) => (
-              <Pressable
-                key={item.title}
-                accessibilityRole="button"
-                accessibilityState={{ selected: state.spaceId === item.id }}
-                onPress={() => selectSpace(item.id)}
-                className="min-h-11 flex-1 justify-center rounded-xl px-2"
-              >
-                <Text
-                  className={cn(
-                    "text-sm",
-                    state.spaceId === item.id
-                      ? "font-t3-semibold text-foreground"
-                      : "text-foreground-muted",
-                  )}
-                >
-                  {item.title}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          <View className="flex-row flex-wrap gap-2">
-            {state.profile.spaces?.map((space) => (
-              <View
-                key={space.id}
-                style={{ width: "48.5%", minHeight: 104 }}
-                className={cn(
-                  "rounded-2xl p-2",
-                  state.spaceId === space.id ? "bg-foreground" : "bg-card",
-                )}
-              >
-                <View className="flex-row">
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: state.spaceId === space.id }}
-                    accessibilityLabel={`Open ${space.name}`}
-                    onPress={() =>
-                      selectSpace(state.spaceId === space.id ? OUTSIDE_SPACES : space.id)
-                    }
-                    className="min-h-11 flex-1 justify-center"
-                  >
-                    <Text
-                      numberOfLines={1}
-                      className={cn(
-                        "font-t3-medium",
-                        state.spaceId === space.id ? "text-screen" : "text-foreground",
-                      )}
-                    >
-                      {space.name}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    disabled={!state.writable}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Manage ${space.name}`}
-                    onPress={() => spaceMenu(space)}
-                    className="size-11 items-center justify-center"
-                  >
-                    <Text
-                      className={
-                        state.spaceId === space.id ? "text-screen" : "text-foreground-muted"
-                      }
-                    >
-                      ···
-                    </Text>
-                  </Pressable>
-                </View>
-                <View className="flex-row items-center">
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open ${space.name}`}
-                    className="flex-1"
-                    onPress={() =>
-                      selectSpace(state.spaceId === space.id ? OUTSIDE_SPACES : space.id)
-                    }
-                  >
-                    <Text
-                      numberOfLines={1}
-                      className={cn(
-                        "text-xs",
-                        state.spaceId === space.id ? "text-screen" : "text-foreground-muted",
-                      )}
-                    >
-                      {space.newChatDefaults
-                        ? `${space.newChatDefaults.deviceLabel} · ${space.newChatDefaults.workspaceRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? "/"}`
-                        : `${counts.get(space.id) ?? 0} chats`}
-                    </Text>
-                    <Text
-                      className={cn(
-                        "text-xs",
-                        state.spaceId === space.id ? "text-screen" : "text-foreground-muted",
-                      )}
-                    >
-                      {space.newChatDefaults ? `${counts.get(space.id) ?? 0} chats` : " "}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    disabled={!state.writable}
-                    accessibilityRole="button"
-                    accessibilityLabel={`New chat in ${space.name}`}
-                    onPress={() => launchSpace(space)}
-                    className="size-11 items-center justify-center"
-                  >
-                    <Text
-                      className={state.spaceId === space.id ? "text-screen" : "text-foreground"}
-                    >
-                      +
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            ))}
-          </View>
-          {deleted?.profileId === state.profile.id && (
+          ) : null}
+        </View>
+        <View className="flex-row flex-wrap gap-2">
+          <View
+            style={{ width: "48.5%", minHeight: 104 }}
+            className={cn(
+              "rounded-2xl p-2",
+              state.spaceId === OUTSIDE_SPACES ? "bg-foreground" : "bg-card",
+            )}
+          >
             <Pressable
               accessibilityRole="button"
-              className="min-h-11 justify-center px-2"
-              onPress={() =>
-                run(async () => {
-                  const spaces = [...(state.profile.spaces ?? [])];
-                  spaces.splice(deleted.index, 0, {
-                    ...deleted.space,
-                    threads: deleted.space.threads.filter(
-                      (thread) =>
-                        state.profile.projectKeys.includes(thread.projectKey) &&
-                        !spaces.some((space) =>
-                          space.threads.some((item) => item.threadKey === thread.threadKey),
-                        ),
-                    ),
-                  });
-                  await updateProfile({
-                    ...state.profile,
-                    spaces,
-                    threadPins: state.profile.threadPins?.map((pin) =>
-                      pin.spaceId === null &&
-                      deleted.pins.some((old) => old.threadKey === pin.threadKey) &&
-                      spaces
-                        .find((space) => space.id === deleted.space.id)
-                        ?.threads.some((thread) => thread.threadKey === pin.threadKey)
-                        ? { ...pin, spaceId: deleted.space.id }
-                        : pin,
-                    ),
-                  });
-                  setDeleted(null);
-                })
-              }
+              accessibilityLabel="Open Default space"
+              accessibilityState={{ selected: state.spaceId === OUTSIDE_SPACES }}
+              onPress={() => selectSpace(OUTSIDE_SPACES)}
+              className="min-h-11 flex-1 justify-center"
             >
-              <Text className="text-sm text-foreground">Space deleted · Undo</Text>
+              <Text
+                className={cn(
+                  "font-t3-medium",
+                  state.spaceId === OUTSIDE_SPACES ? "text-screen" : "text-foreground",
+                )}
+              >
+                Default
+              </Text>
+              <Text
+                className={cn(
+                  "text-xs",
+                  state.spaceId === OUTSIDE_SPACES ? "text-screen" : "text-foreground-muted",
+                )}
+              >
+                Unassigned chats
+              </Text>
             </Pressable>
-          )}
+            <View className="flex-row items-center justify-between">
+              <Text
+                className={cn(
+                  "text-xs",
+                  state.spaceId === OUTSIDE_SPACES ? "text-screen" : "text-foreground-muted",
+                )}
+              >
+                {counts.get(OUTSIDE_SPACES) ?? 0} chats
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="New chat in Default"
+                className="size-11 items-center justify-center"
+                onPress={() => {
+                  selectSpace(OUTSIDE_SPACES);
+                  navigation.navigate("NewTaskSheet", { screen: "NewTask" });
+                }}
+              >
+                <Text
+                  className={state.spaceId === OUTSIDE_SPACES ? "text-screen" : "text-foreground"}
+                >
+                  +
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+          {state.profile.spaces?.map((space) => (
+            <View
+              key={space.id}
+              style={{ width: "48.5%", minHeight: 104 }}
+              className={cn(
+                "rounded-2xl p-2",
+                state.spaceId === space.id ? "bg-foreground" : "bg-card",
+              )}
+            >
+              <View className="flex-row">
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: state.spaceId === space.id }}
+                  accessibilityLabel={`Open ${space.name}`}
+                  onPress={() =>
+                    selectSpace(state.spaceId === space.id ? OUTSIDE_SPACES : space.id)
+                  }
+                  className="min-h-11 flex-1 justify-center"
+                >
+                  <Text
+                    numberOfLines={1}
+                    className={cn(
+                      "font-t3-medium",
+                      state.spaceId === space.id ? "text-screen" : "text-foreground",
+                    )}
+                  >
+                    {space.name}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  disabled={!state.writable}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Manage ${space.name}`}
+                  onPress={() => spaceMenu(space)}
+                  className="size-11 items-center justify-center"
+                >
+                  <Text
+                    className={state.spaceId === space.id ? "text-screen" : "text-foreground-muted"}
+                  >
+                    ···
+                  </Text>
+                </Pressable>
+              </View>
+              <View className="flex-row items-center">
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${space.name}`}
+                  className="flex-1"
+                  onPress={() =>
+                    selectSpace(state.spaceId === space.id ? OUTSIDE_SPACES : space.id)
+                  }
+                >
+                  <Text
+                    numberOfLines={1}
+                    className={cn(
+                      "text-xs",
+                      state.spaceId === space.id ? "text-screen" : "text-foreground-muted",
+                    )}
+                  >
+                    {space.newChatDefaults
+                      ? `${space.newChatDefaults.deviceLabel} · ${space.newChatDefaults.workspaceRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? "/"}`
+                      : `${counts.get(space.id) ?? 0} chats`}
+                  </Text>
+                  <Text
+                    className={cn(
+                      "text-xs",
+                      state.spaceId === space.id ? "text-screen" : "text-foreground-muted",
+                    )}
+                  >
+                    {space.newChatDefaults ? `${counts.get(space.id) ?? 0} chats` : " "}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  disabled={!state.writable}
+                  accessibilityRole="button"
+                  accessibilityLabel={`New chat in ${space.name}`}
+                  onPress={() => launchSpace(space)}
+                  className="size-11 items-center justify-center"
+                >
+                  <Text className={state.spaceId === space.id ? "text-screen" : "text-foreground"}>
+                    +
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
         </View>
-      )}
+        {deleted?.profileId === state.profile.id && (
+          <Pressable
+            accessibilityRole="button"
+            className="min-h-11 justify-center px-2"
+            onPress={() =>
+              run(async () => {
+                const spaces = [...(state.profile.spaces ?? [])];
+                spaces.splice(deleted.index, 0, {
+                  ...deleted.space,
+                  threads: deleted.space.threads.filter(
+                    (thread) =>
+                      state.profile.projectKeys.includes(thread.projectKey) &&
+                      !spaces.some((space) =>
+                        space.threads.some((item) => item.threadKey === thread.threadKey),
+                      ),
+                  ),
+                });
+                await updateProfile({
+                  ...state.profile,
+                  spaces,
+                  threadPins: state.profile.threadPins?.map((pin) =>
+                    pin.spaceId === null &&
+                    deleted.pins.some((old) => old.threadKey === pin.threadKey) &&
+                    spaces
+                      .find((space) => space.id === deleted.space.id)
+                      ?.threads.some((thread) => thread.threadKey === pin.threadKey)
+                      ? { ...pin, spaceId: deleted.space.id }
+                      : pin,
+                  ),
+                });
+                setDeleted(null);
+              })
+            }
+          >
+            <Text className="text-sm text-foreground">Space deleted · Undo</Text>
+          </Pressable>
+        )}
+      </View>
       <Modal
         visible={editor !== null}
         animationType="slide"

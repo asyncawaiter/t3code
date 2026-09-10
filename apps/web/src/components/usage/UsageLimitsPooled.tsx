@@ -19,9 +19,12 @@ import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getDriverOption } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
+  LimitWindows,
+  ResetCredits,
   PaceIcon,
   ResetCreditDialog,
   barColor,
@@ -536,23 +539,77 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
  */
 export function UsageLimitsPooled({
   presentations,
-  now,
+  now: openedAt,
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
   readonly now: number;
 }) {
-  const pools = collectLimitPools(collectLimitAccounts(presentations), now);
+  const [view, setView] = useState("accounts");
+  const accounts = collectLimitAccounts(presentations);
+  // New reports advance the countdown anchor without a repainting timer.
+  const now = Math.max(
+    openedAt,
+    ...accounts.map((account) => Date.parse(account.limits.checkedAt)).filter(Number.isFinite),
+  );
+  const pools = collectLimitPools(accounts, now);
   const notices = collectLimitNotices(presentations);
   return (
     <div className="flex flex-col gap-8">
+      <ToggleGroup
+        aria-label="Limits view"
+        value={[view]}
+        onValueChange={(values) => {
+          if (values[0] === "accounts" || values[0] === "pooled") setView(values[0]);
+        }}
+      >
+        <Toggle value="accounts">Accounts</Toggle>
+        <Toggle value="pooled">Combined</Toggle>
+      </ToggleGroup>
       {pools.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No provider on the selected environments reports subscription limits.
         </p>
       ) : null}
-      {pools.map((pool) => (
-        <PoolSection key={pool.driver} pool={pool} now={now} />
-      ))}
+      {view === "accounts"
+        ? accounts.map((account) => (
+            <section key={account.key} className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <AccountAvatar account={account} />
+                <AccountName account={account} className="font-medium" />
+                {account.email ? (
+                  <RedactedSensitiveText
+                    value={account.email}
+                    ariaLabel="Toggle account email visibility"
+                    revealTooltip="Reveal email"
+                    hideTooltip="Hide email"
+                  />
+                ) : null}
+                {account.plan ? (
+                  <span className="text-muted-foreground">{account.plan}</span>
+                ) : null}
+                <span className="ms-auto text-xs text-muted-foreground">
+                  {account.environments.map((entry) => entry.label).join(", ") ||
+                    account.sourceLabel}
+                </span>
+              </div>
+              <LimitWindows
+                driver={account.driver}
+                windows={account.limits.windows}
+                now={now}
+                used
+                compact
+              />
+              {account.limits.resetCredits && account.redeem ? (
+                <ResetCredits
+                  environmentId={account.redeem.environmentId}
+                  input={account.redeem.input}
+                  credits={account.limits.resetCredits}
+                  now={now}
+                />
+              ) : null}
+            </section>
+          ))
+        : pools.map((pool) => <PoolSection key={pool.driver} pool={pool} now={now} />)}
       <LimitNotices notices={notices} />
     </div>
   );

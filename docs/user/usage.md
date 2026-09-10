@@ -39,9 +39,12 @@ the dialog.
 
 ## Track subscription limits
 
-**Usage → Limits** pools every subscription account it can see per provider, so with several Codex
-or Claude accounts across your environments and hubs you read one number per window rather than a
-list. Each window card shows how much of the pool is left and a bar with one segment per account,
+**Usage → Limits** opens in **Accounts**, showing each account's quota windows, percent used,
+pace, reset countdowns and available reset credits. Claude's overall and model-specific weekly
+windows appear separately, including Fable when reported. Provider marks identify each account;
+the heading includes its plan and connected devices.
+
+Choose **Combined** for the pooled summary across accounts. Each window card shows how much of the pool is left and a bar with one segment per account,
 kept in the same column across windows. Accounts are ordered by their 5-hour reset, soonest
 first, or by the first available window when no account reports a 5-hour limit. A gap means the
 account does not report that window. When the provider reports reset times, the card also says
@@ -53,6 +56,10 @@ the bar show each account's quota, countdown, and credits. Tap a row to open its
 
 The same account signed in on more than one environment, or reported by a hub as well, counts once.
 Filter with the environment dropdown to see what a single machine has.
+
+The composer also shows compact quota bars and percentages for the selected account. Claude's
+overall and Fable windows remain visible without hovering when the account reports them. On web
+and desktop, open the indicator for reset countdowns and banked credits.
 
 If a window looks stale, refresh Limits to re-check every provider and hub.
 

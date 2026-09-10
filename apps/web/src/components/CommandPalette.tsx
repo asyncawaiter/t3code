@@ -1605,7 +1605,7 @@ function OpenCommandPaletteDialog(props: {
     : undefined;
   if (primarySettingsLoaded && threadProfile && thread) {
     for (const destination of [
-      { id: null, name: `${threadProfile.name} / Outside spaces` },
+      { id: null, name: `${threadProfile.name} / Default` },
       ...(threadProfile.spaces ?? []),
     ]) {
       actionItems.push({

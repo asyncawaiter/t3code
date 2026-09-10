@@ -6,6 +6,14 @@ include a skill when the task needs more context.
 Messages can contain up to 120,000 characters. Longer drafts stay in the composer
 so you can shorten them or split them into several messages.
 
+The account usage strip above the composer shows the selected provider's reported quota
+windows with compact bars and percentages. Claude's overall and Fable quotas appear separately
+when reported. The strip stays visible in the compact composer.
+
+On web and desktop, hover or click it for reset countdowns, plan and banked resets.
+Missing quota data shows `--` with a loading or unavailable explanation. The context-window
+meter is separate, and `/usage-limits` still opens the provider limits report.
+
 ## Attach files
 
 Attach up to eight files per message. Images can be up to 10 MB; other files can

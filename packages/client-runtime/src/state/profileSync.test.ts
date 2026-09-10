@@ -4,6 +4,7 @@ import { EnvironmentId, type Profile } from "@t3tools/contracts";
 import {
   resolveProfileSource,
   profileThreadFilter,
+  profileSpaceCounts,
   OUTSIDE_SPACES,
   moveProjectToProfile,
   saveSharedProfiles,
@@ -107,6 +108,29 @@ it("filters outside spaces without hiding profile and global pins", () => {
   expect(profileThreadFilter([organized], null, null)(thread("assigned"))).toBe(true);
 });
 
+it("shows only unassigned chats in Default when viewing All profiles", () => {
+  const outside = profileThreadFilter([organized], null, OUTSIDE_SPACES);
+  expect(outside(thread("assigned"))).toBe(false);
+  expect(outside(thread("loose"))).toBe(true);
+  expect(outside({ ...thread("assigned"), environmentId: "poly" })).toBe(true);
+});
+
+it("counts Default without mixing assigned, archived or other-profile chats", () => {
+  const chats = [
+    thread("assigned"),
+    thread("loose"),
+    { ...thread("old"), archivedAt: "2026-09-01" },
+    { ...thread("assigned"), environmentId: "poly" },
+  ];
+  expect(profileSpaceCounts([organized], "work", chats)).toEqual(
+    new Map([
+      ["build", 1],
+      [OUTSIDE_SPACES, 1],
+    ]),
+  );
+  expect(profileSpaceCounts([organized], null, chats).get(OUTSIDE_SPACES)).toBe(2);
+});
+
 it("moves a whole project, removing old spaces and scoped pins but retaining its new siblings", () => {
   const target = {
     ...profile,
@@ -164,4 +188,13 @@ it("serializes edits against fresh source settings and recovers after a failed w
       getSource: () => ({ ...io.getSource(), conflict: true }),
     }),
   ).rejects.toThrow("Choose a shared");
+});
+
+it("counts and pages the selected Space before taking a shelf window", () => {
+  const siblings = Array.from({ length: 20 }, (_, index) => thread(`sibling-${index}`));
+  const shelf = [...siblings, thread("assigned")];
+  const visible = shelf.filter(profileThreadFilter([organized], "work", "build"));
+  expect(visible).toHaveLength(1);
+  expect(visible.slice(0, 10).map((entry) => entry.id)).toEqual(["assigned"]);
+  expect(shelf.filter(profileThreadFilter([organized], "work", OUTSIDE_SPACES))).toEqual(siblings);
 });

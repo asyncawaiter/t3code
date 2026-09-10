@@ -198,6 +198,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { UsageLimitsMeter } from "./UsageLimitsMeter";
 import {
   providerSupportsManualCompaction,
   resolveContextWindowModelDisplayName,
@@ -4960,6 +4961,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             restingControlsHost,
           )
         : null}
+      {selectedProviderEntry?.snapshot &&
+      (selectedProviderEntry.driverKind === "codex" ||
+        selectedProviderEntry.driverKind === "claudeAgent") ? (
+        <div data-chat-composer-collapsed-controls="true" className="flex justify-end px-1 pb-1">
+          <UsageLimitsMeter
+            environmentId={environmentId}
+            instanceId={selectedProviderEntry.instanceId}
+            provider={selectedProviderEntry.driverKind === "codex" ? "codex" : "claude"}
+          />
+        </div>
+      ) : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
           <ComposerBannerStack

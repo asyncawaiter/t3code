@@ -9,6 +9,7 @@ import type {
   UsageProviderKind,
 } from "@t3tools/contracts";
 import {
+  compactUsageWindowLabel,
   elapsedShare,
   formatDuration,
   formatResetsIn,
@@ -45,14 +46,15 @@ function useBarColor(driver: Driver): string | null {
  * right, so a row reads in one glance.
  */
 function WindowRow(props: {
+  readonly used?: boolean;
   readonly window: ServerProviderUsageWindow;
   readonly color: string | null;
   readonly now: number;
 }) {
   const { window, now } = props;
-  const remaining = remainingPercent(window);
+  const remaining = props.used ? 100 - remainingPercent(window) : remainingPercent(window);
   const elapsed = elapsedShare(window, now);
-  const timeLeft = elapsed === null ? null : Math.round((1 - elapsed) * 100);
+  const timeLeft = elapsed === null ? null : Math.round((props.used ? elapsed : 1 - elapsed) * 100);
   const pace = paceOf(window, now);
   const resetsIn = formatResetsIn(window, now);
   return (
@@ -60,22 +62,24 @@ function WindowRow(props: {
       <View className="flex-row items-baseline justify-between gap-3">
         <Text className="text-sm text-foreground">{window.label}</Text>
         <Text className="text-sm font-t3-medium tabular-nums text-foreground">
-          {remaining}% left
+          {remaining}% {props.used ? "used" : "left"}
         </Text>
       </View>
       <View className="h-3 justify-center">
         <View className="h-1.5 flex-row overflow-hidden rounded-full bg-subtle">
           <View
             className={
-              remaining <= 10
+              (props.used ? 100 - remaining : remaining) <= 10
                 ? "h-full rounded-full bg-red-500"
-                : remaining <= 30
+                : (props.used ? 100 - remaining : remaining) <= 30
                   ? "h-full rounded-full bg-amber-500"
                   : "h-full rounded-full bg-foreground"
             }
             style={[
               { flex: remaining },
-              remaining > 30 && props.color ? { backgroundColor: props.color } : null,
+              (props.used ? 100 - remaining : remaining) > 30 && props.color
+                ? { backgroundColor: props.color }
+                : null,
             ]}
           />
           <View style={{ flex: 100 - remaining }} />
@@ -122,6 +126,7 @@ function AccountInstanceLabel({ value }: { readonly value: string }) {
 
 /** One account: icon, name and plan on a single line, then its windows. */
 export function AccountLimits(props: {
+  readonly used?: boolean;
   readonly driver: Driver;
   readonly label: string;
   readonly instanceLabel: string;
@@ -166,7 +171,7 @@ export function AccountLimits(props: {
       ) : (
         <View className="gap-3">
           {limits.windows.map((window) => (
-            <WindowRow key={window.id} window={window} color={color} now={now} />
+            <WindowRow key={window.id} window={window} color={color} now={now} used={props.used} />
           ))}
         </View>
       )}
@@ -322,4 +327,38 @@ export function useRefreshLimits(selectedEnvironmentIds: ReadonlySet<Environment
     )
     .map(({ label }) => label);
   return { now, refreshing, failedLabels, refresh };
+}
+
+/** Show every reported quota in the composer without opening account details. */
+export function ComposerUsageLimits({ provider }: { readonly provider: ServerProvider | null }) {
+  const limits = provider?.usageLimits;
+  if (!provider || !limits || limitsNotice(limits) || !limits.windows.length) return null;
+  return (
+    <View className="flex-row flex-wrap items-center justify-end gap-3 px-3 py-1">
+      <ProviderIcon provider={provider.driver} size={14} />
+      {limits.windows.map((window) => {
+        const used = 100 - remainingPercent(window);
+        return (
+          <View
+            key={window.id}
+            accessibilityLabel={`${window.label}: ${used}% used`}
+            className="gap-0.5"
+          >
+            <View className="flex-row items-center gap-1">
+              <Text className="text-2xs text-foreground-muted">
+                {compactUsageWindowLabel(window)}
+              </Text>
+              <Text className="text-2xs font-t3-medium tabular-nums text-foreground">{used}%</Text>
+            </View>
+            <View className="h-0.5 overflow-hidden rounded-full bg-subtle-strong">
+              <View
+                className={`h-full rounded-full ${used > 90 ? "bg-red-500" : "bg-foreground"}`}
+                style={{ width: `${used}%` }}
+              />
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
 }

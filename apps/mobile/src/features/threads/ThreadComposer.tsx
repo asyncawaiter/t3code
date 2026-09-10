@@ -1,3 +1,4 @@
+import { ComposerUsageLimits } from "../usage/UsageLimitsSection";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
@@ -572,6 +573,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             <Text className="text-xs text-foreground">Model unavailable. Open model settings.</Text>
           </Pressable>
         ) : null}
+
+        <ComposerUsageLimits provider={selectedProviderStatus} />
 
         <ComposerSurface
           style={

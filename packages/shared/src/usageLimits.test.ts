@@ -10,6 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   type LimitAccount,
+  compactUsageWindowLabel,
   isUsageLimitsCommand,
   collectProviderUsageLimits,
   sameUsageLimitCommandCoverage,
@@ -1195,4 +1196,15 @@ describe("isUsageLimitsCommand", () => {
     expect(isUsageLimitsCommand("Explain /usage-limits")).toBe(false);
     expect(isUsageLimitsCommand("/usage")).toBe(false);
   });
+});
+
+it("keeps overall and model-scoped quotas distinguishable in compact composers", () => {
+  expect(
+    [
+      { id: "five_hour", label: "Session" },
+      { id: "seven_day", label: "Weekly" },
+      { id: "seven_day_fable", label: "Weekly Fable" },
+      { id: "custom", label: "Extra usage" },
+    ].map(compactUsageWindowLabel),
+  ).toEqual(["5h", "Overall", "Fable", "Extra usage"]);
 });

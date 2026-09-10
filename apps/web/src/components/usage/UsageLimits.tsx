@@ -82,22 +82,25 @@ function WindowBar({
   color,
   window,
   now,
+  used = false,
 }: {
+  readonly used?: boolean;
   readonly color: string;
   readonly window: ServerProviderUsageWindow;
   readonly now: number;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const remaining = remainingPercent(window);
+  const remaining = used ? 100 - remainingPercent(window) : remainingPercent(window);
+  const unit = used ? "used" : "left";
   const elapsed = elapsedShare(window, now);
-  // The fill is quota left, so the even-spending mark is the time left.
-  const timeLeft = elapsed === null ? null : Math.round((1 - elapsed) * 100);
+  // Match the time marker to the selected quota direction.
+  const timeLeft = elapsed === null ? null : Math.round((used ? elapsed : 1 - elapsed) * 100);
   const resetsIn = formatResetsIn(window, now);
   const resetsAt = window.resetsAt
     ? formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)
     : null;
-  const summary = `${window.label}: ${remaining}% left${
-    timeLeft === null ? "" : `, ${timeLeft}% of the window left`
+  const summary = `${window.label}: ${remaining}% ${unit}${
+    timeLeft === null ? "" : `, ${timeLeft}% of the window ${used ? "elapsed" : "left"}`
   }${resetsIn ? `, ${resetsIn}` : ""}`;
 
   return (
@@ -130,7 +133,8 @@ function WindowBar({
       <TooltipPopup side="top" className="max-w-72 text-xs">
         <div className="flex flex-col gap-0.5">
           <span className="text-foreground">
-            {remaining}% left{timeLeft !== null ? ` · ${timeLeft}% of the window left` : ""}
+            {remaining}% {unit}
+            {timeLeft !== null ? ` · ${timeLeft}% of the window ${used ? "elapsed" : "left"}` : ""}
           </span>
           {timeLeft !== null ? (
             <span className="text-muted-foreground">The line is where even spending would be.</span>
@@ -156,7 +160,9 @@ export function LimitWindows({
   windows,
   now,
   compact = false,
+  used = false,
 }: {
+  readonly used?: boolean;
   readonly driver: ServerProvider["driver"];
   readonly windows: ReadonlyArray<ServerProviderUsageWindow>;
   readonly now: number;
@@ -179,10 +185,11 @@ export function LimitWindows({
             <span className="flex min-w-0 items-center gap-2 text-xs">
               <span className="truncate text-muted-foreground">{window.label}</span>
               <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
-                {remainingPercent(window)}% left
+                {used ? 100 - remainingPercent(window) : remainingPercent(window)}%{" "}
+                {used ? "used" : "left"}
               </span>
             </span>
-            <WindowBar color={color} window={window} now={now} />
+            <WindowBar color={color} window={window} now={now} used={used} />
             <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
               {pace ? <PaceIcon pace={pace} /> : null}
               <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>
@@ -325,8 +332,7 @@ export function UsageLimitsSection({
   readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
-  // Anchored once per mount on purpose: countdowns must not tick (see above).
-  const [now] = useState(() => Date.now());
+  const [now] = useState(Date.now);
   const selected =
     selectedEnvironmentIds === null
       ? presentations

@@ -22,7 +22,7 @@ import { AppText as Text } from "../../components/AppText";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { environmentPresentations } from "../../state/presentation";
-import { ResetCredits } from "./UsageLimitsSection";
+import { AccountLimits, ResetCredits } from "./UsageLimitsSection";
 import { useProviderColors } from "./usageProviders";
 
 const DRIVER_LABEL: Partial<Record<string, string>> = { codex: "Codex", claudeAgent: "Claude" };
@@ -207,11 +207,28 @@ export function UsageLimitsSection({
     selectedEnvironmentIds === null
       ? presentations
       : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
-  const pools = collectLimitPools(collectLimitAccounts(selected), now);
+  const [view, setView] = useState("accounts");
+  const accounts = collectLimitAccounts(selected);
+  const pools = collectLimitPools(accounts, now);
   const notices = collectLimitNotices(selected);
   const colors = useProviderColors();
   return (
     <View className="gap-6">
+      <View className="flex-row gap-1 rounded-full bg-card p-1">
+        {(["accounts", "pooled"] as const).map((value) => (
+          <Pressable
+            key={value}
+            accessibilityRole="button"
+            accessibilityState={{ selected: view === value }}
+            onPress={() => setView(value)}
+            className={`min-h-11 flex-1 items-center justify-center rounded-full ${view === value ? "bg-subtle-strong" : ""}`}
+          >
+            <Text className="text-sm font-t3-medium text-foreground">
+              {value === "accounts" ? "Accounts" : "Combined"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
       {failedLabels.length ? (
         <Text className="text-sm text-foreground-muted">
           {failedLabels.join(", ")} could not refresh limits. Showing the last known values.
@@ -224,25 +241,61 @@ export function UsageLimitsSection({
             : "No provider on the selected environments reports subscription limits."}
         </Text>
       ) : null}
-      {pools.map((pool) => (
-        <View key={pool.driver} className="gap-3">
-          <View className="flex-row items-center gap-2 px-1">
-            <ProviderIcon provider={pool.driver} size={18} />
-            <Text className="text-base font-t3-medium text-foreground">
-              {DRIVER_LABEL[pool.driver] ?? pool.driver}
-            </Text>
-          </View>
-          {pool.windows.map((window) => (
-            <PoolWindowCard
-              key={`${window.kind}:${window.id}`}
-              pool={window}
-              color={pool.driver === "claudeAgent" ? colors.claude : colors.codex}
+      {view === "accounts"
+        ? accounts.map((account) => (
+            <AccountLimits
+              key={account.key}
+              driver={account.driver}
+              label={DRIVER_LABEL[account.driver] ?? account.driver}
+              instanceLabel={
+                account.displayName ??
+                account.email ??
+                DRIVER_LABEL[account.driver] ??
+                account.driver
+              }
+              detail={[
+                account.plan,
+                account.environments.map((entry) => entry.label).join(", ") || account.sourceLabel,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              limits={account.limits}
               now={now}
-              environmentIds={selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds]}
+              first
+              used
+              footer={
+                account.limits.resetCredits && account.redeem ? (
+                  <ResetCredits
+                    environmentId={account.redeem.environmentId}
+                    input={account.redeem.input}
+                    credits={account.limits.resetCredits}
+                    now={now}
+                  />
+                ) : undefined
+              }
             />
+          ))
+        : pools.map((pool) => (
+            <View key={pool.driver} className="gap-3">
+              <View className="flex-row items-center gap-2 px-1">
+                <ProviderIcon provider={pool.driver} size={18} />
+                <Text className="text-base font-t3-medium text-foreground">
+                  {DRIVER_LABEL[pool.driver] ?? pool.driver}
+                </Text>
+              </View>
+              {pool.windows.map((window) => (
+                <PoolWindowCard
+                  key={`${window.kind}:${window.id}`}
+                  pool={window}
+                  color={pool.driver === "claudeAgent" ? colors.claude : colors.codex}
+                  now={now}
+                  environmentIds={
+                    selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds]
+                  }
+                />
+              ))}
+            </View>
           ))}
-        </View>
-      ))}
       {notices.map((notice) => (
         <Text key={notice} className="text-sm text-foreground-muted">
           {notice}

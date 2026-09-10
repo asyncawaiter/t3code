@@ -484,7 +484,7 @@ export function DashboardPage() {
                   {effectiveSpaceFilter === "all"
                     ? "All spaces"
                     : effectiveSpaceFilter === "root"
-                      ? "Outside spaces"
+                      ? "Default"
                       : spaceOptions.find((space) => space.key === effectiveSpaceFilter)?.name}
                 </SelectValue>
               </SelectTrigger>
@@ -493,7 +493,7 @@ export function DashboardPage() {
                   All spaces
                 </SelectItem>
                 <SelectItem value="root" className="min-h-7 text-xs">
-                  Outside spaces
+                  Default
                 </SelectItem>
                 {spaceOptions.map((space) => (
                   <SelectItem key={space.key} value={space.key} className="min-h-7 text-xs">
@@ -972,7 +972,7 @@ export function DashboardPage() {
                     className="flex min-h-0 min-w-72 flex-1 flex-col border-r border-border/40 px-2 last:border-r-0"
                   >
                     <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-xs font-semibold">
-                      {spaceOptions.find((space) => space.key === key)?.name ?? "Outside spaces"}
+                      {spaceOptions.find((space) => space.key === key)?.name ?? "Default"}
                       <span className="text-muted-foreground">{entries.length}</span>
                     </h2>
                     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">

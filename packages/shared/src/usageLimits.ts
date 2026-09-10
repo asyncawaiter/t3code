@@ -741,3 +741,13 @@ export function collectProviderUsageLimits(
   }
   return { createdAt: DateTime.formatIso(DateTime.makeUnsafe(now)), accounts, notices };
 }
+
+/** Compact labels keep each account window visible beside the provider mark. */
+export function compactUsageWindowLabel(window: { id: string; label: string }) {
+  if (window.id === "five_hour") return "5h";
+  if (window.id === "seven_day") return "Overall";
+  return window.label
+    .replace(/^Weekly /, "")
+    .replace(/^Weekly$/, "7d")
+    .replace(/ hour$/, "h");
+}

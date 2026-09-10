@@ -2,8 +2,6 @@ import { useComposerDraftStore, composerDraftHasUserContent } from "../../compos
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { SpaceLaunch } from "./SpaceLaunch";
 import type { ScopedProjectRef } from "@t3tools/contracts";
-import { OUTSIDE_SPACES } from "./Spaces.logic";
-import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import { useEffect, useState } from "react";
 import { PlusIcon, CheckIcon, XIcon, PencilIcon, MoreHorizontalIcon } from "lucide-react";
 import { type Profile, type ProfileSpace, ALL_PROFILE_ID } from "@t3tools/contracts";
@@ -95,12 +93,11 @@ export function SpaceToolbar({
   const [creating, setCreating] = useState(false);
   useEffect(() => {
     const create = () => {
-      if (!disabled) setCreating(true);
+      if (!disabled && profile.id !== ALL_PROFILE_ID) setCreating(true);
     };
     window.addEventListener("t3:create-space", create);
     return () => window.removeEventListener("t3:create-space", create);
-  }, [disabled]);
-  if (profile.id === ALL_PROFILE_ID) return null;
+  }, [disabled, profile.id]);
   return (
     <div className="px-1 pt-1" data-thread-selection-safe>
       <div className="flex h-7 items-center justify-between px-1.5">
@@ -112,55 +109,34 @@ export function SpaceToolbar({
           <span>Spaces</span>
         </span>
 
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="New space"
-                disabled={disabled || (profile.spaces?.length ?? 0) >= 64}
-                onClick={() => setCreating(true)}
-              />
-            }
-          >
-            <PlusIcon className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipPopup>New space in {profile.name}</TooltipPopup>
-        </Tooltip>
-      </div>
-      {profile.spaces?.length ? (
-        <Select
-          value={selectedSpaceId ?? "all"}
-          onValueChange={(id) => {
-            if (id !== null) onFilterChange(id === "all" ? null : id);
-          }}
+        <Button
+          size="xs"
+          variant="ghost"
+          aria-pressed={selectedSpaceId === null}
+          onClick={() => onFilterChange(null)}
+          className="h-6 px-1.5 text-[10px]"
         >
-          <SelectTrigger
-            size="xs"
-            aria-label="Show chats in profile"
-            className="mb-1 h-6 w-full min-w-0 border-0 bg-sidebar-foreground/5 px-2 text-[10px] shadow-none sm:h-6"
-          >
-            <SelectValue>
-              {selectedSpaceId === OUTSIDE_SPACES
-                ? "Outside spaces"
-                : selectedSpaceId
-                  ? (profile.spaces?.find((space) => space.id === selectedSpaceId)?.name ??
-                    "Outside spaces")
-                  : "All threads"}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup alignItemWithTrigger={false}>
-            <SelectItem value="all">All threads</SelectItem>
-            <SelectItem value={OUTSIDE_SPACES}>Outside spaces</SelectItem>
-            {(profile.spaces ?? []).map((space) => (
-              <SelectItem key={space.id} value={space.id}>
-                {space.name}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      ) : null}
+          All chats
+        </Button>
+        {profile.id !== ALL_PROFILE_ID ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="New space"
+                  disabled={disabled || (profile.spaces?.length ?? 0) >= 64}
+                  onClick={() => setCreating(true)}
+                />
+              }
+            >
+              <PlusIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup>New space in {profile.name}</TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </div>
       {creating ? (
         <SpaceNameEditor
           initialName=""
@@ -180,6 +156,50 @@ export function SpaceToolbar({
         />
       ) : null}
     </div>
+  );
+}
+
+export function DefaultSpaceTile({
+  count,
+  selected,
+  onSelect,
+  onNewChat,
+}: {
+  count: number;
+  selected: boolean;
+  onSelect: () => void;
+  onNewChat: () => void;
+}) {
+  return (
+    <li className="relative h-18 min-w-0 list-none" data-thread-selection-safe>
+      <button
+        type="button"
+        aria-label="Open Default space"
+        aria-pressed={selected}
+        onClick={onSelect}
+        className={cn(
+          "flex h-full w-full flex-col items-start rounded-xl px-2.5 py-2 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
+          selected
+            ? "bg-zinc-700 text-zinc-50 dark:bg-zinc-300 dark:text-zinc-900"
+            : "bg-sidebar-foreground/5 text-sidebar-foreground hover:bg-sidebar-foreground/10",
+        )}
+      >
+        <span className="text-xs font-medium leading-4">Default</span>
+        <span className="text-[10px] leading-3.5 opacity-75">Unassigned chats</span>
+        <span className="mt-auto text-[10px] opacity-75">
+          {count} {count === 1 ? "chat" : "chats"}
+        </span>
+      </button>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        aria-label="New chat in Default"
+        onClick={onNewChat}
+        className={cn("absolute bottom-1 right-1", selected && "text-zinc-50 dark:text-zinc-900")}
+      >
+        <PlusIcon className="size-3.5" />
+      </Button>
+    </li>
   );
 }
 
