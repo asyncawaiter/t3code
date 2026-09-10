@@ -51,6 +51,10 @@ concrete conflict or a user preference. Preserve explicit saved choices and resp
 operating-system permissions. Official upstream updates remain disabled so they
 cannot replace the custom build.
 
+Fork installers require the public T3 Connect settings from `.env.example` in
+the build worktree's `.env`. The packaging preflight rejects missing settings;
+verify Connect controls in the packaged app before delivery.
+
 ## Custom behavior to preserve
 
 - Profiles and Spaces are shared visual organization, not access controls.

@@ -156,6 +156,22 @@ export function resolvePublicConfig(...sources: readonly Environment[]): T3CodeP
   };
 }
 
+export function assertForkCloudConfig(version: string, env: Environment): void {
+  if (!version.includes("-fork.")) return;
+
+  const config = resolvePublicConfig(env);
+  if (
+    !config.clerkPublishableKey ||
+    !config.clerkJwtTemplate ||
+    !config.clerkCliOAuthClientId ||
+    !config.relayUrl
+  ) {
+    throw new Error(
+      "Fork installers require T3 Connect configuration. Populate .env from .env.example before building.",
+    );
+  }
+}
+
 function firstNonEmpty(sources: readonly Environment[], ...names: readonly string[]) {
   for (const source of sources) {
     for (const name of names) {

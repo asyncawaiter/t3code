@@ -4,9 +4,26 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { loadRepoEnv, resolvePublicConfig } from "./public-config.ts";
+import { assertForkCloudConfig, loadRepoEnv, resolvePublicConfig } from "./public-config.ts";
 
 const temporaryDirectories: string[] = [];
+
+it("requires complete T3 Connect configuration for fork installers", () => {
+  const env = {
+    T3CODE_CLERK_PUBLISHABLE_KEY: "pk_test",
+    T3CODE_CLERK_JWT_TEMPLATE: "t3-relay",
+    T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_test",
+    T3CODE_RELAY_URL: "https://relay.example.test",
+  };
+  expect(() => assertForkCloudConfig("0.0.41", {})).not.toThrow();
+  expect(() => assertForkCloudConfig("0.0.41-fork.19", env)).not.toThrow();
+  expect(() => assertForkCloudConfig("0.0.41-fork.19", {})).toThrow("T3 Connect");
+  for (const key of Object.keys(env)) {
+    expect(() => assertForkCloudConfig("0.0.41-fork.19", { ...env, [key]: " " })).toThrow(
+      "T3 Connect",
+    );
+  }
+});
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
