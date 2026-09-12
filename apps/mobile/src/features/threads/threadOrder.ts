@@ -1,3 +1,4 @@
+import * as Arr from "effect/Array";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { planPinnedMove } from "@t3tools/client-runtime/state/thread-sort";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -42,6 +43,8 @@ export function createThreadMovePlanner(input: {
   readonly reorderableEnvironmentIds: ReadonlySet<EnvironmentId>;
 }) {
   const orderedIds = input.ordered.map(rowId);
+  const rowsByDevice = Arr.groupBy(input.ordered, (row) => row.environmentId);
+  const environmentById = new Map(input.ordered.map((row) => [rowId(row), row.environmentId]));
   const keysById = new Map(
     (input.allThreads ?? input.ordered).map((row) => [
       rowId(row),
@@ -55,7 +58,16 @@ export function createThreadMovePlanner(input: {
   );
   return (movedId: string, direction: "up" | "down") => {
     if (!writableIds.has(movedId)) return null;
-    const assignments = planPinnedMove({ orderedIds, keysById, movedId, direction });
+    const deviceId = environmentById.get(movedId);
+    const assignments = planPinnedMove({
+      orderedIds:
+        input.section === "active" && deviceId !== undefined
+          ? (rowsByDevice[deviceId] ?? []).map(rowId)
+          : orderedIds,
+      keysById,
+      movedId,
+      direction,
+    });
     return assignments === null ||
       assignments.length === 0 ||
       assignments.some((assignment) => !writableIds.has(assignment.id))
@@ -73,8 +85,20 @@ export function createPendingThreadOrder(input: {
 }): PendingThreadOrder {
   const orderedIds = input.ordered.map(rowId);
   const from = orderedIds.indexOf(input.movedId);
-  orderedIds.splice(from, 1);
-  orderedIds.splice(from + (input.direction === "up" ? -1 : 1), 0, input.movedId);
+  const step = input.direction === "up" ? -1 : 1;
+  let to = from + step;
+  if (input.section === "active") {
+    while (
+      to >= 0 &&
+      to < input.ordered.length &&
+      input.ordered[to]?.environmentId !== input.ordered[from]?.environmentId
+    )
+      to += step;
+  }
+  if (from >= 0 && to >= 0 && to < orderedIds.length) {
+    orderedIds.splice(from, 1);
+    orderedIds.splice(to, 0, input.movedId);
+  }
   return {
     section: input.section,
     orderedIds,

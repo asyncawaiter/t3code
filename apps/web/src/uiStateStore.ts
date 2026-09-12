@@ -1,3 +1,4 @@
+import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { Debouncer } from "@tanstack/react-pacer";
 import type { PullRequestMergeMethod } from "@t3tools/contracts";
 import { create } from "zustand";
@@ -20,6 +21,8 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 ] as const;
 
 export interface PersistedUiState {
+  bookmarkedThreadKey?: string | null;
+  bookmarkReturnThreadKey?: string | null;
   projectExpandedById?: Record<string, boolean>;
   projectOrder?: string[];
   threadLastVisitedAtById?: Record<string, string>;
@@ -46,6 +49,8 @@ export interface UiProjectState {
 }
 
 export interface UiThreadState {
+  bookmarkedThreadKey: string | null;
+  bookmarkReturnThreadKey: string | null;
   threadLastVisitedAtById: Record<string, string>;
   threadChangedFilesExpandedById: Record<string, Record<string, boolean>>;
 }
@@ -62,6 +67,8 @@ export interface UiState
   extends UiProjectState, UiThreadState, UiEndpointState, UiPullRequestState {}
 
 const initialState: UiState = {
+  bookmarkedThreadKey: null,
+  bookmarkReturnThreadKey: null,
   projectExpandedById: {},
   projectOrder: [],
   sidebarProjectScopeKey: null,
@@ -157,6 +164,16 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       parsed.threadChangedFilesExpansionVersion === THREAD_CHANGED_FILES_EXPANSION_VERSION
         ? sanitizePersistedThreadChangedFilesExpanded(parsed.threadChangedFilesExpandedById)
         : {},
+    bookmarkReturnThreadKey:
+      typeof parsed.bookmarkReturnThreadKey === "string" &&
+      parseScopedThreadKey(parsed.bookmarkReturnThreadKey)
+        ? parsed.bookmarkReturnThreadKey
+        : null,
+    bookmarkedThreadKey:
+      typeof parsed.bookmarkedThreadKey === "string" &&
+      parseScopedThreadKey(parsed.bookmarkedThreadKey)
+        ? parsed.bookmarkedThreadKey
+        : null,
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
     sidebarProjectScopeKey: sanitizeOptionalKey(parsed.sidebarProjectScopeKey),
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
@@ -234,6 +251,8 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+        bookmarkedThreadKey: state.bookmarkedThreadKey,
+        bookmarkReturnThreadKey: state.bookmarkReturnThreadKey,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
@@ -445,6 +464,7 @@ export function reorderProjects(
 }
 
 interface UiStateStore extends UiState {
+  toggleChatBookmark: (threadKey: string) => void;
   markThreadVisited: (threadId: string, visitedAt: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
@@ -462,6 +482,11 @@ interface UiStateStore extends UiState {
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
+  toggleChatBookmark: (threadKey) =>
+    set((state) => ({
+      bookmarkedThreadKey: state.bookmarkedThreadKey === threadKey ? null : threadKey,
+      bookmarkReturnThreadKey: null,
+    })),
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>

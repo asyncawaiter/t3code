@@ -109,6 +109,44 @@ export const ThreadListV2SectionDivider = memo(function ThreadListV2SectionDivid
   );
 });
 
+export const ThreadListV2DeviceHeader = memo(function ThreadListV2DeviceHeader(props: {
+  readonly label: string;
+  readonly count: number;
+  readonly connectionState: string | undefined;
+  readonly machine?: EnvironmentMachineKind;
+  readonly pane?: "screen" | "sidebar";
+}) {
+  const status =
+    props.connectionState === "connected"
+      ? "Online"
+      : props.connectionState === "connecting"
+        ? "Connecting"
+        : "Offline";
+  return (
+    <View
+      accessibilityRole="header"
+      accessibilityLabel={`${props.label}, ${props.count} chats, ${status}`}
+      className={cn("h-8 flex-row items-center gap-2", props.pane === "sidebar" ? "px-3" : "px-5")}
+    >
+      <EnvironmentMachineSymbol
+        kind={props.machine ?? "server"}
+        size={12}
+        tintColorClassName="text-foreground-tertiary"
+      />
+      <Text numberOfLines={1} className="flex-1 text-xs font-t3-medium text-foreground-tertiary">
+        {props.label}
+      </Text>
+      <Text className="text-xs text-foreground-tertiary">{props.count}</Text>
+      <View
+        className={cn(
+          "size-1.5 rounded-full",
+          status === "Online" ? "bg-emerald-500" : "bg-foreground-tertiary",
+        )}
+      />
+    </View>
+  );
+});
+
 export const ThreadListV2SnoozedShelfHeader = memo(function ThreadListV2SnoozedShelfHeader(props: {
   readonly count: number;
   readonly disabled?: boolean;

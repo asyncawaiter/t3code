@@ -1,3 +1,4 @@
+import { resolveChatFocus } from "@t3tools/client-runtime/state/chat-bookmark";
 import { useThreadPinMenu } from "../hooks/useThreadPinMenu";
 import { openChatCreation } from "../chatCreationStore";
 import type { DraftThreadState } from "../composerDraftStore";
@@ -23,6 +24,7 @@ import { SpaceToolbar, SpaceTile, DefaultSpaceTile } from "./sidebar/Spaces";
 import { profileSpaceCounts, profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
+import * as Arr from "effect/Array";
 import {
   DndContext,
   DragOverlay,
@@ -75,6 +77,7 @@ import {
   CircleDashedIcon,
   ClockIcon,
   FolderIcon,
+  FunnelIcon,
   GitBranchIcon,
   LocateFixedIcon,
   PinIcon,
@@ -616,14 +619,18 @@ const draftPenClassName = "size-3 shrink-0 text-amber-600 dark:text-amber-300/80
 // with the rows and the gap can open on either side of them. They can't be
 // picked up, and a marker is the sortable `over` when the pointer is on it,
 // which resolveSidebarDropTarget turns into the section the gap sits in.
-function SortableSidebarMarker(props: {
-  marker: SidebarListMarker;
-  className?: string;
-  children?: ReactNode;
-  "data-testid"?: string;
-}) {
+function SortableSidebarMarker(
+  props: ({ marker: SidebarListMarker } | { deviceId: string }) & {
+    className?: string;
+    children?: ReactNode;
+    "data-testid"?: string;
+  },
+) {
   const { setNodeRef, transform, transition } = useSortable({
-    id: sidebarMarkerId(props.marker),
+    id:
+      "deviceId" in props
+        ? sidebarListItemId({ kind: "device", environmentId: props.deviceId })
+        : sidebarMarkerId(props.marker),
     disabled: { draggable: true },
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
@@ -636,7 +643,8 @@ function SortableSidebarMarker(props: {
       style={{
         transform: CSS.Translate.toString(transform),
         // A newly revealed target must not slide from its hidden position.
-        transition: props.marker.endsWith("-placeholder") ? "none" : transition,
+        transition:
+          "marker" in props && props.marker.endsWith("-placeholder") ? "none" : transition,
         visibility: transform?.scaleY === 0 ? "hidden" : undefined,
       }}
     >
@@ -1082,6 +1090,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   jumpLabel: string | null;
   currentEnvironmentId: string | null;
   environmentLabel: string | null;
+  hideEnvironment?: boolean;
   environmentMachine: EnvironmentMachineKind;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
@@ -1978,23 +1987,30 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : null}
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5 text-secondary-label text-[11px] leading-4">
-              <span className="inline-flex max-w-[40%] min-w-0 items-center gap-1">
-                <EnvironmentMachineIcon
-                  aria-hidden
-                  kind={props.environmentMachine}
-                  className="size-3 shrink-0"
-                />
-                <span className="truncate">
-                  {props.environmentLabel ?? (isRemote ? "Remote" : "This machine")}
+              {!props.hideEnvironment ? (
+                <span className="inline-flex max-w-[40%] min-w-0 items-center gap-1">
+                  <EnvironmentMachineIcon
+                    aria-hidden
+                    kind={props.environmentMachine}
+                    className="size-3 shrink-0"
+                  />
+                  <span className="truncate">
+                    {props.environmentLabel ?? (isRemote ? "Remote" : "This machine")}
+                  </span>
                 </span>
-              </span>
+              ) : null}
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
               {thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
-                  <span className="min-w-0 flex-1 truncate border-l border-sidebar-border/70 pl-1.5 whitespace-nowrap">
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate whitespace-nowrap",
+                      !props.hideEnvironment && "border-l border-sidebar-border/70 pl-1.5",
+                    )}
+                  >
                     {thread.branch}
                   </span>
                 </>
@@ -2405,14 +2421,14 @@ export default function Sidebar() {
 
   const environmentLabelById = useMemo(
     () =>
-      new Map(
+      new Map<string, string>(
         environments.map((environment) => [environment.environmentId, environment.label] as const),
       ),
     [environments],
   );
   const environmentMachineById = useMemo(
     () =>
-      new Map(
+      new Map<string, EnvironmentMachineKind>(
         environments.map(
           (environment) =>
             [
@@ -2522,15 +2538,33 @@ export default function Sidebar() {
   }, [setProjectScopeKey]);
   // {value, label} items let Base UI drive the combobox selection contract
   // while the popup search filters the same collection.
+  const projectKeysInSpace = useMemo(() => {
+    if (spaceFilter === null) return null;
+    const matches = profileThreadFilter(rawProfiles, activeProfile.id, spaceFilter);
+    return new Set(
+      threads
+        .filter((thread) => thread.archivedAt === null && matches(thread))
+        .map((thread) => `${thread.environmentId}:${thread.projectId}`),
+    );
+  }, [threads, rawProfiles, activeProfile.id, spaceFilter]);
   const projectScopeItems = useMemo(
     () => [
       { value: "all", label: allProjectsLabel },
-      ...projectGroups.map((project) => ({
-        value: project.projectKey,
-        label: project.displayName,
-      })),
+      ...projectGroups
+        .filter(
+          (project) =>
+            projectKeysInSpace === null ||
+            project.projectKey === projectScopeKey ||
+            project.memberProjects.some((member) =>
+              projectKeysInSpace.has(`${member.environmentId}:${member.id}`),
+            ),
+        )
+        .map((project) => ({
+          value: project.projectKey,
+          label: project.displayName,
+        })),
     ],
-    [allProjectsLabel, projectGroups],
+    [allProjectsLabel, projectGroups, projectScopeKey, projectKeysInSpace],
   );
   const projectGroupByScopeKey = useMemo(
     () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
@@ -2717,7 +2751,7 @@ export default function Sidebar() {
     pinnedThreads,
     draggableThreadKeys,
     activeReorderableThreadKeys,
-    activeThreads,
+    activeThreads: ungroupedActiveThreads,
     snoozedThreads,
     settledThreads,
     snoozeNow,
@@ -2857,6 +2891,22 @@ export default function Sidebar() {
     rawProfiles,
     spaceFilter,
   ]);
+
+  const activeDeviceGroups = useMemo(
+    () =>
+      Object.entries(Arr.groupBy(ungroupedActiveThreads, (thread) => thread.environmentId)).sort(
+        ([left], [right]) =>
+          (environmentLabelById.get(left) ?? left).localeCompare(
+            environmentLabelById.get(right) ?? right,
+          ) || left.localeCompare(right),
+      ),
+    [ungroupedActiveThreads, environmentLabelById],
+  );
+  const activeThreads = useMemo(
+    () => activeDeviceGroups.flatMap(([, rows]) => rows),
+    [activeDeviceGroups],
+  );
+  const showDeviceGroups = activeDeviceGroups.length > 1;
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3508,7 +3558,7 @@ export default function Sidebar() {
         )
         .map((thread) => {
           const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-          return { kind: "thread", key, section };
+          return { kind: "thread", key, section, environmentId: thread.environmentId };
         });
     if (
       pinnedThreads.length +
@@ -3531,9 +3581,11 @@ export default function Sidebar() {
       ...pinnedRows.slice(split),
     );
     items.push({ kind: "marker", marker: "pinned-divider" });
-    const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
-    items.push(...activeRows);
+    for (const [environmentId, rows] of activeDeviceGroups) {
+      if (showDeviceGroups) items.push({ kind: "device", environmentId });
+      items.push(...rowsOf(rows, "active"));
+    }
     if (snoozedThreads.length > 0) {
       items.push({ kind: "marker", marker: "snoozed-header" });
       items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
@@ -3545,6 +3597,8 @@ export default function Sidebar() {
     return items;
   }, [
     activeThreads,
+    activeDeviceGroups,
+    showDeviceGroups,
     pinnedThreads,
     pinIndex,
     renderedSettledThreads,
@@ -3569,7 +3623,9 @@ export default function Sidebar() {
   const sidebarListOrderKey = useMemo(
     () =>
       sidebarListItems
-        .map((item) => (item.kind === "thread" ? `${item.key}:${item.section}` : item.marker))
+        .map((item) =>
+          item.kind === "thread" ? `${item.key}:${item.section}` : sidebarListItemId(item),
+        )
         .join("\0"),
     [sidebarListItems],
   );
@@ -3616,6 +3672,13 @@ export default function Sidebar() {
     () =>
       createSidebarSortingStrategy({
         items: sidebarListItems,
+        deviceOrder: environments
+          .toSorted(
+            (left, right) =>
+              left.label.localeCompare(right.label) ||
+              left.environmentId.localeCompare(right.environmentId),
+          )
+          .map((environment) => environment.environmentId),
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
         settledExpanded: settledShelfExpanded,
@@ -3625,6 +3688,7 @@ export default function Sidebar() {
       }),
     [
       draggedSettledOrder,
+      environments,
       routeThreadKey,
       settledShelfExpanded,
       settledVisibleCount,
@@ -4709,23 +4773,36 @@ export default function Sidebar() {
   // etc. in) the whole thread list. Skipped on the initial mount and when
   // the user asked for reduced motion.
   const profileListRef = useRef<HTMLDivElement>(null);
-  const openThread = routeThreadRef
-    ? threads.find(
-        (thread) =>
-          thread.id === routeThreadRef.threadId &&
-          thread.environmentId === routeThreadRef.environmentId &&
-          thread.archivedAt === null,
-      )
-    : undefined;
+  const bookmarkedThreadKey = useUiStateStore((state) => state.bookmarkedThreadKey);
+  const bookmarkReturnThreadKey = useUiStateStore((state) => state.bookmarkReturnThreadKey);
+  const bookmarkFocus = resolveChatFocus(
+    bookmarkedThreadKey,
+    bookmarkReturnThreadKey,
+    routeThreadKey,
+  );
+  const focusThread = threads.find(
+    (thread) => `${thread.environmentId}:${thread.id}` === bookmarkFocus?.threadKey,
+  );
   const [revealRequest, setRevealRequest] = useState<{ threadKey: string } | null>(null);
-  const revealCurrentChat = () => {
-    if (!openThread || !routeThreadKey) return;
+  const focusBookmarkedChat = () => {
+    if (!bookmarkFocus) return;
+    if (!focusThread || focusThread.archivedAt !== null) {
+      toastManager.add({
+        type: "warning",
+        title: "Focus chat unavailable",
+        description: focusThread?.archivedAt
+          ? "Restore this chat from Settings > Archive, or bookmark another chat."
+          : "Reconnect its device, or bookmark another chat.",
+      });
+      return;
+    }
     const projectKey = scopedProjectKey(
-      scopeProjectRef(openThread.environmentId, openThread.projectId),
+      scopeProjectRef(focusThread.environmentId, focusThread.projectId),
     );
     const profile = profileForProject(rawProfiles, projectKey) ?? ALL_PROFILE;
-    const space = spaceForThread(profile, routeThreadKey, projectKey);
+    const space = spaceForThread(profile, bookmarkFocus.threadKey, projectKey);
     useUiStateStore.setState({
+      bookmarkReturnThreadKey: bookmarkFocus.returnThreadKey,
       activeProfileId: profile.id === ALL_PROFILE_ID ? null : profile.id,
       spaceSelection: {
         profileId: profile.id,
@@ -4735,15 +4812,17 @@ export default function Sidebar() {
     setProjectScopeKey(null);
     clearThreadSearch();
     clearSelection();
-    setRevealRequest({ threadKey: routeThreadKey });
+    setRevealRequest({ threadKey: bookmarkFocus.threadKey });
+    navigateToThread(scopeThreadRef(focusThread.environmentId, focusThread.id));
   };
   useEffect(() => {
-    if (revealRequest?.threadKey === routeThreadKeyRef.current) {
-      profileListRef.current
-        ?.querySelector<HTMLElement>('[data-current-thread="true"]')
-        ?.scrollIntoView({ block: "nearest", behavior: "instant" });
+    if (revealRequest?.threadKey !== routeThreadKey) return;
+    const row = profileListRef.current?.querySelector<HTMLElement>('[data-current-thread="true"]');
+    if (row) {
+      row.scrollIntoView({ block: "nearest", behavior: "instant" });
+      setRevealRequest(null);
     }
-  }, [revealRequest]);
+  }, [revealRequest, routeThreadKey, sidebarListOrderKey]);
   const previousProfileIdRef = useRef<string | null>(null);
   useEffect(() => {
     const previousProfileId = previousProfileIdRef.current;
@@ -4761,7 +4840,7 @@ export default function Sidebar() {
 
   const sidebarProjectFilter =
     projectGroups.length > 0 ? (
-      <div className="mx-1 mt-1 flex items-center gap-1 rounded-lg bg-sidebar-foreground/5 px-1">
+      <div className="shrink-0">
         <Combobox
           items={projectScopeItems}
           filteredItems={filteredProjectScopeItems}
@@ -4781,19 +4860,19 @@ export default function Sidebar() {
           <ComboboxTrigger
             render={
               <SidebarMenuButton
-                aria-label="Filter threads by project"
-                className="h-8 min-w-0 flex-1 gap-1.5 px-1.5 text-[11px] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                size="icon"
+                aria-label="Filter chats by project"
+                title="Filter chats by project"
+                className={cn(
+                  "shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
+                  scopedProjectGroup && "bg-sidebar-accent text-sidebar-foreground",
+                )}
               />
             }
           >
-            <span className="min-w-0 flex-1 truncate">
-              {scopedProjectGroup
-                ? `Project: ${scopedProjectGroup.displayName}`
-                : "Filter chats by project"}
-            </span>
-            <ChevronDownIcon className="size-3 shrink-0 text-sidebar-muted-foreground" />
+            <FunnelIcon className="size-4" />
           </ComboboxTrigger>
-          <ComboboxPopup align="start" className="w-(--anchor-width) min-w-0 overflow-hidden">
+          <ComboboxPopup align="start" className="w-80 max-w-[calc(100vw-2rem)] overflow-hidden">
             <p className="px-3 pt-2 text-[11px] text-muted-foreground">
               Narrow this view to one project.
             </p>
@@ -4887,41 +4966,37 @@ export default function Sidebar() {
                 );
               }}
             </ComboboxList>
+            <div className="border-t p-1">
+              <Button
+                variant="ghost"
+                className="w-full justify-start"
+                onClick={() => {
+                  dispatchProjectScopeMenu({ type: "open-changed", open: false });
+                  openAddProjectCommandPalette();
+                }}
+              >
+                <PlusIcon className="size-3.5" />
+                New project
+              </Button>
+            </div>
           </ComboboxPopup>
         </Combobox>
-        {scopedProjectGroup ? (
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Clear project filter"
-            title="Show chats from all projects in this view"
-            onClick={() => setProjectScopeKey(null)}
-          >
-            <XIcon className="size-3.5" />
-          </Button>
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <SidebarMenuButton
-                size="icon"
-                className="relative size-7 shrink-0 text-sidebar-muted-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                onClick={openAddProjectCommandPalette}
-                type="button"
-                aria-label="New project"
-              />
-            }
-          >
-            <PlusIcon className="size-3.5" />
-            <span
-              className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-              aria-hidden="true"
-            />
-          </TooltipTrigger>
-          <TooltipPopup side="right">New project</TooltipPopup>
-        </Tooltip>
       </div>
     ) : null;
+  const projectFilterChip = scopedProjectGroup ? (
+    <div className="mx-1 flex min-w-0 items-center gap-1 rounded-md bg-sidebar-foreground/5 pl-2 text-[11px]">
+      <span className="min-w-0 flex-1 truncate">Project: {scopedProjectGroup.displayName}</span>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        aria-label="Clear project filter"
+        title="Show chats from all projects in this view"
+        onClick={() => setProjectScopeKey(null)}
+      >
+        <XIcon className="size-3" />
+      </Button>
+    </div>
+  ) : null;
 
   return (
     <DndContext
@@ -5000,7 +5075,8 @@ export default function Sidebar() {
                     </Button>
                   ) : null}
                 </div>
-                {openThread ? (
+                {sidebarProjectFilter}
+                {bookmarkedThreadKey ? (
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -5008,15 +5084,15 @@ export default function Sidebar() {
                           size="icon"
                           type="button"
                           className="shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                          onClick={revealCurrentChat}
-                          aria-label="Show current chat"
+                          onClick={focusBookmarkedChat}
+                          aria-label="Focus saved chat"
                         />
                       }
                     >
                       <LocateFixedIcon />
                     </TooltipTrigger>
                     <TooltipPopup side="right">
-                      Show current chat in its profile and space
+                      Return to {focusThread?.title ?? "saved chat"}
                     </TooltipPopup>
                   </Tooltip>
                 ) : null}
@@ -5069,7 +5145,7 @@ export default function Sidebar() {
                 dropDisabled={!primarySettingsLoaded || activeProfile.id === ALL_PROFILE_ID}
                 onSelect={(id) => setActiveProfileId(id === ALL_PROFILE_ID ? null : id)}
               />
-              {isSearchingThreads ? sidebarProjectFilter : null}
+              {isSearchingThreads ? projectFilterChip : null}
             </SidebarGroup>
           }
         >
@@ -5249,6 +5325,7 @@ export default function Sidebar() {
                             jumpLabel={
                               showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
+                            hideEnvironment={section === "active" && showDeviceGroups}
                             currentEnvironmentId={primaryEnvironmentId}
                             environmentLabel={
                               environmentLabelById.get(thread.environmentId) ?? null
@@ -5436,10 +5513,10 @@ export default function Sidebar() {
                           </SortableContext>
                         </li>,
                       );
-                      if (sidebarProjectFilter)
+                      if (projectFilterChip)
                         items.push(
                           <li key="project-filter" className="mb-2 list-none">
-                            {sidebarProjectFilter}
+                            {projectFilterChip}
                           </li>,
                         );
                       items.push(draftBlock);
@@ -5447,6 +5524,55 @@ export default function Sidebar() {
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          continue;
+                        }
+                        if (item.kind === "device") {
+                          const environment = environments.find(
+                            (entry) => entry.environmentId === item.environmentId,
+                          );
+                          const connected = environment?.connection.phase === "connected";
+                          const status = connected
+                            ? "Online"
+                            : environment?.connection.phase === "connecting"
+                              ? "Connecting"
+                              : "Offline";
+                          items.push(
+                            <SortableSidebarMarker
+                              key={sidebarListItemId(item)}
+                              deviceId={item.environmentId}
+                              data-testid="sidebar-device-header"
+                              className="flex h-7 items-center gap-1.5 px-2.5 text-[11px] text-sidebar-muted-foreground"
+                            >
+                              <EnvironmentMachineIcon
+                                kind={environmentMachineById.get(item.environmentId) ?? "server"}
+                                className="size-3 shrink-0"
+                                aria-hidden
+                              />
+                              <span
+                                role="heading"
+                                aria-level={3}
+                                className="min-w-0 flex-1 truncate"
+                              >
+                                {environmentLabelById.get(item.environmentId) ?? "Device"}
+                              </span>
+                              <span>
+                                {
+                                  activeDeviceGroups.find(([id]) => id === item.environmentId)?.[1]
+                                    .length
+                                }
+                              </span>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={<span role="img" aria-label={status} />}
+                                  className={cn(
+                                    "size-1.5 shrink-0 rounded-full",
+                                    connected ? "bg-emerald-500" : "bg-sidebar-muted-foreground/40",
+                                  )}
+                                />
+                                <TooltipPopup>{status}</TooltipPopup>
+                              </Tooltip>
+                            </SortableSidebarMarker>,
+                          );
                           continue;
                         }
                         switch (item.marker) {

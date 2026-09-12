@@ -1220,6 +1220,32 @@ describe("planSidebarThreadDrop", () => {
       target: { activeOrder: [], ...overrides.target },
     });
 
+  it("reorders only the source device and rejects another device's active targets", () => {
+    const items: SidebarListItem[] = [
+      { kind: "marker", marker: "pinned-divider" },
+      { kind: "device", environmentId: "a" },
+      { kind: "thread", key: "a1", section: "active", environmentId: "a" },
+      { kind: "thread", key: "a2", section: "active", environmentId: "a" },
+      { kind: "device", environmentId: "b" },
+      { kind: "thread", key: "b1", section: "active", environmentId: "b" },
+    ];
+    expect(resolveSidebarDropTarget(items, "a1", "b1")).toBeNull();
+    expect(resolveSidebarDropTarget(items, "a1", "sidebar-marker-device-b")).toBeNull();
+    const target = resolveSidebarDropTarget(items, "a1", "a2")!;
+    expect(target.activeGroup).toEqual(["a2", "a1"]);
+    const result = plan({
+      activeKey: "a1",
+      activeSection: "active",
+      target,
+      activeOrder: ["a1", "a2", "b1"],
+      activeKeysById: new Map(),
+      activeReorderableKeys: new Set(["a1", "a2"]),
+    });
+    expect(result.kind).toBe("move-active");
+    if (result.kind === "move-active")
+      expect(result.assignments.map((entry) => entry.id).sort()).toEqual(["a1", "a2"]);
+  });
+
   it("allows old-server pinned reordering while rejecting settlement", () => {
     expect(
       plan({

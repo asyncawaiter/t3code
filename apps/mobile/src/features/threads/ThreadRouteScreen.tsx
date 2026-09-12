@@ -1,4 +1,5 @@
-import { revealProfileThread, useProfiles } from "../../state/profiles";
+import { useChatBookmark } from "./use-chat-bookmark";
+import { useProfiles } from "../../state/profiles";
 import { profileForProject, spaceForThread } from "@t3tools/contracts";
 import { ThreadMessageActionsProvider } from "./ThreadMessageActions";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
@@ -332,19 +333,15 @@ function ThreadRouteContent(
           `${selectedThread.environmentId}:${selectedThread.projectId}`,
         )
       : undefined;
-  const showInList = useCallback(() => {
-    if (!selectedThread) return;
-    revealProfileThread(selectedThread);
-    if (layout.usesSplitView) {
-      if (!panes.primarySidebarVisible) togglePrimarySidebar();
-    } else navigation.dispatch(StackActions.popTo("Home"));
-  }, [
-    selectedThread,
-    layout.usesSplitView,
-    panes.primarySidebarVisible,
-    togglePrimarySidebar,
-    navigation,
-  ]);
+  const currentBookmarkKey = selectedThread
+    ? `${selectedThread.environmentId}:${selectedThread.id}`
+    : null;
+  const bookmark = useChatBookmark(currentBookmarkKey);
+  const isBookmarked = bookmark.key !== null && bookmark.key === currentBookmarkKey;
+  const toggleChatBookmark = bookmark.toggle;
+  const toggleBookmark = useCallback(() => {
+    if (currentBookmarkKey) toggleChatBookmark(currentBookmarkKey);
+  }, [currentBookmarkKey, toggleChatBookmark]);
   const headerSubtitle = [
     parentProfile ? `${parentProfile.name}${parentSpace ? ` / ${parentSpace.name}` : ""}` : null,
     selectedThreadProject?.title ?? null,
@@ -734,7 +731,23 @@ function ThreadRouteContent(
   const androidHeaderActions = useMemo<ReadonlyArray<AndroidHeaderAction>>(() => {
     if (Platform.OS !== "android") return [];
 
-    const actions: AndroidHeaderAction[] = [];
+    const actions: AndroidHeaderAction[] = [
+      {
+        accessibilityLabel: isBookmarked ? "Remove chat bookmark" : "Bookmark this chat",
+        icon: isBookmarked ? "bookmark.fill" : "bookmark",
+        onPress: toggleBookmark,
+        disabled: !bookmark.loaded,
+      },
+      ...(bookmark.key
+        ? [
+            {
+              accessibilityLabel: "Focus saved chat",
+              icon: "scope" as const,
+              onPress: bookmark.focus,
+            },
+          ]
+        : []),
+    ];
     if (props.onReturnToThread) {
       actions.push({
         accessibilityLabel: "Return to chat",
@@ -770,6 +783,11 @@ function ThreadRouteContent(
     }
     return actions;
   }, [
+    isBookmarked,
+    bookmark.loaded,
+    bookmark.key,
+    bookmark.focus,
+    toggleBookmark,
     fileInspector.supported,
     handleOpenFilesInspector,
     handleOpenTerminal,
@@ -937,7 +955,13 @@ function ThreadRouteContent(
     <>
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
       <NativeStackScreenOptions
-        optionsVersion={threadGitControlProps.projectScripts}
+        optionsVersion={[
+          threadGitControlProps.projectScripts,
+          bookmark.key,
+          bookmark.returnThreadKey,
+          bookmark.loaded,
+          currentBookmarkKey,
+        ]}
         options={{
           // Android draws its own in-flow header (AndroidScreenHeader below);
           // the native stack header stays iOS-only.
@@ -970,11 +994,25 @@ function ThreadRouteContent(
               ? () => [
                   withNativeGlassHeaderItem({
                     type: "button",
-                    identifier: "show-in-list",
-                    accessibilityLabel: "Show in list",
-                    icon: { name: "scope", type: "sfSymbol" },
-                    onPress: showInList,
+                    identifier: "chat-bookmark",
+                    accessibilityLabel: isBookmarked
+                      ? "Remove chat bookmark"
+                      : "Bookmark this chat",
+                    icon: { name: isBookmarked ? "bookmark.fill" : "bookmark", type: "sfSymbol" },
+                    disabled: !bookmark.loaded,
+                    onPress: toggleBookmark,
                   }),
+                  ...(bookmark.key
+                    ? [
+                        withNativeGlassHeaderItem({
+                          type: "button",
+                          identifier: "focus-chat",
+                          accessibilityLabel: "Focus saved chat",
+                          icon: { name: "scope", type: "sfSymbol" },
+                          onPress: bookmark.focus,
+                        }),
+                      ]
+                    : []),
                   ...(layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems),
                 ]
               : undefined,

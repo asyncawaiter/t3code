@@ -20,6 +20,19 @@ on Windows and Linux to start a new thread and immediately open another draft. T
 next draft keeps the workspace mode and base branch you selected. With **New
 worktree**, each background submission creates its own worktree.
 
+## Bookmark and return
+
+Use the bookmark button in a chat header to save a focus destination. After opening
+another chat, choose **Focus saved chat** to return to your bookmark. Choose it
+again to go back to the chat you left. Browsing to a third chat makes that the next
+return point. Each jump selects the destination profile and space and reveals the
+chat in the sidebar.
+
+Bookmarking another chat replaces the bookmark and clears the return point. Select
+the filled bookmark again to remove it. Your bookmark and return point survive
+reloads on that client. Restore an archived destination or reconnect its device
+before focusing it.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.
@@ -42,10 +55,11 @@ edge to pin a thread. Section labels stay readable for the whole drag, and the s
 thread is over takes the accent color. Section labels also
 identify empty sections and a collapsed settled shelf.
 
-Drag within the pinned or active section to change its order. Other rows slide aside to show the
-spot where the thread will land. Drops into either section keep the position you choose. On
+Drag within the pinned section or an active device group to change its order. Other rows slide
+aside to show where the thread will land. Drops keep the position you choose. On
 mobile, open a pinned or active thread's menu and choose **Move up** or **Move down**. The server
 saves the order, so it survives a refresh and appears on your other connected devices.
+Active moves stay within the chat's device. Pinned order remains shared across devices.
 
 On web and desktop, the list also animates section changes made with thread actions such as
 **Pin**, **Settle**, and **Snooze**. These transitions respect your system's reduced-motion

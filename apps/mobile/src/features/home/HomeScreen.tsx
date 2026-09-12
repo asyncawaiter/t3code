@@ -48,6 +48,7 @@ import {
 } from "../threads/thread-list-items";
 import {
   ThreadListV2PendingRow,
+  ThreadListV2DeviceHeader,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
   ThreadListV2SnoozedShelfHeader,
@@ -766,6 +767,7 @@ export function HomeScreen(props: HomeScreenProps) {
     () =>
       buildThreadListV2ListItems({
         items: threadListV2Layout.items,
+        environmentLabel: (id) => props.savedConnectionsById[id]?.environmentLabel ?? "Device",
         pendingTasks: v2PendingTasks,
         snoozedCount: threadListV2Layout.snoozedCount,
         snoozedShelfExpanded,
@@ -775,7 +777,14 @@ export function HomeScreen(props: HomeScreenProps) {
         settledShelfHeaderIndex: threadListV2Layout.settledShelfHeaderIndex,
         snoozeLabelNow: `${nowMinute}:00.000Z`,
       }),
-    [nowMinute, settledShelfExpanded, snoozedShelfExpanded, threadListV2Layout, v2PendingTasks],
+    [
+      nowMinute,
+      settledShelfExpanded,
+      snoozedShelfExpanded,
+      threadListV2Layout,
+      v2PendingTasks,
+      props.savedConnectionsById,
+    ],
   );
 
   const renderV2Item = useCallback(
@@ -784,6 +793,20 @@ export function HomeScreen(props: HomeScreenProps) {
       const showTrailingDivider =
         nextItem?.type === "v2-thread" ||
         (nextItem?.type === "v2-pending" && !nextItem.showPendingDivider);
+      if (item.type === "v2-device") {
+        return (
+          <ThreadListV2DeviceHeader
+            label={item.label}
+            count={item.count}
+            connectionState={
+              props.environments.find(
+                (environment) => environment.environmentId === item.environmentId,
+              )?.connectionState
+            }
+            machine={machineByEnvironmentId.get(item.environmentId)}
+          />
+        );
+      }
       if (item.type === "v2-pending") {
         const pendingScopeKey = scopedProjectKey(
           item.pendingTask.environmentId,
@@ -851,7 +874,7 @@ export function HomeScreen(props: HomeScreenProps) {
           )}
           providerInstance={resolveThreadProviderInstance(serverConfigs, thread)}
           environmentLabel={
-            Object.keys(props.savedConnectionsById).length > 1
+            !item.hideEnvironment && Object.keys(props.savedConnectionsById).length > 1
               ? (props.savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
               : null
           }
@@ -917,6 +940,7 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onSelectThread,
       props.onNewThreadOnBranch,
       props.savedConnectionsById,
+      props.environments,
       serverConfigs,
       shelfPreferencesLoaded,
       settlementEnvironmentIds,
@@ -942,6 +966,7 @@ export function HomeScreen(props: HomeScreenProps) {
       projectTitleByProjectKey: v2ProjectTitleByProjectKey,
       serverConfigs,
       savedConnectionsById: props.savedConnectionsById,
+      environments: props.environments,
       searchQuery: props.searchQuery,
       snoozePresetMinute: nowMinute,
       threadSearchMatchByKey,
@@ -950,6 +975,7 @@ export function HomeScreen(props: HomeScreenProps) {
       projectByKey,
       props.searchQuery,
       props.savedConnectionsById,
+      props.environments,
       serverConfigs,
       nowMinute,
       threadSearchMatchByKey,

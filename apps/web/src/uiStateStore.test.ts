@@ -18,10 +18,13 @@ import {
   selectSidebarSpace,
   setThreadChangedFilesExpanded,
   type UiState,
+  useUiStateStore,
 } from "./uiStateStore";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
+    bookmarkedThreadKey: null,
+    bookmarkReturnThreadKey: null,
     projectExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKey: null,
@@ -35,6 +38,25 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
 }
 
 describe("uiStateStore pure functions", () => {
+  it("replaces and clears the bookmark without retaining an old return point", () => {
+    const before = useUiStateStore.getState();
+    useUiStateStore.setState({
+      bookmarkedThreadKey: "a:chat-a",
+      bookmarkReturnThreadKey: "b:chat-b",
+    });
+    useUiStateStore.getState().toggleChatBookmark("c:chat-c");
+    expect(useUiStateStore.getState()).toMatchObject({
+      bookmarkedThreadKey: "c:chat-c",
+      bookmarkReturnThreadKey: null,
+    });
+    useUiStateStore.getState().toggleChatBookmark("c:chat-c");
+    expect(useUiStateStore.getState()).toMatchObject({
+      bookmarkedThreadKey: null,
+      bookmarkReturnThreadKey: null,
+    });
+    useUiStateStore.setState(before);
+  });
+
   it("clears the project filter when switching profiles so Default shows every unassigned chat", () => {
     const state = makeUiState({ activeProfileId: "work", sidebarProjectScopeKey: "old-project" });
     expect(setActiveProfileId(state, "personal").sidebarProjectScopeKey).toBeNull();
@@ -208,6 +230,8 @@ describe("parsePersistedState", () => {
     });
 
     expect(parsed).toEqual({
+      bookmarkedThreadKey: null,
+      bookmarkReturnThreadKey: null,
       projectExpandedById: {
         logical: false,
       },
@@ -331,6 +355,8 @@ describe("uiStateStore persistence", () => {
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
     expect(persisted).toEqual({
+      bookmarkedThreadKey: null,
+      bookmarkReturnThreadKey: null,
       projectExpandedById: {
         logical: false,
       },
@@ -353,6 +379,19 @@ describe("uiStateStore persistence", () => {
     expect(parsePersistedState(persisted)).toEqual({
       ...state,
     });
+  });
+
+  it("restores both focus destinations and rejects malformed saved keys", () => {
+    const bookmark = {
+      bookmarkedThreadKey: "device-a:chat-a",
+      bookmarkReturnThreadKey: "device-b:chat-b",
+    };
+    persistState(makeUiState(bookmark));
+    const persisted = JSON.parse(localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}");
+    expect(parsePersistedState(persisted)).toMatchObject(bookmark);
+    expect(
+      parsePersistedState({ bookmarkedThreadKey: "broken", bookmarkReturnThreadKey: ":" }),
+    ).toMatchObject({ bookmarkedThreadKey: null, bookmarkReturnThreadKey: null });
   });
 
   it("restores the sidebar project scope across reloads", () => {

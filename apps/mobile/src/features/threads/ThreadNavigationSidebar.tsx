@@ -73,6 +73,7 @@ import {
 } from "./thread-list-items";
 import {
   ThreadListV2PendingRow,
+  ThreadListV2DeviceHeader,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
   ThreadListV2SnoozedShelfHeader,
@@ -595,6 +596,7 @@ function ThreadNavigationSidebarPane(
     );
     const items: SidebarListItem[] = buildThreadListV2ListItems({
       items: threadListV2Layout.items,
+      environmentLabel: (id) => savedConnectionsById[id]?.environmentLabel ?? "Device",
       pendingTasks: v2PendingTasks,
       snoozedCount: threadListV2Layout.snoozedCount,
       snoozedShelfExpanded,
@@ -614,6 +616,7 @@ function ThreadNavigationSidebarPane(
     return items;
   }, [
     listLayout.items,
+    savedConnectionsById,
     nowMinute,
     options.selectedEnvironmentId,
     pendingTasks,
@@ -813,6 +816,7 @@ function ThreadNavigationSidebarPane(
       projectByKey,
       projectTitleByProjectKey,
       savedConnectionsById,
+      workspaceEnvironments,
       serverConfigs,
       snoozePresetMinute: nowMinute,
       threadSearchMatchByKey,
@@ -822,6 +826,7 @@ function ThreadNavigationSidebarPane(
       projectByKey,
       projectTitleByProjectKey,
       savedConnectionsById,
+      workspaceEnvironments,
       serverConfigs,
       nowMinute,
       threadSearchMatchByKey,
@@ -836,7 +841,15 @@ function ThreadNavigationSidebarPane(
           previous.item.variant === item.item.variant &&
           previous.item.snoozed === item.item.snoozed &&
           previous.item.pinned === item.item.pinned &&
+          previous.hideEnvironment === item.hideEnvironment &&
           previous.snoozeWakeLabelText === item.snoozeWakeLabelText
+        );
+      }
+      if (previous.type === "v2-device" && item.type === "v2-device") {
+        return (
+          previous.key === item.key &&
+          previous.label === item.label &&
+          previous.count === item.count
         );
       }
       if (previous.type === "v2-show-more" && item.type === "v2-show-more") {
@@ -855,6 +868,8 @@ function ThreadNavigationSidebarPane(
         return previous.count === item.count && previous.expanded === item.expanded;
       }
       if (
+        previous.type === "v2-device" ||
+        item.type === "v2-device" ||
         previous.type === "v2-thread" ||
         previous.type === "v2-show-more" ||
         previous.type === "v2-pending" ||
@@ -892,6 +907,20 @@ function ThreadNavigationSidebarPane(
   const renderListItem = useCallback(
     ({ item }: { readonly item: SidebarListItem }) => {
       switch (item.type) {
+        case "v2-device":
+          return (
+            <ThreadListV2DeviceHeader
+              label={item.label}
+              count={item.count}
+              pane="sidebar"
+              connectionState={
+                workspaceEnvironments.find(
+                  (environment) => environment.environmentId === item.environmentId,
+                )?.connectionState
+              }
+              machine={machineByEnvironmentId.get(item.environmentId)}
+            />
+          );
         case "v2-pending": {
           const pendingScopeKey = scopedProjectKey(
             item.pendingTask.environmentId,
@@ -936,7 +965,7 @@ function ThreadNavigationSidebarPane(
               projectTitle={projectTitleByProjectKey.get(scopeKey)}
               providerInstance={resolveThreadProviderInstance(serverConfigs, thread)}
               environmentLabel={
-                Object.keys(savedConnectionsById).length > 1
+                !item.hideEnvironment && Object.keys(savedConnectionsById).length > 1
                   ? (savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
                   : null
               }
@@ -1120,6 +1149,7 @@ function ThreadNavigationSidebarPane(
       props.selectedThreadKey,
       props.width,
       savedConnectionsById,
+      workspaceEnvironments,
       serverConfigs,
       shelfPreferencesLoaded,
       threadSearchMatchByKey,
@@ -1237,7 +1267,7 @@ function ThreadNavigationSidebarPane(
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
               <LegendList
-                ListHeaderComponent={<ProfilesPanel />}
+                ListHeaderComponent={<ProfilesPanel currentThreadKey={props.selectedThreadKey} />}
                 ref={revealListRef}
                 onContentSizeChange={revealCurrent}
                 data={listItems}
@@ -1285,7 +1315,7 @@ function ThreadNavigationSidebarPane(
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
             <LegendList
-              ListHeaderComponent={<ProfilesPanel />}
+              ListHeaderComponent={<ProfilesPanel currentThreadKey={props.selectedThreadKey} />}
               ref={revealListRef}
               onContentSizeChange={revealCurrent}
               data={listItems}

@@ -99,8 +99,15 @@ Select a named tile to show its chats. Click it again to return to Default. Swit
 a profile selects Default. Creating a Space does not select it or hide unassigned chats.
 Use **All chats** beside the Spaces heading to include both assigned and unassigned chats.
 An empty selected view also offers **Show all threads**.
-On web and desktop, **Filter chats by project** narrows the selected view. Its clear button
-restores all projects. Choosing a Space or switching profiles clears that project filter.
+On web and desktop, the filter button beside Search lists projects in the selected view.
+Choosing a project shows a **Project: name** chip above the chats. Clear the chip to restore
+all projects. Choosing a Space or switching profiles clears that project filter.
+
+When active chats span multiple devices, device headers group them within the selected
+profile or Space. Each header shows the device name, chat count, and connection status.
+A view with one active device keeps the simpler list. Pinned, snoozed, and settled chats
+keep their existing sections. Space tiles show names and counts; the plus-button preview
+shows the saved device and folder for new chats.
 Assigning a project to a profile does not assign its chats to a same-named space.
 Profile pins stay above the grid. A dot on a tile indicates work that needs attention.
 
@@ -201,8 +208,9 @@ folders that are not saved projects yet. The new-task screen shows the destinati
 profile and space and can save the chosen device, folder, model, and workspace as
 the space's shortcut. Starting a chat sends only when you submit your prompt.
 
-**Show in list** in an open chat selects its profile and space and reveals it in the
-chat list. On iPhone this returns to the list; on iPad it opens the sidebar.
+Bookmark an open chat with the bookmark button. **Focus saved chat** alternates
+between that chat and the chat you came from, selecting the destination profile
+and space each time. On iPad it also opens the sidebar.
 
 Open **Dashboard** from the profile menu to see tasks by state and filter by device,
 project, provider, profile, or space. Pull requests are browsed per device, with

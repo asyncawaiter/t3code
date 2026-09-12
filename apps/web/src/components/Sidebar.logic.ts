@@ -116,11 +116,21 @@ export function sidebarMarkerId(marker: SidebarListMarker): string {
 }
 
 export type SidebarListItem =
-  | { readonly kind: "thread"; readonly key: string; readonly section: SidebarSection }
+  | {
+      readonly kind: "thread";
+      readonly key: string;
+      readonly section: SidebarSection;
+      readonly environmentId?: string;
+    }
+  | { readonly kind: "device"; readonly environmentId: string }
   | { readonly kind: "marker"; readonly marker: SidebarListMarker };
 
 export function sidebarListItemId(item: SidebarListItem): string {
-  return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker);
+  return item.kind === "thread"
+    ? item.key
+    : item.kind === "device"
+      ? `${SIDEBAR_MARKER_PREFIX}device-${item.environmentId}`
+      : sidebarMarkerId(item.marker);
 }
 
 /** The section a slot belongs to, read off the markers around it: from
@@ -145,6 +155,8 @@ export type SidebarDropTarget = {
   readonly section: "pinned" | "active" | "settled";
   readonly pinnedOrder: readonly string[];
   readonly activeOrder: readonly string[];
+  /** Active ordering writes stay on the dragged chat's device. */
+  readonly activeGroup?: readonly string[];
 };
 
 export function resolveSidebarDropTarget(
@@ -156,21 +168,44 @@ export function resolveSidebarDropTarget(
   const overIndex = items.findIndex((item) => sidebarListItemId(item) === overId);
   if (activeIndex === -1 || overIndex === -1 || items[activeIndex]?.kind !== "thread") return null;
   if (overId === sidebarMarkerId("controls")) return null;
+  const active = items[activeIndex];
+  const over = items[overIndex];
   const moved = items.filter((_, index) => index !== activeIndex);
   moved.splice(overIndex, 0, items[activeIndex]!);
   const section = sectionAtSidebarSlot(moved, overIndex);
   if (section === "snoozed") return null;
+  if (
+    section === "active" &&
+    active?.kind === "thread" &&
+    active.environmentId &&
+    (over?.kind === "device" || (over?.kind === "thread" && over.section === "active")) &&
+    over.environmentId &&
+    over.environmentId !== active.environmentId
+  )
+    return null;
   const pinnedOrder: string[] = [];
   const activeOrder: string[] = [];
+  const activeGroup: string[] = [];
   let currentSection: SidebarSection = "pinned";
   for (const item of moved) {
     if (item.kind === "marker") {
       if (item.marker === "pinned-divider") currentSection = "active";
       else if (item.marker === "snoozed-header" || item.marker === "settled-header") break;
-    } else if (currentSection === "pinned") pinnedOrder.push(item.key);
-    else activeOrder.push(item.key);
+    } else if (item.kind === "thread") {
+      if (currentSection === "pinned") pinnedOrder.push(item.key);
+      else {
+        activeOrder.push(item.key);
+        if (active?.kind === "thread" && item.environmentId === active.environmentId)
+          activeGroup.push(item.key);
+      }
+    }
   }
-  return { section, pinnedOrder, activeOrder };
+  return {
+    section,
+    pinnedOrder,
+    activeOrder,
+    ...(active?.kind === "thread" && active.environmentId ? { activeGroup } : {}),
+  };
 }
 
 export type SidebarThreadDropPlan =
@@ -260,7 +295,7 @@ export function planSidebarThreadDrop(input: {
         return { kind: "none" };
       }
       const assignments = planPinnedReorder({
-        orderedIds: order,
+        orderedIds: target.activeGroup ?? order,
         keysById: activeKeysById,
         movedId: activeKey,
       });

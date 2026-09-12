@@ -126,11 +126,13 @@ function layout(
     const height =
       item.kind === "thread"
         ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
-        : item.marker === "controls"
-          ? 220 * scale
-          : item.marker === "pinned-header" || item.marker === "pinned-divider"
-            ? 0
-            : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
+        : item.kind === "device"
+          ? 28 * scale
+          : item.marker === "controls"
+            ? 220 * scale
+            : item.marker === "pinned-header" || item.marker === "pinned-divider"
+              ? 0
+              : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
     const rect = { top, height, bottom: top + height, left: 0, right: 260, width: 260 };
     top += height + 1;
     return rect;
@@ -247,6 +249,35 @@ describe("sidebar collision detection", () => {
       expect(detector(args).map((collision) => collision.id)).toEqual(["source"]);
     },
   );
+
+  it("does not redirect a foreign device drop to a nearby row on the source device", () => {
+    const args = collisionArgs();
+    const items: SidebarListItem[] = [
+      pinnedHeader,
+      divider,
+      { kind: "thread", key: "source", section: "active", environmentId: "a" },
+      { kind: "thread", key: "blocked", section: "active", environmentId: "b" },
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const node = {
+      querySelector: () => ({
+        getBoundingClientRect: () => ({ top: 0, bottom: 16, left: 0, right: 260 }),
+      }),
+      getBoundingClientRect: () => ({ top: 1000 }),
+    } as unknown as HTMLElement;
+    const detector = createSidebarCollisionDetection(() => true, { items, activationY: 100 });
+    expect(
+      detector({
+        ...args,
+        pointerCoordinates: { x: 130, y: 240 },
+        droppableContainers: args.droppableContainers.map((container) => ({
+          ...container,
+          node: { current: node },
+        })),
+      }).map((collision) => collision.id),
+    ).toEqual(["source"]);
+  });
 
   it("selects the nearest supported target", () => {
     const detector = createSidebarCollisionDetection(() => true);
@@ -889,4 +920,27 @@ describe("sidebar drag projection", () => {
     expect(result.get(sidebarMarkerId("snoozed-header"))).toEqual({ ...stationary, y: 83 });
     expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(46);
   });
+});
+
+it("keeps device headers above their rows when removing the other device's last active chat", () => {
+  const a: SidebarListItem = { kind: "thread", key: "a", section: "active", environmentId: "a" };
+  const b: SidebarListItem = { kind: "thread", key: "b", section: "active", environmentId: "b" };
+  const items: SidebarListItem[] = [
+    pinnedHeader,
+    divider,
+    { kind: "device", environmentId: "a" },
+    a,
+    { kind: "device", environmentId: "b" },
+    b,
+    settledHeader,
+  ];
+  const moved = preview(
+    { items, settledOrder: ["a"], settledExpanded: true },
+    "a",
+    sidebarMarkerId("settled-header"),
+  );
+  expect(moved.get("sidebar-marker-device-a")?.scaleY).toBe(0);
+  expect(moved.get("sidebar-marker-device-b")?.scaleY).toBe(0);
+  const base = layout(items, "a", sidebarMarkerId("settled-header"));
+  expect(base.rects[5]!.top + moved.get("b")!.y).toBe(base.rects[0]!.top + 2);
 });

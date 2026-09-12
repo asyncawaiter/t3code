@@ -354,11 +354,6 @@ export function SpaceTile({
                   <TooltipPopup>{space.name}</TooltipPopup>
                 </Tooltip>
               </span>
-              <span className="h-3.5 w-full shrink-0 truncate text-[10px] leading-3.5 opacity-75">
-                {space.newChatDefaults
-                  ? `${space.newChatDefaults.deviceLabel} · ${space.newChatDefaults.workspaceRoot.split(/[\\/]/).findLast(Boolean)}`
-                  : null}
-              </span>
               <span className="mt-auto flex w-full min-w-0 items-center gap-1 text-[10px] text-inherit opacity-75">
                 {attention ? (
                   <span

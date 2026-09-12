@@ -1211,14 +1211,16 @@ describe("mobile move availability", () => {
       expect(assignments).toHaveLength(1);
       expect(assignments![0]!.id).toBe(`${environmentId}:move-0`);
       expect(assignments![0]!.orderKey > "dd").toBe(true);
-      expect(assignments![0]!.orderKey < "ff").toBe(true);
+      expect(
+        section === "active" ? assignments![0]!.orderKey > "ff" : assignments![0]!.orderKey < "ff",
+      ).toBe(true);
       expect(plan(`${oldEnvironment}:move-1`, "up")).toBeNull();
       expect(plan(`${environmentId}:move-0`, "up")).toBeNull();
     },
   );
 
   it.each(["active", "pinned"] as const)(
-    "disables %s moves requiring unsupported keyless materialization",
+    "keeps unsupported keyless materialization outside %s move plans",
     (section) => {
       const ordered = rows(section, [null, null, null]);
       const plan = createThreadMovePlanner({
@@ -1226,14 +1228,25 @@ describe("mobile move availability", () => {
         section,
         reorderableEnvironmentIds: new Set([environmentId]),
       });
-      expect(plan(`${environmentId}:move-0`, "down")).toBeNull();
-      expect(plan(`${environmentId}:move-2`, "up")).toBeNull();
+      if (section === "pinned") {
+        expect(plan(`${environmentId}:move-0`, "down")).toBeNull();
+        expect(plan(`${environmentId}:move-2`, "up")).toBeNull();
+      } else {
+        expect(
+          plan(`${environmentId}:move-0`, "down")
+            ?.map((entry) => entry.id)
+            .sort(),
+        ).toEqual([`${environmentId}:move-0`, `${environmentId}:move-2`]);
+        expect(plan(`${environmentId}:move-2`, "down")).toBeNull();
+      }
       const supported = createThreadMovePlanner({
         ordered,
         section,
         reorderableEnvironmentIds: new Set([environmentId, oldEnvironment]),
       });
-      expect(supported(`${environmentId}:move-0`, "down")).toHaveLength(3);
+      expect(supported(`${environmentId}:move-0`, "down")).toHaveLength(
+        section === "active" ? 2 : 3,
+      );
     },
   );
 
@@ -1258,7 +1271,11 @@ describe("mobile move availability", () => {
       );
       expect(assignments).toHaveLength(1);
       expect(assignments![0]!.orderKey).not.toBe(collision);
-      expect(assignments![0]!.orderKey > "dd" && assignments![0]!.orderKey < "ff").toBe(true);
+      expect(
+        section === "active"
+          ? assignments![0]!.orderKey > "ff"
+          : assignments![0]!.orderKey > "dd" && assignments![0]!.orderKey < "ff",
+      ).toBe(true);
     },
   );
 
@@ -1274,5 +1291,87 @@ describe("mobile move availability", () => {
     expect(assignments![0]!.id).toBe(`${environmentId}:move-4`);
     expect(assignments![0]!.orderKey > "bb").toBe(true);
     expect(assignments![0]!.orderKey < "dd").toBe(true);
+  });
+});
+
+describe("device groups", () => {
+  it("groups only active chats, preserving pins, pending tasks, and settled history", () => {
+    const remote = EnvironmentId.make("remote");
+    const threads = [
+      makeThread({ id: ThreadId.make("a"), title: "A", activeOrderKey: "bb" }),
+      makeThread({
+        id: ThreadId.make("remote"),
+        title: "Remote",
+        environmentId: remote,
+        activeOrderKey: "cc",
+      }),
+      makeThread({ id: ThreadId.make("b"), title: "B", activeOrderKey: "dd" }),
+      makeThread({ id: ThreadId.make("pin"), title: "Pin", pinnedAt: NOW }),
+      makeThread({
+        id: ThreadId.make("done"),
+        title: "Done",
+        settledAt: NOW,
+        settledOverride: "settled",
+      }),
+    ];
+    const layout = buildThreadListV2Items({
+      threads,
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+    const items = buildThreadListV2ListItems({
+      ...layout,
+      pendingTasks: [makePendingTask("queued")],
+      environmentLabel: (id) => (id === remote ? "Alpha" : "Zulu"),
+    });
+    expect(
+      items.map((item) =>
+        item.type === "v2-thread"
+          ? item.item.thread.id
+          : item.type === "v2-device"
+            ? `${item.label}:${item.count}`
+            : item.type,
+      ),
+    ).toEqual([
+      "pin",
+      "Alpha:1",
+      "remote",
+      "Zulu:2",
+      "a",
+      "b",
+      "v2-pending",
+      "v2-settled-shelf",
+      "done",
+    ]);
+    expect(items.filter((item) => item.type === "v2-thread" && item.hideEnvironment).length).toBe(
+      3,
+    );
+    const single = buildThreadListV2ListItems({
+      items: layout.items.filter((item) => item.thread.environmentId !== remote),
+      pendingTasks: [],
+    });
+    expect(
+      single.some(
+        (item) => item.type === "v2-device" || (item.type === "v2-thread" && item.hideEnvironment),
+      ),
+    ).toBe(false);
+    const ordered = threads.slice(0, 3);
+    const assignments = createThreadMovePlanner({
+      ordered,
+      section: "active",
+      reorderableEnvironmentIds: new Set([environmentId]),
+    })(`${environmentId}:a`, "down")!;
+    const pending = createPendingThreadOrder({
+      ordered,
+      section: "active",
+      movedId: `${environmentId}:a`,
+      direction: "down",
+      assignments,
+    });
+    expect(pending.orderedIds.filter((id) => id.startsWith(`${environmentId}:`))).toEqual([
+      `${environmentId}:b`,
+      `${environmentId}:a`,
+    ]);
   });
 });

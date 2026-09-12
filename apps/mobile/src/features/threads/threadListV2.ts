@@ -1,3 +1,4 @@
+import * as Arr from "effect/Array";
 import {
   effectiveSnoozed,
   hasQueuedTurnStart,
@@ -239,6 +240,7 @@ export interface ThreadListV2Layout {
 
 export interface ThreadListV2ThreadListItem {
   readonly type: "v2-thread";
+  readonly hideEnvironment?: boolean;
   readonly key: string;
   readonly item: ThreadListV2Item;
   /** Precomputed so recycled-list equality can see a minute-tick change. */
@@ -267,7 +269,16 @@ export interface ThreadListV2SettledShelfListItem {
   readonly expanded: boolean;
 }
 
+export interface ThreadListV2DeviceListItem {
+  readonly type: "v2-device";
+  readonly key: string;
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly count: number;
+}
+
 export type ThreadListV2ListItem =
+  | ThreadListV2DeviceListItem
   | ThreadListV2ThreadListItem
   | ThreadListV2PendingListItem
   | ThreadListV2SnoozedShelfListItem
@@ -281,6 +292,7 @@ export type ThreadListV2ListItem =
 export function buildThreadListV2ListItems(input: {
   readonly items: ReadonlyArray<ThreadListV2Item>;
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
+  readonly environmentLabel?: (environmentId: EnvironmentId) => string;
   readonly snoozedCount?: number;
   readonly snoozedShelfExpanded?: boolean;
   readonly snoozedShelfHeaderIndex?: number | null;
@@ -289,7 +301,7 @@ export function buildThreadListV2ListItems(input: {
   readonly settledShelfHeaderIndex?: number | null;
   readonly snoozeLabelNow?: string;
 }): ThreadListV2ListItem[] {
-  const threadItems = input.items.map((item): ThreadListV2ListItem => ({
+  const threadItems = input.items.map((item): ThreadListV2ThreadListItem => ({
     type: "v2-thread",
     key: `v2-thread:${item.thread.environmentId}:${item.thread.id}`,
     item,
@@ -310,7 +322,40 @@ export function buildThreadListV2ListItems(input: {
   const settledShelfHeaderIndex = input.settledShelfHeaderIndex ?? null;
   const activeEnd = snoozedShelfHeaderIndex ?? settledShelfHeaderIndex ?? threadItems.length;
   const snoozedEnd = settledShelfHeaderIndex ?? threadItems.length;
-  const result: ThreadListV2ListItem[] = [...threadItems.slice(0, activeEnd), ...pendingItems];
+  const cards = threadItems.slice(0, activeEnd);
+  const groups = Object.values(
+    Arr.groupBy(
+      cards.filter((row) => !row.item.pinned),
+      (row) => row.item.thread.environmentId,
+    ),
+  )
+    .map((rows) => ({
+      rows,
+      environmentId: rows[0]!.item.thread.environmentId,
+      label:
+        input.environmentLabel?.(rows[0]!.item.thread.environmentId) ??
+        rows[0]!.item.thread.environmentId,
+    }))
+    .sort(
+      (left, right) =>
+        left.label.localeCompare(right.label) ||
+        left.environmentId.localeCompare(right.environmentId),
+    );
+  const result: ThreadListV2ListItem[] = cards.filter((row) => row.item.pinned);
+  for (const group of groups) {
+    if (groups.length > 1)
+      result.push({
+        type: "v2-device",
+        key: `v2-device:${group.environmentId}`,
+        environmentId: group.environmentId,
+        label: group.label,
+        count: group.rows.length,
+      });
+    result.push(
+      ...group.rows.map((row) => (groups.length > 1 ? { ...row, hideEnvironment: true } : row)),
+    );
+  }
+  result.push(...pendingItems);
   if (snoozedShelfHeaderIndex !== null && snoozedCount > 0) {
     result.push({
       type: "v2-snoozed-shelf",

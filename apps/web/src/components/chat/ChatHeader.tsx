@@ -1,3 +1,5 @@
+import { useUiStateStore } from "../../uiStateStore";
+import { Button } from "../ui/button";
 import {
   type EnvironmentId,
   type EditorId,
@@ -11,7 +13,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronDownIcon } from "lucide-react";
+import { BookmarkIcon, ChevronDownIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -173,6 +175,10 @@ export const ChatHeader = memo(function ChatHeader({
     () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
     [activeThreadEnvironmentId, activeThreadId],
   );
+  const bookmarkedThreadKey = useUiStateStore((state) => state.bookmarkedThreadKey);
+  const toggleChatBookmark = useUiStateStore((state) => state.toggleChatBookmark);
+  const isBookmarked = bookmarkedThreadKey === `${activeThreadEnvironmentId}:${activeThreadId}`;
+  const bookmarkLabel = isBookmarked ? "Remove chat bookmark" : "Bookmark this chat";
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -400,6 +406,36 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {isServerThread ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={bookmarkLabel}
+                aria-pressed={isBookmarked}
+                onClick={() => toggleChatBookmark(`${activeThreadEnvironmentId}:${activeThreadId}`)}
+              />
+            }
+          >
+            <BookmarkIcon
+              className={cn(
+                "size-4",
+                isBookmarked && "fill-current text-amber-600 dark:text-amber-400",
+              )}
+            />
+          </TooltipTrigger>
+          <TooltipPopup>
+            {isBookmarked
+              ? "Remove chat bookmark"
+              : bookmarkedThreadKey
+                ? "Replace bookmark with this chat"
+                : "Bookmark this chat to return to it with Focus"}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       <div
         ref={headerActionsRef}
         data-chat-header-actions

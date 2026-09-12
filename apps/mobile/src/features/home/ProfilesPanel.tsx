@@ -1,3 +1,4 @@
+import { useChatBookmark } from "../threads/use-chat-bookmark";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentServerConfigsAtom } from "../../state/server";
 import {
@@ -64,7 +65,8 @@ export function chooseAction(
     ]);
 }
 
-export function ProfilesPanel() {
+export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
+  const bookmark = useChatBookmark(props.currentThreadKey ?? null);
   const state = useProfiles();
   const sync = useProfileSync();
   const configs = useAtomValue(environmentServerConfigsAtom);
@@ -436,6 +438,17 @@ export function ProfilesPanel() {
             </Pressable>
           ))}
         </ScrollView>
+        {bookmark.key ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Focus saved chat"
+            accessibilityHint={`Return to ${bookmark.targetTitle ?? "saved chat"}`}
+            onPress={bookmark.focus}
+            className="size-11 items-center justify-center"
+          >
+            <SymbolView name="scope" size={20} tintColorClassName="accent-foreground" />
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityLabel="Manage profiles"
           accessibilityRole="button"
@@ -606,17 +619,7 @@ export function ProfilesPanel() {
                       state.spaceId === space.id ? "text-screen" : "text-foreground-muted",
                     )}
                   >
-                    {space.newChatDefaults
-                      ? `${space.newChatDefaults.deviceLabel} · ${space.newChatDefaults.workspaceRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? "/"}`
-                      : `${counts.get(space.id) ?? 0} chats`}
-                  </Text>
-                  <Text
-                    className={cn(
-                      "text-xs",
-                      state.spaceId === space.id ? "text-screen" : "text-foreground-muted",
-                    )}
-                  >
-                    {space.newChatDefaults ? `${counts.get(space.id) ?? 0} chats` : " "}
+                    {`${counts.get(space.id) ?? 0} chats`}
                   </Text>
                 </Pressable>
                 <Pressable
