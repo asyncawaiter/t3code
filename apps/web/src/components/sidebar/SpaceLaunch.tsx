@@ -92,7 +92,7 @@ export function SpaceLaunch({
   profile,
   space,
   selected,
-  disabled,
+  writeBlockReason,
   onChange,
   onLaunch,
   open,
@@ -101,7 +101,7 @@ export function SpaceLaunch({
   profile: Profile;
   space: ProfileSpace;
   selected: boolean;
-  disabled: boolean;
+  writeBlockReason: string | null;
   onChange: (profile: Profile) => void;
   onLaunch: (project: ScopedProjectRef, defaults: Defaults) => Promise<void>;
   open: boolean;
@@ -179,7 +179,7 @@ export function SpaceLaunch({
     setError(null);
   };
   const launch = async () => {
-    if (pending.current || !available || !project || !value) return;
+    if (writeBlockReason || pending.current || !available || !project || !value) return;
     pending.current = true;
     setBusy(true);
     setError(null);
@@ -209,10 +209,9 @@ export function SpaceLaunch({
           <Button
             size="icon-xs"
             variant="ghost"
-            disabled={disabled}
             aria-label={`New chat in ${space.name}`}
             className={cn(
-              "absolute bottom-1 right-1",
+              "absolute bottom-1 right-1 [--control-icon-color:currentColor]",
               selected
                 ? "text-zinc-50 hover:bg-white/10 hover:text-zinc-50 dark:text-zinc-900 dark:hover:bg-black/10 dark:hover:text-zinc-900"
                 : "text-sidebar-muted-foreground",
@@ -229,6 +228,11 @@ export function SpaceLaunch({
         viewportClassName={editing ? "p-2" : "p-1.5"}
         aria-label={`New chat in ${space.name}`}
       >
+        {writeBlockReason && (
+          <p role="status" className="px-2 py-1 text-xs text-muted-foreground">
+            {writeBlockReason}
+          </p>
+        )}
         {editing && (
           <PopoverTitle className="mb-2 truncate px-1 pr-2 text-xs font-medium">
             New chat in {space.name}
@@ -306,6 +310,7 @@ export function SpaceLaunch({
                   size="xs"
                   variant="ghost"
                   className="mr-auto"
+                  disabled={!!writeBlockReason || busy}
                   onClick={() => {
                     onChange({
                       ...profile,
@@ -329,9 +334,9 @@ export function SpaceLaunch({
               <Button
                 size="compact"
                 className="border-zinc-700 bg-zinc-700 text-white hover:bg-zinc-600 dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-300"
-                disabled={!location || busy}
+                disabled={!!writeBlockReason || !location || busy}
                 onClick={async () => {
-                  if (!location || pending.current) return;
+                  if (writeBlockReason || !location || pending.current) return;
                   pending.current = true;
                   setBusy(true);
                   setError(null);
@@ -386,7 +391,7 @@ export function SpaceLaunch({
             <button
               type="button"
               aria-label={`Open new chat in ${space.name}`}
-              disabled={busy || !available}
+              disabled={!!writeBlockReason || busy || !available}
               onClick={() => void launch()}
               className="group w-full rounded-md px-2 py-1.5 text-left hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
             >

@@ -216,7 +216,25 @@ export function ProfilesPanel() {
           ]),
       { title: "Shared source", action: sourceMenu },
     ]);
-  const spaceMenu = (space: ProfileSpace) =>
+  const requireWritable = () => {
+    if (state.writable) return true;
+    const label =
+      environments.find((env) => env.environmentId === state.sourceId)?.environmentLabel ??
+      "the shared profile source";
+    Alert.alert(
+      "Space changes unavailable",
+      state.conflict
+        ? "Devices have conflicting profile sources. Choose the shared source to continue."
+        : `Connect or update ${label} to save Space changes or open a chat in this Space.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Shared source", onPress: sourceMenu },
+      ],
+    );
+    return false;
+  };
+  const spaceMenu = (space: ProfileSpace) => {
+    if (!requireWritable()) return;
     chooseAction(space.name, [
       {
         title: "Rename",
@@ -302,12 +320,14 @@ export function ProfilesPanel() {
           ]),
       },
     ]);
+  };
   const launchSpace = (space: ProfileSpace) => {
     const defaults = space.newChatDefaults;
     const project = projects.find(
       (item) => `${item.environmentId}:${item.id}` === defaults?.projectKey,
     );
     const openPicker = () => {
+      if (!requireWritable()) return;
       selectSpace(space.id);
       navigation.navigate("NewTaskSheet", { screen: "NewTask" });
     };
@@ -316,6 +336,7 @@ export function ProfilesPanel() {
       {
         title: "Open new chat",
         action: () => {
+          if (!requireWritable()) return;
           if (
             !project ||
             !environments.some(
@@ -557,7 +578,6 @@ export function ProfilesPanel() {
                   </Text>
                 </Pressable>
                 <Pressable
-                  disabled={!state.writable}
                   accessibilityRole="button"
                   accessibilityLabel={`Manage ${space.name}`}
                   onPress={() => spaceMenu(space)}
@@ -600,7 +620,6 @@ export function ProfilesPanel() {
                   </Text>
                 </Pressable>
                 <Pressable
-                  disabled={!state.writable}
                   accessibilityRole="button"
                   accessibilityLabel={`New chat in ${space.name}`}
                   onPress={() => launchSpace(space)}

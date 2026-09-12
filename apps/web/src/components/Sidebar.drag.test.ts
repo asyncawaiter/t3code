@@ -4,7 +4,7 @@ import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sort
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
-  restrictBelowSidebarLabel,
+  withSidebarSpaceTargets,
 } from "./Sidebar.drag";
 import {
   resolveSidebarDropTarget,
@@ -26,6 +26,94 @@ const divider = marker("pinned-divider");
 const settledHeader = marker("settled-header");
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
 
+describe("Space drop targets", () => {
+  const space = (profileId: string, spaceId: string | null) => ({
+    kind: "space",
+    profileId,
+    spaceId,
+  });
+  const rect = (left: number, top: number, width = 100, height = 60) => ({
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+  });
+  const targets = [
+    {
+      id: "blocked-strip",
+      data: { ...space("profile", null), acceptsThreads: false },
+      rect: rect(0, -70),
+    },
+    { id: "default", data: space("profile", null), rect: rect(0, 0) },
+    { id: "first", data: space("profile", "first"), rect: rect(110, 0) },
+    { id: "second", data: space("profile", "second"), rect: rect(0, 70) },
+    { id: "foreign", data: space("other", "foreign"), rect: rect(110, 70) },
+    { id: sidebarMarkerId("controls"), data: {}, rect: rect(0, 0, 210, 150) },
+    { id: "row", data: {}, rect: rect(0, 160) },
+  ];
+  function args(x: number, y: number, source: Record<string, unknown> = {}) {
+    const collisionRect = rect(x - 50, y - 30);
+    return {
+      active: {
+        id: "source",
+        data: { current: source },
+        rect: { current: { initial: collisionRect, translated: collisionRect } },
+      },
+      collisionRect,
+      droppableRects: new Map(targets.map((target) => [target.id, target.rect])),
+      droppableContainers: targets.map((target) => ({
+        id: target.id,
+        key: target.id,
+        disabled: false,
+        data: { current: target.data },
+        node: { current: null },
+        rect: { current: target.rect },
+      })),
+      pointerCoordinates: { x, y },
+    } satisfies Parameters<CollisionDetection>[0];
+  }
+
+  it("assigns to named Spaces and Default without passing them to row sorting", () => {
+    const rows = vi.fn<CollisionDetection>(() => [{ id: "row" }]);
+    const detect = withSidebarSpaceTargets(rows, (profileId) => profileId === "profile");
+    expect(detect(args(150, 30))[0]?.id).toBe("first");
+    expect(detect(args(50, 30))[0]?.id).toBe("default");
+    expect(detect(args(150, 100))).toEqual([]);
+    expect(detect(args(105, 30))).toEqual([]);
+    expect(detect(args(50, -40))).toEqual([]);
+    expect(rows).not.toHaveBeenCalled();
+    expect(detect(args(50, 180))[0]?.id).toBe("row");
+    expect(rows.mock.calls[0]?.[0].droppableContainers.map((target) => target.id)).toEqual([
+      sidebarMarkerId("controls"),
+      "row",
+    ]);
+  });
+
+  it("rejects a blocked assignment without falling through to nearby rows", () => {
+    const rows = vi.fn<CollisionDetection>(() => [{ id: "row" }]);
+    expect(withSidebarSpaceTargets(rows, () => false)(args(150, 30))).toEqual([]);
+    expect(rows).not.toHaveBeenCalled();
+  });
+
+  it("reorders Spaces only within their profile and leaves Default fixed", () => {
+    const rows = vi.fn<CollisionDetection>(() => [{ id: "row" }]);
+    const detect = withSidebarSpaceTargets(rows, () => true);
+    const source = space("profile", "first");
+    expect(detect(args(50, 100, source))[0]?.id).toBe("second");
+    for (const [x, y] of [
+      [50, 30],
+      [150, 100],
+      [50, 180],
+      [400, 400],
+    ]) {
+      expect(detect(args(x!, y!, source))).toEqual([]);
+    }
+    expect(rows).not.toHaveBeenCalled();
+  });
+});
+
 function layout(
   items: readonly SidebarListItem[],
   active: string,
@@ -38,9 +126,11 @@ function layout(
     const height =
       item.kind === "thread"
         ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
-        : item.marker === "pinned-header" || item.marker === "pinned-divider"
-          ? 0
-          : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
+        : item.marker === "controls"
+          ? 220 * scale
+          : item.marker === "pinned-header" || item.marker === "pinned-divider"
+            ? 0
+            : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
     const rect = { top, height, bottom: top + height, left: 0, right: 260, width: 260 };
     top += height + 1;
     return rect;
@@ -68,6 +158,44 @@ function preview(
     input.items.map((item, index) => [sidebarListItemId(item), strategy({ ...args, index })]),
   );
 }
+
+it.each([1, 0.75, 1.5])(
+  "keeps the Space grid and project controls above active rows at scale %s",
+  (scale) => {
+    const items = [
+      pinnedHeader,
+      thread("profile-pin", "pinned"),
+      marker("controls"),
+      thread("space-pin", "pinned"),
+      divider,
+      thread("a", "active"),
+      thread("b", "active"),
+      settledHeader,
+    ];
+    const args = layout(items, "a", "b", scale);
+    const strategy = createSidebarSortingStrategy({
+      items,
+      settledOrder: [],
+      settledExpanded: false,
+    });
+    const controlIndex = 2;
+    const peerIndex = 6;
+    const control = strategy({ ...args, index: controlIndex });
+    const peer = strategy({ ...args, index: peerIndex });
+    expect(control?.scaleY).toBe(1);
+    const profilePin = strategy({ ...args, index: 1 });
+    const spacePin = strategy({ ...args, index: 3 });
+    expect(args.rects[1]!.bottom + (profilePin?.y ?? 0)).toBeLessThanOrEqual(
+      args.rects[controlIndex]!.top + (control?.y ?? 0),
+    );
+    expect(args.rects[3]!.top + (spacePin?.y ?? 0)).toBeGreaterThanOrEqual(
+      args.rects[controlIndex]!.bottom + (control?.y ?? 0),
+    );
+    expect(args.rects[peerIndex]!.top + (peer?.y ?? 0)).toBeGreaterThanOrEqual(
+      args.rects[controlIndex]!.bottom,
+    );
+  },
+);
 
 describe("sidebar collision detection", () => {
   function collisionArgs(blockedAboveSource = false) {
@@ -760,49 +888,5 @@ describe("sidebar drag projection", () => {
     );
     expect(result.get(sidebarMarkerId("snoozed-header"))).toEqual({ ...stationary, y: 83 });
     expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(46);
-  });
-});
-
-describe("lifted card clearance", () => {
-  const rect = (top: number, height: number) => ({
-    top,
-    bottom: top + height,
-    height,
-    left: 0,
-    right: 260,
-    width: 260,
-  });
-  const apply = (cardTop: number, cardHeight: number, y: number, listTop = 136, offset = 32) =>
-    restrictBelowSidebarLabel(
-      {
-        transform: { ...stationary, y },
-        containerNodeRect: rect(listTop, 500),
-        draggingNodeRect: rect(cardTop, cardHeight),
-        activatorEvent: null,
-        active: null,
-        activeNodeRect: null,
-        over: null,
-        overlayNodeRect: null,
-        scrollableAncestors: [],
-        scrollableAncestorRects: [],
-        windowRect: null,
-      },
-      offset,
-    );
-
-  it.each([36, 82])("keeps a %ipx row below empty Pins even past the top edge", (height) => {
-    for (const pointerY of [150, 136, 100, 0]) {
-      const transform = apply(511, height, pointerY - 529);
-      expect(511 + transform.y).toBe(168);
-    }
-  });
-
-  it("preserves pointer movement below the label", () => {
-    expect(apply(511, 36, -200).y).toBe(-200);
-  });
-
-  it("follows the list when it scrolls and includes content preceding Pins", () => {
-    expect(511 + apply(511, 36, -500, 96).y).toBe(128);
-    expect(511 + apply(511, 36, -500, 136, 114).y).toBe(250);
   });
 });

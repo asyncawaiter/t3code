@@ -6,6 +6,9 @@ import {
   matchesSidebarSpace,
   resolveSidebarSpaceFilter,
   OUTSIDE_SPACES,
+  commonSpaceProfile,
+  getSpaceDragData,
+  spaceDragId,
 } from "./sidebar/Spaces.logic";
 import { buildDashboard } from "@t3tools/client-runtime/state/dashboard";
 import {
@@ -16,21 +19,22 @@ import {
   type Profile,
   type ProfileSpace,
 } from "@t3tools/contracts";
-import { SpaceToolbar, SpaceTile, DefaultSpaceTile, SPACE_THREAD_DRAG } from "./sidebar/Spaces";
+import { SpaceToolbar, SpaceTile, DefaultSpaceTile } from "./sidebar/Spaces";
 import { profileSpaceCounts, profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
   DndContext,
+  DragOverlay,
+  useDndContext,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
-  type Modifier,
 } from "@dnd-kit/core";
-import { SortableContext, useSortable } from "@dnd-kit/sortable";
-import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { SortableContext, useSortable, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
+import { restrictToWindowEdges, snapCenterToCursor } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
   canSnooze,
@@ -99,6 +103,7 @@ import {
   type ReactNode,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
+import { createPortal } from "react-dom";
 
 import {
   isAtomCommandInterrupted,
@@ -150,9 +155,9 @@ import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   useClientSettings,
   usePrimarySettings,
-  useProfilesLoaded,
   useUpdatePrimarySettings,
 } from "../hooks/useSettings";
+import { useProfileWriteBlockReason } from "../hooks/useProfileSync";
 import { moveProjectToProfile } from "./settings/ProjectSettingsPanel.logic";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -227,7 +232,7 @@ import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
-  restrictBelowSidebarLabel,
+  withSidebarSpaceTargets,
 } from "./Sidebar.drag";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
@@ -543,13 +548,18 @@ type SortableThreadRowBag = Pick<
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
 >;
 
+const spaceSortingStrategy: typeof rectSortingStrategy = (args) =>
+  args.activeIndex < 0 ? null : rectSortingStrategy(args);
+
 function SortableThreadRow(props: {
   id: string;
+  title: string;
   disabled: boolean;
   children: (bag: SortableThreadRowBag) => ReactNode;
 }) {
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: props.id,
+    data: { kind: "thread", label: props.title },
     disabled: { draggable: props.disabled },
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
@@ -560,6 +570,40 @@ function SortableThreadRow(props: {
     [listeners, setNodeRef, transform, transition, isDragging],
   );
   return props.children(bag);
+}
+
+function SidebarDragPreview() {
+  const { active } = useDndContext();
+  const label = active?.data.current?.label;
+  const isSpace = getSpaceDragData(active?.data.current) !== null;
+  const count = useThreadSelectionStore((state) =>
+    active && state.selectedThreadKeys.has(String(active.id)) ? state.selectedThreadKeys.size : 1,
+  );
+  const Icon = isSpace ? TagsIcon : SquarePenIcon;
+  return createPortal(
+    <DragOverlay
+      dropAnimation={null}
+      modifiers={[restrictToWindowEdges]}
+      style={{ width: 240, height: "auto", pointerEvents: "none" }}
+    >
+      {active && typeof label === "string" ? (
+        <div
+          aria-hidden="true"
+          data-testid="sidebar-drag-preview"
+          className="flex items-center gap-2.5 rounded-xl border border-sidebar-foreground/20 bg-sidebar px-3 py-2.5 text-sidebar-foreground shadow-xl"
+        >
+          <Icon className="size-4 shrink-0 text-sidebar-muted-foreground" />
+          <div className="min-w-0">
+            <div className="truncate text-xs font-medium">{label}</div>
+            <div className="text-[10px] text-sidebar-muted-foreground">
+              {isSpace ? "Move Space" : count > 1 ? `${count} selected chats` : "Move chat"}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </DragOverlay>,
+    document.body,
+  );
 }
 
 // Unsent work shares one look: the new-thread draft rows and thread rows
@@ -1417,12 +1461,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       !props.isActive &&
       !isSelected &&
       "opacity-70 transition-opacity hover:opacity-100",
-    // The lifted row is an opaque card so the rows beneath it never show
-    // through. The row tint is translucent in dark themes and the pointer
-    // keeps the hover color applied, so both the tint and the solid sidebar
-    // color are stacked as background images.
-    props.sortable?.isDragging &&
-      "bg-[linear-gradient(var(--sidebar-row-active),var(--sidebar-row-active)),linear-gradient(var(--sidebar),var(--sidebar))] text-sidebar-foreground opacity-100 shadow-lg",
   );
   // dnd-kit props for the row root. Same bag on both variants: every row in
   // the list translates around the gap as the drag passes it.
@@ -1433,6 +1471,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         style: {
           transform: CSS.Translate.toString(sortable.transform),
           transition: sortable.transition,
+          opacity: sortable.isDragging ? 0.3 : undefined,
           // A zero-height boundary also makes dnd-kit scale the source to
           // zero. Only projected peers use scaleY as a visibility sentinel.
           visibility:
@@ -1540,19 +1579,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             type="button"
             aria-label={`Move ${thread.title} to space`}
             aria-description="Drag to a Space or click to choose one."
-            draggable
-            onDragStart={(event) => {
-              event.stopPropagation();
-              const key = scopedThreadKey(threadRef);
-              const selected = useThreadSelectionStore.getState().selectedThreadKeys;
-              event.dataTransfer.setData(
-                SPACE_THREAD_DRAG,
-                JSON.stringify(selected.has(key) ? [...selected] : [key]),
-              );
-              event.dataTransfer.effectAllowed = "move";
-            }}
-            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            onPointerDown={(event) => event.stopPropagation()}
+            className="inline-flex size-5 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
             onClick={(event) => {
               event.stopPropagation();
               props.onOrganize(threadRef);
@@ -2139,7 +2166,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const rawProfiles = usePrimarySettings((s) => s.profiles);
-  const primarySettingsLoaded = useProfilesLoaded();
+  const profileWriteBlockReason = useProfileWriteBlockReason();
+  const primarySettingsLoaded = profileWriteBlockReason === null;
   const updatePrimarySettings = useUpdatePrimarySettings();
   const latestProfilesRef = useRef(rawProfiles);
   latestProfilesRef.current = rawProfiles;
@@ -3273,15 +3301,8 @@ export default function Sidebar() {
     },
     [unsnoozeThread],
   );
-  const threadListRef = useRef<HTMLUListElement | null>(null);
-  const dragLabelOffsetRef = useRef(0);
-  const restrictBelowPins = useCallback<Modifier>(
-    (args) => restrictBelowSidebarLabel(args, dragLabelOffsetRef.current),
-    [],
-  );
   const listMotionRef = useRef<ReturnType<typeof createSidebarListMotion> | null>(null);
   const attachListMotionRef = useCallback((node: HTMLUListElement | null) => {
-    threadListRef.current = node;
     listMotionRef.current?.dispose();
     listMotionRef.current = node === null ? null : createSidebarListMotion(node);
     listMotionRef.current?.update(false);
@@ -3463,16 +3484,6 @@ export default function Sidebar() {
       if (activeSection === undefined) return;
       // Stop normal section motion before dnd-kit measures the picked-up row.
       listMotionRef.current?.suspend();
-      const list = threadListRef.current;
-      const header = list?.querySelector<HTMLElement>('[data-testid="sidebar-pinned-header"]');
-      if (list && header) {
-        const listRect = list.getBoundingClientRect();
-        const scale = list.offsetWidth > 0 ? listRect.width / list.offsetWidth : 1;
-        dragLabelOffsetRef.current =
-          header.getBoundingClientRect().top - listRect.top + SIDEBAR_DRAG_LABEL_HEIGHT * scale;
-      } else {
-        dragLabelOffsetRef.current = 0;
-      }
       setDragState({
         activeKey,
         activeSection,
@@ -3506,11 +3517,19 @@ export default function Sidebar() {
         settledThreads.length ===
       0
     ) {
-      return [];
+      return [{ kind: "marker", marker: "controls" }];
     }
     const items: SidebarListItem[] = [{ kind: "marker", marker: "pinned-header" }];
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
-    items.push(...pinnedRows);
+    const controlsIndex = pinnedRows.findIndex(
+      (item) => item.kind === "thread" && pinIndex.get(item.key)?.spaceId,
+    );
+    const split = controlsIndex < 0 ? pinnedRows.length : controlsIndex;
+    items.push(
+      ...pinnedRows.slice(0, split),
+      { kind: "marker", marker: "controls" },
+      ...pinnedRows.slice(split),
+    );
     items.push({ kind: "marker", marker: "pinned-divider" });
     const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
@@ -3527,6 +3546,7 @@ export default function Sidebar() {
   }, [
     activeThreads,
     pinnedThreads,
+    pinIndex,
     renderedSettledThreads,
     settledThreads.length,
     snoozedThreads.length,
@@ -3634,7 +3654,24 @@ export default function Sidebar() {
   const draggedThreadKey = dragState?.activeKey;
   const draggedFromSection = dragState?.activeSection;
   const dragActivationY = dragState?.activationY;
-  const dndCollisionDetection = useMemo(() => {
+  const profileForSpaceDrop = useCallback(
+    (key: string, profileId: string) => {
+      if (!primarySettingsLoaded) return null;
+      const selected = useThreadSelectionStore.getState().selectedThreadKeys;
+      const keys = selected.has(key) ? [...selected] : [key];
+      const projectKeys = keys.flatMap((key) => {
+        const thread = threadByKey.get(key);
+        return thread ? [`${thread.environmentId}:${thread.projectId}`] : [];
+      });
+      if (projectKeys.length !== keys.length) return null;
+      const profile = commonSpaceProfile(rawProfiles, projectKeys);
+      return profile && (profileId === ALL_PROFILE_ID || profile.id === profileId)
+        ? { profile, keys }
+        : null;
+    },
+    [primarySettingsLoaded, rawProfiles, threadByKey],
+  );
+  const threadCollisionDetection = useMemo(() => {
     if (draggedThreadKey === undefined || draggedFromSection === undefined)
       return createSidebarCollisionDetection(() => true);
     const source = threadByKey.get(draggedThreadKey);
@@ -3681,9 +3718,44 @@ export default function Sidebar() {
     sidebarListItems,
     threadByKey,
   ]);
+  const dndCollisionDetection = useMemo(
+    () =>
+      withSidebarSpaceTargets(
+        threadCollisionDetection,
+        (profileId) =>
+          draggedThreadKey !== undefined &&
+          profileForSpaceDrop(draggedThreadKey, profileId) !== null,
+      ),
+    [threadCollisionDetection, draggedThreadKey, profileForSpaceDrop],
+  );
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
+      const spaceSource = getSpaceDragData(event.active.data.current);
+      const spaceTarget = getSpaceDragData(event.over?.data.current);
+      if (spaceSource) {
+        if (
+          !spaceTarget ||
+          spaceTarget.profileId !== spaceSource.profileId ||
+          !primarySettingsLoaded
+        )
+          return;
+        const profile = latestProfilesRef.current.find((item) => item.id === spaceSource.profileId);
+        const spaces = profile?.spaces ?? [];
+        const from = spaces.findIndex((space) => space.id === spaceSource.spaceId);
+        const to = spaces.findIndex((space) => space.id === spaceTarget.spaceId);
+        if (profile && from >= 0 && to >= 0 && from !== to)
+          changeSpaces({ ...profile, spaces: arrayMove([...spaces], from, to) });
+        return;
+      }
       const activeKey = String(event.active.id);
+      if (spaceTarget) {
+        const destination = profileForSpaceDrop(activeKey, spaceTarget.profileId);
+        if (destination && spaceTarget.acceptsThreads) {
+          moveSpaceThreads(destination.keys, spaceTarget.spaceId, destination.profile.id);
+          setSelectedSpaceId(spaceTarget.spaceId ?? OUTSIDE_SPACES);
+        }
+        return;
+      }
       const activeSection = sectionByThreadKey.get(activeKey);
       const target =
         event.over === null
@@ -3812,6 +3884,11 @@ export default function Sidebar() {
       })();
     },
     [
+      primarySettingsLoaded,
+      changeSpaces,
+      profileForSpaceDrop,
+      moveSpaceThreads,
+      setSelectedSpaceId,
       activeKeysById,
       pinnedKeysById,
       serverConfigs,
@@ -4847,261 +4924,254 @@ export default function Sidebar() {
     ) : null;
 
   return (
-    <div
-      ref={sidebarSwipeRef}
-      className={cn(
-        "flex min-h-0 w-full flex-1 flex-col",
-        onScrollGesture &&
-          "overflow-x-hidden overscroll-x-none [&_[data-slot=scroll-area-viewport]]:overscroll-x-none [&_[data-slot=profile-strip]_[role=group]]:overflow-x-hidden",
-      )}
+    <DndContext
+      sensors={dndSensors}
+      collisionDetection={dndCollisionDetection}
+      modifiers={[snapCenterToCursor]}
+      onDragStart={handleThreadDragStart}
+      onDragOver={handleThreadDragOver}
+      onDragEnd={handleThreadDragEnd}
     >
-      <SidebarChromeHeader isElectron={isElectron} />
-      <SidebarContent
-        className="gap-0"
-        fixedHeader={
-          // Lifted above the stage backdrop, whose fade bleeds below the
-          // header and would otherwise paint across the search row's outline.
-          <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)]">
-            <div className="flex items-center gap-1">
-              <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
-                <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
-                <Input
-                  ref={threadSearchInputRef}
-                  nativeInput
-                  unstyled
-                  type="search"
-                  value={threadSearchQuery}
-                  onChange={(event) => {
-                    setThreadSearchQuery(event.currentTarget.value);
-                    setActiveSearchResultIndex(0);
-                  }}
-                  onKeyDown={handleThreadSearchKeyDown}
-                  placeholder={
-                    scopedProjectGroup
-                      ? `Search ${scopedProjectGroup.displayName}`
-                      : activeProfile.id === ALL_PROFILE_ID
-                        ? "Search all threads"
-                        : `Search ${activeProfile.name}`
-                  }
-                  aria-label={`Search thread titles in ${scopedProjectGroup?.displayName ?? activeProfile.name}`}
-                  role="combobox"
-                  aria-autocomplete="list"
-                  aria-expanded={isSearchingThreads && threadSearchResults.length > 0}
-                  aria-controls={
-                    isSearchingThreads && threadSearchResults.length > 0
-                      ? "sidebar-thread-search-results"
-                      : undefined
-                  }
-                  aria-activedescendant={
-                    isSearchingThreads && threadSearchResults[activeSearchResultIndex]
-                      ? `sidebar-thread-search-result-${activeSearchResultIndex}`
-                      : undefined
-                  }
-                  className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:leading-normal [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:font-medium [&_[data-slot=input]]:text-sidebar-foreground [&_[data-slot=input]]:placeholder:text-sidebar-muted-foreground"
-                />
-                {isSearchingThreads ? (
-                  <Button
-                    type="button"
-                    size="icon-micro"
-                    variant="ghost"
-                    className="shrink-0 text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
-                    aria-label="Clear thread search"
-                    onClick={() => {
-                      clearThreadSearch();
-                      threadSearchInputRef.current?.focus();
-                    }}
-                  >
-                    <XIcon className="size-3" />
-                  </Button>
-                ) : null}
-              </div>
-              {openThread ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        type="button"
-                        className="shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={revealCurrentChat}
-                        aria-label="Show current chat"
-                      />
-                    }
-                  >
-                    <LocateFixedIcon />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">
-                    Show current chat in its profile and space
-                  </TooltipPopup>
-                </Tooltip>
-              ) : null}
-              <div className="shrink-0">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        type="button"
-                        className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={handleNewThreadClick}
-                        aria-label="New thread"
-                      />
-                    }
-                  >
-                    <SquarePenIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">
-                    {projectGroups.length > 1 ? (
-                      <span className="flex flex-col gap-0.5">
-                        <span>
-                          {newThreadShortcutLabel
-                            ? `New thread (${newThreadShortcutLabel})`
-                            : "New thread"}
-                        </span>
-                        <span className="text-muted-foreground">
-                          New thread in current project: Shift+click
-                          {newThreadInProjectShortcutLabel
-                            ? ` (${newThreadInProjectShortcutLabel})`
-                            : ""}
-                        </span>
-                      </span>
-                    ) : newThreadShortcutLabel ? (
-                      `New thread (${newThreadShortcutLabel})`
-                    ) : (
-                      "New thread"
-                    )}
-                  </TooltipPopup>
-                </Tooltip>
-              </div>
-            </div>
-            <ProfileStrip
-              profiles={resolvedProfiles}
-              activeProfileId={activeProfileId}
-              onThreadDrop={
-                activeProfile.id !== ALL_PROFILE_ID
-                  ? (keys) => moveSpaceThreads(keys, null)
-                  : undefined
-              }
-              onSelect={(id) => setActiveProfileId(id === ALL_PROFILE_ID ? null : id)}
-            />
-            {isSearchingThreads ? sidebarProjectFilter : null}
-          </SidebarGroup>
-        }
+      <div
+        ref={sidebarSwipeRef}
+        className={cn(
+          "flex min-h-0 w-full flex-1 flex-col",
+          onScrollGesture &&
+            "overflow-x-hidden overscroll-x-none [&_[data-slot=scroll-area-viewport]]:overscroll-x-none [&_[data-slot=profile-strip]_[role=group]]:overflow-x-hidden",
+        )}
       >
-        <SidebarGroup
-          ref={profileListRef}
-          className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0"
+        <SidebarChromeHeader isElectron={isElectron} />
+        <SidebarContent
+          className="gap-0"
+          fixedHeader={
+            // Lifted above the stage backdrop, whose fade bleeds below the
+            // header and would otherwise paint across the search row's outline.
+            <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)]">
+              <div className="flex items-center gap-1">
+                <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
+                  <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
+                  <Input
+                    ref={threadSearchInputRef}
+                    nativeInput
+                    unstyled
+                    type="search"
+                    value={threadSearchQuery}
+                    onChange={(event) => {
+                      setThreadSearchQuery(event.currentTarget.value);
+                      setActiveSearchResultIndex(0);
+                    }}
+                    onKeyDown={handleThreadSearchKeyDown}
+                    placeholder={
+                      scopedProjectGroup
+                        ? `Search ${scopedProjectGroup.displayName}`
+                        : activeProfile.id === ALL_PROFILE_ID
+                          ? "Search all threads"
+                          : `Search ${activeProfile.name}`
+                    }
+                    aria-label={`Search thread titles in ${scopedProjectGroup?.displayName ?? activeProfile.name}`}
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={isSearchingThreads && threadSearchResults.length > 0}
+                    aria-controls={
+                      isSearchingThreads && threadSearchResults.length > 0
+                        ? "sidebar-thread-search-results"
+                        : undefined
+                    }
+                    aria-activedescendant={
+                      isSearchingThreads && threadSearchResults[activeSearchResultIndex]
+                        ? `sidebar-thread-search-result-${activeSearchResultIndex}`
+                        : undefined
+                    }
+                    className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:leading-normal [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:font-medium [&_[data-slot=input]]:text-sidebar-foreground [&_[data-slot=input]]:placeholder:text-sidebar-muted-foreground"
+                  />
+                  {isSearchingThreads ? (
+                    <Button
+                      type="button"
+                      size="icon-micro"
+                      variant="ghost"
+                      className="shrink-0 text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
+                      aria-label="Clear thread search"
+                      onClick={() => {
+                        clearThreadSearch();
+                        threadSearchInputRef.current?.focus();
+                      }}
+                    >
+                      <XIcon className="size-3" />
+                    </Button>
+                  ) : null}
+                </div>
+                {openThread ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <SidebarMenuButton
+                          size="icon"
+                          type="button"
+                          className="shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                          onClick={revealCurrentChat}
+                          aria-label="Show current chat"
+                        />
+                      }
+                    >
+                      <LocateFixedIcon />
+                    </TooltipTrigger>
+                    <TooltipPopup side="right">
+                      Show current chat in its profile and space
+                    </TooltipPopup>
+                  </Tooltip>
+                ) : null}
+                <div className="shrink-0">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <SidebarMenuButton
+                          size="icon"
+                          type="button"
+                          className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                          onClick={handleNewThreadClick}
+                          aria-label="New thread"
+                        />
+                      }
+                    >
+                      <SquarePenIcon />
+                      <span
+                        className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
+                        aria-hidden="true"
+                      />
+                    </TooltipTrigger>
+                    <TooltipPopup side="right">
+                      {projectGroups.length > 1 ? (
+                        <span className="flex flex-col gap-0.5">
+                          <span>
+                            {newThreadShortcutLabel
+                              ? `New thread (${newThreadShortcutLabel})`
+                              : "New thread"}
+                          </span>
+                          <span className="text-muted-foreground">
+                            New thread in current project: Shift+click
+                            {newThreadInProjectShortcutLabel
+                              ? ` (${newThreadInProjectShortcutLabel})`
+                              : ""}
+                          </span>
+                        </span>
+                      ) : newThreadShortcutLabel ? (
+                        `New thread (${newThreadShortcutLabel})`
+                      ) : (
+                        "New thread"
+                      )}
+                    </TooltipPopup>
+                  </Tooltip>
+                </div>
+              </div>
+              <ProfileStrip
+                profiles={resolvedProfiles}
+                activeProfileId={activeProfileId}
+                dropDisabled={!primarySettingsLoaded || activeProfile.id === ALL_PROFILE_ID}
+                onSelect={(id) => setActiveProfileId(id === ALL_PROFILE_ID ? null : id)}
+              />
+              {isSearchingThreads ? sidebarProjectFilter : null}
+            </SidebarGroup>
+          }
         >
-          {isSearchingThreads ? (
-            threadSearchResults.length > 0 ? (
+          <SidebarGroup
+            ref={profileListRef}
+            className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0"
+          >
+            {isSearchingThreads ? (
+              threadSearchResults.length > 0 ? (
+                <TooltipProvider
+                  key="sidebar-thread-search-tooltips-150"
+                  delay={150}
+                  closeDelay={0}
+                  timeout={400}
+                >
+                  <ul
+                    id="sidebar-thread-search-results"
+                    role="listbox"
+                    aria-label="Thread search results"
+                    className="flex flex-col gap-px"
+                  >
+                    {threadSearchResults.map((thread, index) => {
+                      const threadKey = scopedThreadKey(
+                        scopeThreadRef(thread.environmentId, thread.id),
+                      );
+                      return (
+                        <SidebarSearchResultRow
+                          key={threadKey}
+                          thread={thread}
+                          project={
+                            projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
+                          }
+                          projectDisplayName={
+                            [
+                              projectDisplayNameByKey.get(
+                                `${thread.environmentId}:${thread.projectId}`,
+                              ),
+                              threadSpace(thread)?.name,
+                            ]
+                              .filter(Boolean)
+                              .join(" / ") || null
+                          }
+                          environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
+                          environmentMachine={
+                            environmentMachineById.get(thread.environmentId) ?? "server"
+                          }
+                          providerEntryByInstanceId={
+                            providerEntriesByEnvironment.get(thread.environmentId) ??
+                            EMPTY_PROVIDER_ENTRIES
+                          }
+                          isHighlighted={activeSearchResultIndex === index}
+                          isRouteActive={routeThreadKey === threadKey}
+                          resultId={`sidebar-thread-search-result-${index}`}
+                          onHighlight={() => setActiveSearchResultIndex(index)}
+                          onSelect={() => selectThreadSearchResult(thread)}
+                        />
+                      );
+                    })}
+                  </ul>
+                </TooltipProvider>
+              ) : (
+                <p
+                  role="status"
+                  className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
+                >
+                  No matching thread titles in{" "}
+                  {scopedProjectGroup?.displayName ?? activeProfile.name}
+                </p>
+              )
+            ) : null}
+            {deletedSpace?.profileId === activeProfile.id ? (
+              <div className="flex items-center justify-between px-3 py-1 text-xs text-muted-foreground">
+                Space removed
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => {
+                    const spaces = [...(activeProfile.spaces ?? [])];
+                    if (!spaces.some((space) => space.id === deletedSpace.space.id)) {
+                      spaces.splice(Math.min(deletedSpace.index, spaces.length), 0, {
+                        ...deletedSpace.space,
+                        threads: deletedSpace.space.threads.filter(
+                          (thread) =>
+                            activeProfile.projectKeys.includes(thread.projectKey) &&
+                            !spaceForThread(activeProfile, thread.threadKey, thread.projectKey),
+                        ),
+                      });
+                      changeSpaces({ ...activeProfile, spaces });
+                    }
+                    setDeletedSpace(null);
+                  }}
+                >
+                  Undo
+                </Button>
+              </div>
+            ) : null}
+            {!isSearchingThreads ? (
               <TooltipProvider
-                key="sidebar-thread-search-tooltips-150"
+                key="sidebar-thread-tooltips-150"
                 delay={150}
                 closeDelay={0}
                 timeout={400}
-              >
-                <ul
-                  id="sidebar-thread-search-results"
-                  role="listbox"
-                  aria-label="Thread search results"
-                  className="flex flex-col gap-px"
-                >
-                  {threadSearchResults.map((thread, index) => {
-                    const threadKey = scopedThreadKey(
-                      scopeThreadRef(thread.environmentId, thread.id),
-                    );
-                    return (
-                      <SidebarSearchResultRow
-                        key={threadKey}
-                        thread={thread}
-                        project={
-                          projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
-                        }
-                        projectDisplayName={
-                          [
-                            projectDisplayNameByKey.get(
-                              `${thread.environmentId}:${thread.projectId}`,
-                            ),
-                            threadSpace(thread)?.name,
-                          ]
-                            .filter(Boolean)
-                            .join(" / ") || null
-                        }
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        environmentMachine={
-                          environmentMachineById.get(thread.environmentId) ?? "server"
-                        }
-                        providerEntryByInstanceId={
-                          providerEntriesByEnvironment.get(thread.environmentId) ??
-                          EMPTY_PROVIDER_ENTRIES
-                        }
-                        isHighlighted={activeSearchResultIndex === index}
-                        isRouteActive={routeThreadKey === threadKey}
-                        resultId={`sidebar-thread-search-result-${index}`}
-                        onHighlight={() => setActiveSearchResultIndex(index)}
-                        onSelect={() => selectThreadSearchResult(thread)}
-                      />
-                    );
-                  })}
-                </ul>
-              </TooltipProvider>
-            ) : (
-              <p
-                role="status"
-                className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
-              >
-                No matching thread titles in {scopedProjectGroup?.displayName ?? activeProfile.name}
-              </p>
-            )
-          ) : null}
-          {deletedSpace?.profileId === activeProfile.id ? (
-            <div className="flex items-center justify-between px-3 py-1 text-xs text-muted-foreground">
-              Space removed
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => {
-                  const spaces = [...(activeProfile.spaces ?? [])];
-                  if (!spaces.some((space) => space.id === deletedSpace.space.id)) {
-                    spaces.splice(Math.min(deletedSpace.index, spaces.length), 0, {
-                      ...deletedSpace.space,
-                      threads: deletedSpace.space.threads.filter(
-                        (thread) =>
-                          activeProfile.projectKeys.includes(thread.projectKey) &&
-                          !spaceForThread(activeProfile, thread.threadKey, thread.projectKey),
-                      ),
-                    });
-                    changeSpaces({ ...activeProfile, spaces });
-                  }
-                  setDeletedSpace(null);
-                }}
-              >
-                Undo
-              </Button>
-            </div>
-          ) : null}
-          {!isSearchingThreads ? (
-            <TooltipProvider
-              key="sidebar-thread-tooltips-150"
-              delay={150}
-              closeDelay={0}
-              timeout={400}
-            >
-              <DndContext
-                sensors={dndSensors}
-                collisionDetection={dndCollisionDetection}
-                modifiers={[
-                  restrictToVerticalAxis,
-                  restrictBelowPins,
-                  restrictToFirstScrollableAncestor,
-                ]}
-                onDragStart={handleThreadDragStart}
-                onDragOver={handleThreadDragOver}
-                onDragEnd={handleThreadDragEnd}
               >
                 <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
                 <SortableContext items={sortableIds} strategy={sidebarSortingStrategy}>
@@ -5230,8 +5300,11 @@ export default function Sidebar() {
                           <SortableThreadRow
                             key={threadKey}
                             id={threadKey}
+                            title={thread.title}
                             disabled={
-                              !draggableThreadKeys.has(threadKey) || optimisticDrop !== null
+                              (!draggableThreadKeys.has(threadKey) &&
+                                !profileForSpaceDrop(threadKey, activeProfile.id)) ||
+                              optimisticDrop !== null
                             }
                           >
                             {(bag) => renderThreadRowInner(thread, section, bag)}
@@ -5299,58 +5372,68 @@ export default function Sidebar() {
                             onFilterChange={setSelectedSpaceId}
                             disabled={!primarySettingsLoaded}
                           />
-                          <ul aria-label="Spaces" className="mt-1 grid grid-cols-2 gap-1.5">
-                            <DefaultSpaceTile
-                              count={spaceCounts.get(OUTSIDE_SPACES) ?? 0}
-                              selected={spaceFilter === OUTSIDE_SPACES}
-                              onSelect={() => setSelectedSpaceId(OUTSIDE_SPACES)}
-                              onNewChat={() => {
-                                setSelectedSpaceId(OUTSIDE_SPACES);
-                                openChatCreation();
-                              }}
-                            />
-                            {activeProfile.spaces?.map((space) => (
-                              <SpaceTile
-                                offerSetup={newSpaceSetupId === space.id}
-                                key={space.id}
-                                profile={activeProfile}
-                                space={space}
-                                count={spaceCounts.get(space.id) ?? 0}
-                                attention={threads.some(
-                                  (thread) =>
-                                    threadSpace(thread)?.id === space.id &&
-                                    spaceAttention.has(
-                                      scopedThreadKey(
-                                        scopeThreadRef(thread.environmentId, thread.id),
-                                      ),
-                                    ),
-                                )}
-                                selected={selectedSpace?.id === space.id}
-                                onSelect={() =>
-                                  setSelectedSpaceId(
-                                    selectedSpace?.id === space.id ? OUTSIDE_SPACES : space.id,
-                                  )
-                                }
-                                onChange={changeSpaces}
-                                onMove={moveSpaceThreads}
-                                onLaunch={async (projectRef, defaults) => {
-                                  const opened = await handleNewThreadRef.current(projectRef, {
-                                    forceNew: true,
-                                    spaceId: space.id,
-                                    useProjectDefaults: true,
-                                    ...(defaults.modelSelection
-                                      ? { modelSelection: defaults.modelSelection }
-                                      : {}),
-                                    ...(defaults.envMode ? { envMode: defaults.envMode } : {}),
-                                  });
-                                  if (!opened)
-                                    throw new Error("Could not open the draft. Try again.");
-                                  setProjectScopeKey(null);
+                          <SortableContext
+                            items={
+                              activeProfile.spaces?.map((space) =>
+                                spaceDragId(activeProfile.id, space.id),
+                              ) ?? []
+                            }
+                            strategy={spaceSortingStrategy}
+                          >
+                            <ul aria-label="Spaces" className="mt-1 grid grid-cols-2 gap-1.5">
+                              <DefaultSpaceTile
+                                profileId={activeProfile.id}
+                                dropDisabled={!primarySettingsLoaded}
+                                count={spaceCounts.get(OUTSIDE_SPACES) ?? 0}
+                                selected={spaceFilter === OUTSIDE_SPACES}
+                                onSelect={() => setSelectedSpaceId(OUTSIDE_SPACES)}
+                                onNewChat={() => {
+                                  setSelectedSpaceId(OUTSIDE_SPACES);
+                                  openChatCreation();
                                 }}
-                                disabled={!primarySettingsLoaded}
                               />
-                            ))}
-                          </ul>
+                              {activeProfile.spaces?.map((space) => (
+                                <SpaceTile
+                                  offerSetup={newSpaceSetupId === space.id}
+                                  key={space.id}
+                                  profile={activeProfile}
+                                  space={space}
+                                  count={spaceCounts.get(space.id) ?? 0}
+                                  attention={threads.some(
+                                    (thread) =>
+                                      threadSpace(thread)?.id === space.id &&
+                                      spaceAttention.has(
+                                        scopedThreadKey(
+                                          scopeThreadRef(thread.environmentId, thread.id),
+                                        ),
+                                      ),
+                                  )}
+                                  selected={selectedSpace?.id === space.id}
+                                  onSelect={() =>
+                                    setSelectedSpaceId(
+                                      selectedSpace?.id === space.id ? OUTSIDE_SPACES : space.id,
+                                    )
+                                  }
+                                  onChange={changeSpaces}
+                                  onLaunch={async (projectRef, defaults) => {
+                                    const opened = await handleNewThreadRef.current(projectRef, {
+                                      forceNew: true,
+                                      spaceId: space.id,
+                                      useProjectDefaults: true,
+                                      ...(defaults.modelSelection
+                                        ? { modelSelection: defaults.modelSelection }
+                                        : {}),
+                                      ...(defaults.envMode ? { envMode: defaults.envMode } : {}),
+                                    });
+                                    if (!opened)
+                                      throw new Error("Could not open the draft. Try again.");
+                                    setProjectScopeKey(null);
+                                  }}
+                                  writeBlockReason={profileWriteBlockReason}
+                                />
+                              ))}
+                            </ul>
+                          </SortableContext>
                         </li>,
                       );
                       if (sidebarProjectFilter)
@@ -5361,22 +5444,19 @@ export default function Sidebar() {
                         );
                       items.push(draftBlock);
                       const controls = items.splice(0);
-                      let controlsInserted = false;
                       for (const item of sidebarListItems) {
-                        if (
-                          !controlsInserted &&
-                          ((item.kind === "thread" &&
-                            (item.section !== "pinned" || pinIndex.get(item.key)?.spaceId)) ||
-                            (item.kind === "marker" && item.marker === "pinned-divider"))
-                        ) {
-                          items.push(...controls);
-                          controlsInserted = true;
-                        }
                         if (item.kind === "thread") {
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
                           continue;
                         }
                         switch (item.marker) {
+                          case "controls":
+                            items.push(
+                              <SortableSidebarMarker key="controls" marker="controls">
+                                <ul className="flex flex-col gap-px">{controls}</ul>
+                              </SortableSidebarMarker>,
+                            );
+                            break;
                           case "pinned-header":
                             items.push(
                               <SidebarDragBoundary
@@ -5473,7 +5553,6 @@ export default function Sidebar() {
                             break;
                         }
                       }
-                      if (!controlsInserted) items.push(...controls);
                       if (
                         spaceFilter !== null &&
                         orderedThreads.length === 0 &&
@@ -5511,141 +5590,144 @@ export default function Sidebar() {
                     ) : null}
                   </ul>
                 </SortableContext>
-              </DndContext>
-            </TooltipProvider>
-          ) : null}
-          {!isSearchingThreads &&
-          visibleDraftSessionCount === 0 &&
-          pinnedThreads.length +
-            activeThreads.length +
-            snoozedThreads.length +
-            settledThreads.length ===
-            0 ? (
-            <div className="flex flex-col items-start gap-2 px-3 py-4 text-xs text-sidebar-muted-foreground">
-              {visibleProjects.length === 0 ? (
-                <>
-                  <span>
-                    {activeProfile.id === ALL_PROFILE_ID
-                      ? "No projects yet"
-                      : `Add a project to start using ${activeProfile.name}.`}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={openAddProjectCommandPalette}
-                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                  >
-                    <PlusIcon className="-mx-0.5 size-3" />
-                    {activeProfile.id === ALL_PROFILE_ID
-                      ? "Add project"
-                      : `Add project to ${activeProfile.name}`}
-                  </button>
-                </>
-              ) : scopedProjectGroup ? (
-                `No threads in ${scopedProjectGroup.displayName} yet`
-              ) : (
-                "No threads yet"
-              )}
-            </div>
-          ) : null}
-        </SidebarGroup>
-      </SidebarContent>
-      <SidebarChromeFooter />
-      {spaceAssignmentKeys ? (
-        <ThreadSpaceDialog
-          threads={threads
-            .filter((thread) =>
-              spaceAssignmentKeys.includes(
-                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-              ),
-            )
-            .map((thread) => ({
-              threadKey: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-              projectKey: `${thread.environmentId}:${thread.projectId}`,
-            }))}
-          onClose={() => setSpaceAssignmentKeys(null)}
-          onMove={(profileId, spaceId) => moveSpaceThreads(spaceAssignmentKeys, spaceId, profileId)}
-        />
-      ) : null}
-      <Popover
-        open={profileAssignment !== null && assignmentProject !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setProfileAssignment(null);
-        }}
-      >
-        {profileAssignment && assignmentProject ? (
-          <PopoverPopup
-            anchor={{
-              getBoundingClientRect: () =>
-                new DOMRect(profileAssignment.position.x, profileAssignment.position.y, 0, 0),
-            }}
-            align="start"
-            side="bottom"
-            className="w-60 max-w-[calc(100vw-1rem)]"
-            viewportClassName="p-1"
-            finalFocus={threadSearchInputRef}
-          >
-            <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
-              <ProjectFavicon project={assignmentProject} className="size-4 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <PopoverTitle className="truncate text-xs leading-4">
-                  {assignmentProject.title}
-                </PopoverTitle>
-                <PopoverDescription className="text-[11px] leading-4">
-                  Move to a profile
-                </PopoverDescription>
-              </div>
-              <PopoverClose
-                aria-label="Close profile assignment"
-                render={<Button variant="ghost" size="icon-xs" />}
-              >
-                <XIcon className="size-3.5" />
-              </PopoverClose>
-            </div>
-            {assignmentCheckouts.length > 1 ? (
-              <label className="mx-1 mb-1 flex cursor-pointer items-center gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs">
-                <Checkbox checked={assignAllCheckouts} onCheckedChange={setAssignAllCheckouts} />
-                Include all {assignmentCheckouts.length} known checkouts
-              </label>
+              </TooltipProvider>
             ) : null}
-            <div className="max-h-64 overflow-y-auto" aria-label="Choose a profile">
-              {[...rawProfiles, { ...ALL_PROFILE, name: "Unassigned" }].map((profile) => {
-                const selected = assignmentKeys.every(
-                  (key) =>
-                    (profileForProject(rawProfiles, key)?.id ?? ALL_PROFILE_ID) === profile.id,
-                );
-                return (
-                  <button
-                    key={profile.id}
-                    type="button"
-                    aria-pressed={selected}
-                    disabled={!primarySettingsLoaded}
-                    onClick={() => {
-                      updatePrimarySettings({
-                        profiles: moveProjectToProfile(rawProfiles, assignmentKeys, profile.id),
-                      });
-                      setProfileAssignment(null);
-                    }}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
-                      selected && "bg-accent/60",
-                      profile.id === ALL_PROFILE_ID && "mt-1 border-t border-border/60",
-                    )}
-                  >
-                    <ProfileDot color={profile.color} className="size-2.5" />
-                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-                      <span className="block truncate">{profile.name}</span>
-                      {profile.id === ALL_PROFILE_ID ? (
-                        <span className="block text-[11px] text-muted-foreground">All only</span>
-                      ) : null}
+            {!isSearchingThreads &&
+            visibleDraftSessionCount === 0 &&
+            pinnedThreads.length +
+              activeThreads.length +
+              snoozedThreads.length +
+              settledThreads.length ===
+              0 ? (
+              <div className="flex flex-col items-start gap-2 px-3 py-4 text-xs text-sidebar-muted-foreground">
+                {visibleProjects.length === 0 ? (
+                  <>
+                    <span>
+                      {activeProfile.id === ALL_PROFILE_ID
+                        ? "No projects yet"
+                        : `Add a project to start using ${activeProfile.name}.`}
                     </span>
-                    {selected ? <CheckIcon aria-hidden className="size-4 shrink-0" /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </PopoverPopup>
+                    <button
+                      type="button"
+                      onClick={openAddProjectCommandPalette}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                    >
+                      <PlusIcon className="-mx-0.5 size-3" />
+                      {activeProfile.id === ALL_PROFILE_ID
+                        ? "Add project"
+                        : `Add project to ${activeProfile.name}`}
+                    </button>
+                  </>
+                ) : scopedProjectGroup ? (
+                  `No threads in ${scopedProjectGroup.displayName} yet`
+                ) : (
+                  "No threads yet"
+                )}
+              </div>
+            ) : null}
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarChromeFooter />
+        {spaceAssignmentKeys ? (
+          <ThreadSpaceDialog
+            threads={threads
+              .filter((thread) =>
+                spaceAssignmentKeys.includes(
+                  scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                ),
+              )
+              .map((thread) => ({
+                threadKey: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                projectKey: `${thread.environmentId}:${thread.projectId}`,
+              }))}
+            onClose={() => setSpaceAssignmentKeys(null)}
+            onMove={(profileId, spaceId) =>
+              moveSpaceThreads(spaceAssignmentKeys, spaceId, profileId)
+            }
+          />
         ) : null}
-      </Popover>
-    </div>
+        <Popover
+          open={profileAssignment !== null && assignmentProject !== undefined}
+          onOpenChange={(open) => {
+            if (!open) setProfileAssignment(null);
+          }}
+        >
+          {profileAssignment && assignmentProject ? (
+            <PopoverPopup
+              anchor={{
+                getBoundingClientRect: () =>
+                  new DOMRect(profileAssignment.position.x, profileAssignment.position.y, 0, 0),
+              }}
+              align="start"
+              side="bottom"
+              className="w-60 max-w-[calc(100vw-1rem)]"
+              viewportClassName="p-1"
+              finalFocus={threadSearchInputRef}
+            >
+              <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
+                <ProjectFavicon project={assignmentProject} className="size-4 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <PopoverTitle className="truncate text-xs leading-4">
+                    {assignmentProject.title}
+                  </PopoverTitle>
+                  <PopoverDescription className="text-[11px] leading-4">
+                    Move to a profile
+                  </PopoverDescription>
+                </div>
+                <PopoverClose
+                  aria-label="Close profile assignment"
+                  render={<Button variant="ghost" size="icon-xs" />}
+                >
+                  <XIcon className="size-3.5" />
+                </PopoverClose>
+              </div>
+              {assignmentCheckouts.length > 1 ? (
+                <label className="mx-1 mb-1 flex cursor-pointer items-center gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs">
+                  <Checkbox checked={assignAllCheckouts} onCheckedChange={setAssignAllCheckouts} />
+                  Include all {assignmentCheckouts.length} known checkouts
+                </label>
+              ) : null}
+              <div className="max-h-64 overflow-y-auto" aria-label="Choose a profile">
+                {[...rawProfiles, { ...ALL_PROFILE, name: "Unassigned" }].map((profile) => {
+                  const selected = assignmentKeys.every(
+                    (key) =>
+                      (profileForProject(rawProfiles, key)?.id ?? ALL_PROFILE_ID) === profile.id,
+                  );
+                  return (
+                    <button
+                      key={profile.id}
+                      type="button"
+                      aria-pressed={selected}
+                      disabled={!primarySettingsLoaded}
+                      onClick={() => {
+                        updatePrimarySettings({
+                          profiles: moveProjectToProfile(rawProfiles, assignmentKeys, profile.id),
+                        });
+                        setProfileAssignment(null);
+                      }}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                        selected && "bg-accent/60",
+                        profile.id === ALL_PROFILE_ID && "mt-1 border-t border-border/60",
+                      )}
+                    >
+                      <ProfileDot color={profile.color} className="size-2.5" />
+                      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                        <span className="block truncate">{profile.name}</span>
+                        {profile.id === ALL_PROFILE_ID ? (
+                          <span className="block text-[11px] text-muted-foreground">All only</span>
+                        ) : null}
+                      </span>
+                      {selected ? <CheckIcon aria-hidden className="size-4 shrink-0" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </PopoverPopup>
+          ) : null}
+        </Popover>
+      </div>
+      <SidebarDragPreview />
+    </DndContext>
   );
 }

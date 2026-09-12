@@ -1,4 +1,5 @@
-import { closestCenter, type CollisionDetection, type Modifier } from "@dnd-kit/core";
+import { closestCenter, pointerWithin, type CollisionDetection } from "@dnd-kit/core";
+import { getSpaceDragData } from "./sidebar/Spaces.logic";
 import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
 import {
   resolveSidebarDropTarget,
@@ -14,15 +15,39 @@ const hidden = { ...stationary, scaleY: 0 };
 type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
 type Layout = Parameters<SortingStrategy>[0];
 
-/** Keep the lifted card below the Pins label, including when Pins is empty.
- * The container rect follows scrolling; the offset is measured once at pickup. */
-export function restrictBelowSidebarLabel(
-  { transform, containerNodeRect, draggingNodeRect }: Parameters<Modifier>[0],
-  offset: number,
-) {
-  if (!containerNodeRect || !draggingNodeRect) return transform;
-  const minimumY = containerNodeRect.top + offset - draggingNodeRect.top;
-  return transform.y < minimumY ? { ...transform, y: minimumY } : transform;
+/** A Space drop never falls through to a nearby pin, reorder, or settle target. */
+export function withSidebarSpaceTargets(
+  threadCollision: CollisionDetection,
+  canAssign: (profileId: string) => boolean,
+): CollisionDetection {
+  return (args) => {
+    const source = getSpaceDragData(args.active.data.current);
+    const spaces = args.droppableContainers.filter((container) =>
+      getSpaceDragData(container.data.current),
+    );
+    const hits = pointerWithin({ ...args, droppableContainers: spaces });
+    const hit = hits[0];
+    const target = getSpaceDragData(hit?.data?.droppableContainer.data.current);
+    if (source) {
+      if (!target || target.spaceId === null || target.profileId !== source.profileId) return [];
+      return closestCenter({
+        ...args,
+        droppableContainers: spaces.filter((container) => {
+          const data = getSpaceDragData(container.data.current);
+          return data?.spaceId !== null && data?.profileId === source.profileId;
+        }),
+      });
+    }
+    if (target) return target.acceptsThreads && canAssign(target.profileId) ? hits : [];
+    if (pointerWithin(args).some((collision) => collision.id === sidebarMarkerId("controls")))
+      return [];
+    return threadCollision({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(
+        (container) => !getSpaceDragData(container.data.current),
+      ),
+    });
+  };
 }
 
 /** Reject the nearest unsupported target without selecting another section.
@@ -109,6 +134,18 @@ export function createSidebarSortingStrategy(input: {
 }): SortingStrategy {
   const { items } = input;
   const indices = new Map(items.map((item, index) => [sidebarListItemId(item), index]));
+  const controlsIndex = items.findIndex(
+    (item) => item.kind === "marker" && item.marker === "controls",
+  );
+  const spacePins = new Set(
+    controlsIndex < 0
+      ? []
+      : items
+          .slice(controlsIndex + 1)
+          .flatMap((item) =>
+            item.kind === "thread" && item.section === "pinned" ? [item.key] : [],
+          ),
+  );
   let previous: Pick<Layout, "rects" | "activeIndex" | "overIndex"> | undefined;
   let transforms: ReturnType<SortingStrategy>[] | null = [];
 
@@ -177,7 +214,9 @@ export function createSidebarSortingStrategy(input: {
       else marker(`${name}-placeholder`);
     };
     marker("pinned-header");
-    projected.push(...groups.pinned);
+    projected.push(...groups.pinned.filter((item) => !spacePins.has(item.key)));
+    if (controlsIndex >= 0) marker("controls");
+    projected.push(...groups.pinned.filter((item) => spacePins.has(item.key)));
     marker("pinned-divider");
     section("active");
     if (

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { ProfileOptions } from "./ProfileOptions";
-import { SPACE_THREAD_DRAG } from "./Spaces";
+import { useDroppable } from "@dnd-kit/core";
 import type { Profile } from "@t3tools/contracts";
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
@@ -22,7 +22,7 @@ const PROFILE_DOT_CLASS_NAMES: Record<Profile["color"], string> = {
 };
 
 export interface ProfileStripProps {
-  onThreadDrop?: ((keys: string[]) => void) | undefined;
+  dropDisabled: boolean;
   profiles: ReadonlyArray<Profile>;
   activeProfileId: string | null;
   onSelect: (id: string) => void;
@@ -41,10 +41,15 @@ export function ProfileStrip({
   profiles,
   activeProfileId,
   onSelect,
-  onThreadDrop,
+  dropDisabled,
 }: ProfileStripProps) {
   const selectedId =
     profiles.find((profile) => profile.id === activeProfileId)?.id ?? profiles[0]?.id;
+  const { setNodeRef, isOver } = useDroppable({
+    id: JSON.stringify(["profile-root", selectedId]),
+    // Keep blocked targets measurable so a drop cannot fall through to Pins.
+    data: { kind: "space", profileId: selectedId, spaceId: null, acceptsThreads: !dropDisabled },
+  });
   const selectedButton = useRef<HTMLButtonElement>(null);
   const strip = useRef<HTMLDivElement>(null);
   const revealSelected = useCallback(() => {
@@ -61,26 +66,13 @@ export function ProfileStrip({
   }, [selectedId, revealSelected]);
   return (
     <div
-      className="flex items-center gap-1 px-1 pb-1 pt-0.5"
+      ref={setNodeRef}
+      className={cn(
+        "flex items-center gap-1 rounded-lg px-1 pb-1 pt-0.5",
+        isOver && "ring-2 ring-inset ring-sidebar-foreground/50",
+      )}
       aria-label="Profiles"
       data-slot="profile-strip"
-      onDragOver={(event) => {
-        if (onThreadDrop && event.dataTransfer.types.includes(SPACE_THREAD_DRAG))
-          event.preventDefault();
-      }}
-      onDrop={(event) => {
-        if (!onThreadDrop) return;
-        const raw = event.dataTransfer.getData(SPACE_THREAD_DRAG);
-        if (!raw) return;
-        event.preventDefault();
-        try {
-          const keys: unknown = JSON.parse(raw);
-          if (Array.isArray(keys) && keys.every((key): key is string => typeof key === "string"))
-            onThreadDrop(keys);
-        } catch {
-          /* Ignore unrelated drag payloads. */
-        }
-      }}
     >
       <div
         ref={strip}

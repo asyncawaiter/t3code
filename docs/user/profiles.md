@@ -108,8 +108,12 @@ Use the tag button on a chat row or its **Move to space** context-menu action to
 a space. These work in All as well as a specific profile. Choose **Default** to
 remove a space assignment. If the project has no profile, the dialog lets you choose one
 first and explains that moving a project changes the profile of all its chats.
-On web and desktop, drag the tag icon to a named Space tile to assign selected chats.
-Drag the row itself to reorder it or move it between Pinned, Active, and Settled.
+On web and desktop, drag a chat row or its tag icon to a named Space tile to assign it.
+A floating card follows the pointer and identifies the chat or Space being moved.
+If the dragged chat is selected, all selected chats move together. They must belong
+to the target Space's profile. Drop on Default or the selected profile strip to remove
+the Space assignment. Within the chat list, drag rows to reorder them or move them
+between Pinned, Active, and Settled.
 The **Pin** submenu offers one scope at a time: **Global** appears across profiles and
 spaces, **Profile** stays above the owning profile's grid, and **Space** stays in the
 chat's assigned space. Only that space is offered. Pinning never moves a chat.
@@ -141,6 +145,15 @@ The options button remains available before you create your first profile.
 Use the plus on a Space tile to preview where a new chat will run. The compact
 menu shows the device and folder. Click that destination to open a fresh draft
 in the Space; no message is sent automatically.
+
+On web and desktop, the plus and overflow menu remain available when the shared profile
+source is unavailable. They explain which source to connect or update, or where to resolve
+conflicting sources. Saving changes and opening a chat in the Space require that source,
+because the new chat's Space assignment is saved there. The controls become available
+again when the source is ready.
+
+On mobile, tapping a blocked Space action explains the restriction and offers the shared
+source chooser. Saved destinations can still be previewed while the source is unavailable.
 
 Choose any connected device, then search saved projects or browse its folders. The
 folder does not need to be an existing project. **Save & open chat** saves the shortcut

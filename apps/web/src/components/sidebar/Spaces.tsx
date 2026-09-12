@@ -3,6 +3,9 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { SpaceLaunch } from "./SpaceLaunch";
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
+import { useDroppable } from "@dnd-kit/core";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { PlusIcon, CheckIcon, XIcon, PencilIcon, MoreHorizontalIcon } from "lucide-react";
 import { type Profile, type ProfileSpace, ALL_PROFILE_ID } from "@t3tools/contracts";
 import { Button } from "../ui/button";
@@ -10,9 +13,7 @@ import { Input } from "../ui/input";
 import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { randomUUID, cn } from "../../lib/utils";
-
-export const SPACE_THREAD_DRAG = "application/x-t3-space-thread";
-const SPACE_DRAG = "application/x-t3-space";
+import { spaceDragId } from "./Spaces.logic";
 
 function SpaceNameEditor({
   initialName,
@@ -160,18 +161,34 @@ export function SpaceToolbar({
 }
 
 export function DefaultSpaceTile({
+  profileId,
+  dropDisabled,
   count,
   selected,
   onSelect,
   onNewChat,
 }: {
+  profileId: string;
+  dropDisabled: boolean;
   count: number;
   selected: boolean;
   onSelect: () => void;
   onNewChat: () => void;
 }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: spaceDragId(profileId, null),
+    data: { kind: "space", profileId, spaceId: null },
+    disabled: dropDisabled,
+  });
   return (
-    <li className="relative h-18 min-w-0 list-none" data-thread-selection-safe>
+    <li
+      ref={setNodeRef}
+      className={cn(
+        "relative h-18 min-w-0 list-none rounded-xl",
+        isOver && "ring-2 ring-sidebar-foreground/50",
+      )}
+      data-thread-selection-safe
+    >
       <button
         type="button"
         aria-label="Open Default space"
@@ -184,9 +201,9 @@ export function DefaultSpaceTile({
             : "bg-sidebar-foreground/5 text-sidebar-foreground hover:bg-sidebar-foreground/10",
         )}
       >
-        <span className="text-xs font-medium leading-4">Default</span>
-        <span className="text-[10px] leading-3.5 opacity-75">Unassigned chats</span>
-        <span className="mt-auto text-[10px] opacity-75">
+        <span className="w-full truncate text-xs font-medium leading-4">Default</span>
+        <span className="w-full truncate text-[10px] leading-3.5 opacity-75">Unassigned chats</span>
+        <span className="mt-auto w-full truncate pr-7 text-[10px] opacity-75">
           {count} {count === 1 ? "chat" : "chats"}
         </span>
       </button>
@@ -195,7 +212,11 @@ export function DefaultSpaceTile({
         variant="ghost"
         aria-label="New chat in Default"
         onClick={onNewChat}
-        className={cn("absolute bottom-1 right-1", selected && "text-zinc-50 dark:text-zinc-900")}
+        className={cn(
+          "absolute bottom-1 right-1 [--control-icon-color:currentColor]",
+          selected &&
+            "text-zinc-50 hover:bg-white/10 hover:text-zinc-50 dark:text-zinc-900 dark:hover:bg-black/10 dark:hover:text-zinc-900",
+        )}
       >
         <PlusIcon className="size-3.5" />
       </Button>
@@ -212,9 +233,8 @@ export function SpaceTile({
   attention,
   onSelect,
   onChange,
-  onMove,
   onLaunch,
-  disabled,
+  writeBlockReason,
 }: {
   offerSetup?: boolean;
   profile: Profile;
@@ -224,13 +244,19 @@ export function SpaceTile({
   attention: boolean;
   onSelect: () => void;
   onChange: (profile: Profile) => void;
-  onMove: (keys: string[], spaceId: string | null) => void;
   onLaunch: (
     project: ScopedProjectRef,
     defaults: NonNullable<ProfileSpace["newChatDefaults"]>,
   ) => Promise<void>;
-  disabled: boolean;
+  writeBlockReason: string | null;
 }) {
+  const disabled = writeBlockReason !== null;
+  const { setNodeRef, setActivatorNodeRef, listeners, transform, transition, isDragging, isOver } =
+    useSortable({
+      id: spaceDragId(profile.id, space.id),
+      data: { kind: "space", profileId: profile.id, spaceId: space.id, label: space.name },
+      disabled,
+    });
   const draftCount = useComposerDraftStore(
     (store) =>
       Object.entries(store.draftThreadsByThreadKey).filter(
@@ -248,7 +274,6 @@ export function SpaceTile({
   const [launchOpen, setLaunchOpen] = useState(offerSetup);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const spaces = profile.spaces ?? [];
   const index = spaces.findIndex((item) => item.id === space.id);
   const move = (destination: number) => {
@@ -259,48 +284,13 @@ export function SpaceTile({
   };
   return (
     <li
+      ref={setNodeRef}
       className="min-w-0 list-none"
       data-thread-selection-safe
-      onDragOver={(event) => {
-        if (
-          !disabled &&
-          [SPACE_THREAD_DRAG, SPACE_DRAG].some((type) => event.dataTransfer.types.includes(type))
-        ) {
-          event.preventDefault();
-          setDragOver(true);
-        }
-      }}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false);
-      }}
-      onDrop={(event) => {
-        setDragOver(false);
-        if (disabled) return;
-        const source = event.dataTransfer.getData(SPACE_DRAG);
-        const keys = event.dataTransfer.getData(SPACE_THREAD_DRAG);
-        if (!source && !keys) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (source) {
-          const dragged = spaces.find((item) => item.id === source);
-          if (!dragged || dragged.id === space.id) return;
-          const reordered = spaces.filter((item) => item.id !== source);
-          reordered.splice(index, 0, dragged);
-          onChange({ ...profile, spaces: reordered });
-        } else {
-          try {
-            const parsed: unknown = JSON.parse(keys);
-            if (
-              Array.isArray(parsed) &&
-              parsed.every((key): key is string => typeof key === "string")
-            ) {
-              onMove(parsed, space.id);
-              onSelect();
-            }
-          } catch {
-            /* Ignore unrelated drag payloads. */
-          }
-        }
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 20 : undefined,
       }}
     >
       <div
@@ -309,16 +299,12 @@ export function SpaceTile({
           selected
             ? "bg-zinc-700 text-zinc-50 dark:bg-zinc-300 dark:text-zinc-900"
             : "bg-sidebar-foreground/5 text-sidebar-foreground hover:bg-sidebar-foreground/10",
-          dragOver && "ring-2 ring-sidebar-foreground/30",
+          isOver && !isDragging && "ring-2 ring-inset ring-sidebar-foreground/50",
+          isDragging && "opacity-30",
         )}
         onContextMenu={(event) => {
           event.preventDefault();
-          if (!disabled) setMenuOpen(true);
-        }}
-        draggable={!disabled && !renaming}
-        onDragStart={(event) => {
-          event.dataTransfer.setData(SPACE_DRAG, space.id);
-          event.dataTransfer.effectAllowed = "move";
+          setMenuOpen(true);
         }}
       >
         {renaming ? (
@@ -338,8 +324,10 @@ export function SpaceTile({
         ) : (
           <>
             <button
+              ref={setActivatorNodeRef}
+              {...listeners}
               type="button"
-              className="flex h-full w-full flex-col items-start gap-0.5 px-2.5 py-2 pr-6 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+              className="flex h-full w-full touch-none select-none flex-col items-start gap-0.5 px-2.5 py-2 pr-9 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
               aria-label={`Open space ${space.name}`}
               aria-pressed={selected}
               onClick={onSelect}
@@ -392,7 +380,7 @@ export function SpaceTile({
               profile={profile}
               space={space}
               selected={selected}
-              disabled={disabled}
+              writeBlockReason={writeBlockReason}
               onChange={onChange}
               onLaunch={onLaunch}
               open={launchOpen}
@@ -404,10 +392,9 @@ export function SpaceTile({
                   <Button
                     size="icon-xs"
                     variant="ghost"
-                    disabled={disabled}
                     aria-label={`Space actions for ${space.name}`}
                     className={cn(
-                      "absolute right-1 top-1 opacity-75 hover:opacity-100 group-hover/space:opacity-100 focus-visible:opacity-100",
+                      "absolute right-1 top-1 opacity-75 hover:opacity-100 group-hover/space:opacity-100 focus-visible:opacity-100 [--control-icon-color:currentColor]",
                       selected
                         ? "text-zinc-50 hover:bg-white/10 hover:text-zinc-50 dark:text-zinc-900 dark:hover:bg-black/10 dark:hover:text-zinc-900"
                         : "text-sidebar-muted-foreground",
@@ -417,8 +404,17 @@ export function SpaceTile({
               >
                 <MoreHorizontalIcon className="size-3.5" />
               </MenuTrigger>
-              <MenuPopup align="end" className="w-40">
-                <MenuItem className="min-h-7 text-xs" onClick={() => setRenaming(true)}>
+              <MenuPopup align="end" className={disabled ? "w-64" : "w-40"}>
+                {writeBlockReason && (
+                  <p role="status" className="px-2 py-1 text-xs text-muted-foreground">
+                    {writeBlockReason}
+                  </p>
+                )}
+                <MenuItem
+                  className="min-h-7 text-xs"
+                  disabled={disabled}
+                  onClick={() => setRenaming(true)}
+                >
                   <PencilIcon className="size-3" />
                   Rename
                 </MenuItem>
@@ -426,6 +422,7 @@ export function SpaceTile({
                 <MenuItem
                   className="min-h-7 text-xs"
                   variant="destructive"
+                  disabled={disabled}
                   onClick={() =>
                     onChange({ ...profile, spaces: spaces.filter((item) => item.id !== space.id) })
                   }

@@ -3,6 +3,22 @@ import { type Profile, ALL_PROFILE_ID } from "@t3tools/contracts";
 // Control characters cannot occur in real space IDs.
 export const OUTSIDE_SPACES = "\0outside-spaces";
 
+export function spaceDragId(profileId: string, spaceId: string | null) {
+  return JSON.stringify(["space", profileId, spaceId]);
+}
+
+export function getSpaceDragData(data: Record<string, unknown> | undefined) {
+  return data?.kind === "space" &&
+    typeof data.profileId === "string" &&
+    (data.spaceId === null || typeof data.spaceId === "string")
+    ? {
+        profileId: data.profileId,
+        spaceId: data.spaceId,
+        acceptsThreads: data.acceptsThreads !== false,
+      }
+    : null;
+}
+
 export function resolveSidebarSpaceFilter(profile: Profile, storedId: string | null) {
   return storedId === null ||
     storedId === OUTSIDE_SPACES ||

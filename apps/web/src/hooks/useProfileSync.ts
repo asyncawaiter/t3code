@@ -10,15 +10,22 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 
 export function useProfilesLoaded() {
+  return useProfileWriteBlockReason() === null;
+}
+
+export function useProfileWriteBlockReason(): string | null {
   const source = useAtomValue(profileSourceAtom);
   const { environments } = useEnvironments();
-  return (
-    !source.conflict &&
-    source.config?.environment.capabilities.profileSynchronization === true &&
-    environments.some(
-      (env) => env.environmentId === source.sourceId && env.connection.phase === "connected",
-    )
-  );
+  if (source.conflict)
+    return "Devices have conflicting profile sources. Choose one in Settings > General > Profiles.";
+  const environment = environments.find((env) => env.environmentId === source.sourceId);
+  const label = environment?.label ?? "the shared profile source";
+  if (environment?.connection.phase !== "connected")
+    return `Connect ${label} to save Space changes or open a chat in this Space.`;
+  if (!source.config) return `Loading profiles from ${label}.`;
+  if (source.config.environment.capabilities.profileSynchronization !== true)
+    return `Update ${label} to a version that supports shared profiles.`;
+  return null;
 }
 
 export function useSaveProfiles() {
