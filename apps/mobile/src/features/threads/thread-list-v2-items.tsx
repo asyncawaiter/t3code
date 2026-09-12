@@ -1,3 +1,4 @@
+import { useProfiles } from "../../state/profiles";
 import { useThreadOrganization } from "../home/useThreadOrganization";
 import type {
   EnvironmentProject,
@@ -184,6 +185,24 @@ export const ThreadListV2SnoozedShelfHeader = memo(function ThreadListV2SnoozedS
     </Pressable>
   );
 });
+
+export function ThreadListV2PinnedHeader(props: { readonly pane?: "screen" | "sidebar" }) {
+  const { profile } = useProfiles();
+  return (
+    <View
+      accessibilityRole="header"
+      className={cn(
+        "mb-1.5 mt-2 flex-row items-center gap-2.5",
+        props.pane === "sidebar" ? "px-3" : "px-5",
+      )}
+    >
+      <Text className="text-xs font-t3-medium text-foreground-tertiary">
+        Pinned ({profile.name})
+      </Text>
+      <View className="h-px flex-1 bg-border" />
+    </View>
+  );
+}
 
 export const ThreadListV2SettledShelfHeader = memo(function ThreadListV2SettledShelfHeader(props: {
   readonly count: number;

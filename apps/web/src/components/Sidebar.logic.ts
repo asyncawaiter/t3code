@@ -99,7 +99,9 @@ export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
 const SIDEBAR_MARKER_PREFIX = "sidebar-marker-";
 
 export type SidebarListMarker =
-  /** The Space grid, project filter, and drafts keep their measured height. */
+  /** The Space grid stays above all pinned and active chats. */
+  | "spaces"
+  /** The project filter and drafts keep their measured height. */
   | "controls"
   /** The top boundary is also a landing target when there are no pins. */
   | "pinned-header"
@@ -167,7 +169,7 @@ export function resolveSidebarDropTarget(
   const activeIndex = items.findIndex((item) => sidebarListItemId(item) === activeKey);
   const overIndex = items.findIndex((item) => sidebarListItemId(item) === overId);
   if (activeIndex === -1 || overIndex === -1 || items[activeIndex]?.kind !== "thread") return null;
-  if (overId === sidebarMarkerId("controls")) return null;
+  if (overId === sidebarMarkerId("controls") || overId === sidebarMarkerId("spaces")) return null;
   const active = items[activeIndex];
   const over = items[overIndex];
   const moved = items.filter((_, index) => index !== activeIndex);

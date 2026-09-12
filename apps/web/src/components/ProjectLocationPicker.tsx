@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   FolderOpenIcon,
   MonitorIcon,
+  WifiOffIcon,
   SearchIcon,
 } from "lucide-react";
 import {
@@ -98,10 +99,12 @@ export function ProjectLocationPicker({
     setQuery("");
   };
   return (
-    <div className="overflow-hidden rounded-lg border border-border/60 bg-background/50">
-      <div className="flex items-center gap-2 border-b border-border/50 px-2 py-1">
-        <MonitorIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="text-[11px] text-muted-foreground">Device</span>
+    <div className="overflow-hidden rounded-lg border border-border bg-background/50">
+      <div className="space-y-1.5 border-b border-border/60 p-3">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <MonitorIcon className="size-3.5" />
+          <span>Device</span>
+        </div>
         <Select
           value={chosenId}
           onValueChange={(id) => {
@@ -114,12 +117,7 @@ export function ProjectLocationPicker({
           }}
           disabled={disabled}
         >
-          <SelectTrigger
-            size="compact"
-            variant="ghost"
-            className="ml-auto min-w-0 max-w-[75%] text-xs sm:text-xs"
-            aria-label="Device"
-          >
+          <SelectTrigger className="w-full min-w-0" aria-label="Device">
             <SelectValue>{environment?.label ?? "Choose device"}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
@@ -144,21 +142,21 @@ export function ProjectLocationPicker({
             setDeviceId(value.environmentId);
             browse(ensureBrowseDirectoryPath(value.workspaceRoot));
           }}
-          className="flex w-full min-w-0 items-center gap-2 px-2.5 py-2.5 text-left text-xs hover:bg-muted"
+          className="flex w-full min-w-0 items-center gap-2.5 p-3 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-60"
           aria-label="Change folder"
         >
           <FolderOpenIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <Tooltip>
-            <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
+            <TooltipTrigger render={<span className="min-w-0 flex-1 truncate font-mono" />}>
               {value.workspaceRoot}
             </TooltipTrigger>
             <TooltipPopup>{value.workspaceRoot}</TooltipPopup>
           </Tooltip>
-          <span className="text-[10px] text-muted-foreground">Change</span>
+          <span className="shrink-0 text-xs text-muted-foreground">Change</span>
         </button>
       ) : chosenId && connected ? (
         <div>
-          <div className="flex items-center gap-1.5 border-b border-border/50 px-2.5">
+          <div className="flex items-center gap-2 border-b border-border/60 px-3">
             <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
             <Input
               size="compact"
@@ -182,7 +180,7 @@ export function ProjectLocationPicker({
               }}
             />
           </div>
-          <div className="h-36 overflow-y-auto overscroll-contain p-1">
+          <div className="h-40 overflow-y-auto overscroll-contain p-1.5">
             {path.isBrowsing ? (
               <>
                 {path.canBrowseUp && (
@@ -210,7 +208,7 @@ export function ProjectLocationPicker({
                       type="button"
                       disabled={disabled}
                       onClick={() => browse(ensureBrowseDirectoryPath(entry.fullPath))}
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                     >
                       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                       <ChevronRightIcon className="size-3 text-muted-foreground" />
@@ -229,13 +227,13 @@ export function ProjectLocationPicker({
                     key={project.id}
                     disabled={disabled}
                     onClick={() => choose(project.workspaceRoot)}
-                    className="block w-full rounded-md px-2 py-1 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                    className="block w-full rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                   >
                     <span className="block truncate text-xs font-medium">{project.title}</span>
                     <Tooltip>
                       <TooltipTrigger
                         render={
-                          <span className="block truncate text-[10px] leading-4 text-muted-foreground" />
+                          <span className="block truncate font-mono text-xs leading-5 text-muted-foreground" />
                         }
                       >
                         {project.workspaceRoot}
@@ -247,12 +245,12 @@ export function ProjectLocationPicker({
               </>
             )}
           </div>
-          <div className="flex min-h-8 items-center gap-2 border-t border-border/50 px-2 py-1">
+          <div className="flex min-h-9 items-center gap-2 border-t border-border/60 px-3 py-1.5">
             {path.isBrowsing ? (
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" />
                   }
                 >
                   {value ? `Selected: ${value.workspaceRoot}` : "Navigate to a folder to select it"}
@@ -275,12 +273,19 @@ export function ProjectLocationPicker({
         </div>
       ) : null}
       {environment && !connected && (
-        <p role="alert" className="text-xs text-destructive">
-          {environment.label} is offline. Reconnect it or choose another device.
-        </p>
+        <div
+          role="status"
+          className="flex items-start gap-2 border-t border-border/60 bg-warning-surface px-3 py-2.5 text-xs leading-relaxed text-warning-foreground"
+        >
+          <WifiOffIcon className="mt-0.5 size-3.5 shrink-0" />
+          <div>
+            <p className="font-medium">Device offline</p>
+            <p>Reconnect this device or choose another.</p>
+          </div>
+        </div>
       )}
       {environments.length === 0 && (
-        <p className="text-xs text-muted-foreground">
+        <p className="px-3 py-3 text-xs leading-relaxed text-muted-foreground">
           Connect a device in Settings to choose a folder.
         </p>
       )}

@@ -48,6 +48,7 @@ import {
 } from "../threads/thread-list-items";
 import {
   ThreadListV2PendingRow,
+  ThreadListV2PinnedHeader,
   ThreadListV2DeviceHeader,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
@@ -767,6 +768,7 @@ export function HomeScreen(props: HomeScreenProps) {
     () =>
       buildThreadListV2ListItems({
         items: threadListV2Layout.items,
+        profiles: organization.profiles,
         environmentLabel: (id) => props.savedConnectionsById[id]?.environmentLabel ?? "Device",
         pendingTasks: v2PendingTasks,
         snoozedCount: threadListV2Layout.snoozedCount,
@@ -784,6 +786,7 @@ export function HomeScreen(props: HomeScreenProps) {
       threadListV2Layout,
       v2PendingTasks,
       props.savedConnectionsById,
+      organization.profiles,
     ],
   );
 
@@ -793,6 +796,7 @@ export function HomeScreen(props: HomeScreenProps) {
       const showTrailingDivider =
         nextItem?.type === "v2-thread" ||
         (nextItem?.type === "v2-pending" && !nextItem.showPendingDivider);
+      if (item.type === "v2-pinned-header") return <ThreadListV2PinnedHeader />;
       if (item.type === "v2-device") {
         return (
           <ThreadListV2DeviceHeader

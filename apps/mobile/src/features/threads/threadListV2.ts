@@ -14,7 +14,12 @@ import {
   resolveSettledThreadTimestamp,
   sortPinnedThreadsByOrderKey,
 } from "@t3tools/client-runtime/state/thread-sort";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import {
+  indexProfilePins,
+  type Profile,
+  type EnvironmentId,
+  type ProjectId,
+} from "@t3tools/contracts";
 
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 
@@ -278,6 +283,7 @@ export interface ThreadListV2DeviceListItem {
 }
 
 export type ThreadListV2ListItem =
+  | { readonly type: "v2-pinned-header"; readonly key: "v2-pinned-header" }
   | ThreadListV2DeviceListItem
   | ThreadListV2ThreadListItem
   | ThreadListV2PendingListItem
@@ -290,6 +296,7 @@ export type ThreadListV2ListItem =
  * reachable without competing with either the inbox or settled history.
  */
 export function buildThreadListV2ListItems(input: {
+  readonly profiles?: readonly Profile[];
   readonly items: ReadonlyArray<ThreadListV2Item>;
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly environmentLabel?: (environmentId: EnvironmentId) => string;
@@ -341,19 +348,30 @@ export function buildThreadListV2ListItems(input: {
         left.label.localeCompare(right.label) ||
         left.environmentId.localeCompare(right.environmentId),
     );
-  const result: ThreadListV2ListItem[] = cards.filter((row) => row.item.pinned);
+  const pinIndex = indexProfilePins(input.profiles ?? []);
+  const pinned = cards.filter((row) => row.item.pinned);
+  const spacePins = pinned.filter(
+    (row) => pinIndex.get(`${row.item.thread.environmentId}:${row.item.thread.id}`)?.spaceId,
+  );
+  const profilePins = pinned.filter(
+    (row) => !pinIndex.get(`${row.item.thread.environmentId}:${row.item.thread.id}`)?.spaceId,
+  );
+  const result: ThreadListV2ListItem[] = [
+    ...(profilePins.length > 0
+      ? [{ type: "v2-pinned-header" as const, key: "v2-pinned-header" as const }]
+      : []),
+    ...profilePins,
+    ...spacePins,
+  ];
   for (const group of groups) {
-    if (groups.length > 1)
-      result.push({
-        type: "v2-device",
-        key: `v2-device:${group.environmentId}`,
-        environmentId: group.environmentId,
-        label: group.label,
-        count: group.rows.length,
-      });
-    result.push(
-      ...group.rows.map((row) => (groups.length > 1 ? { ...row, hideEnvironment: true } : row)),
-    );
+    result.push({
+      type: "v2-device",
+      key: `v2-device:${group.environmentId}`,
+      environmentId: group.environmentId,
+      label: group.label,
+      count: group.rows.length,
+    });
+    result.push(...group.rows.map((row) => ({ ...row, hideEnvironment: true })));
   }
   result.push(...pendingItems);
   if (snoozedShelfHeaderIndex !== null && snoozedCount > 0) {

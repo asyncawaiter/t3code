@@ -73,6 +73,7 @@ import {
 } from "./thread-list-items";
 import {
   ThreadListV2PendingRow,
+  ThreadListV2PinnedHeader,
   ThreadListV2DeviceHeader,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
@@ -147,6 +148,7 @@ function ThreadNavigationSidebarPane(
 ) {
   const insets = useSafeAreaInsets();
   const { projects, threads, pendingTasks } = useProfileThreads();
+  const organization = useProfiles();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const searchInputRef = useRef<TextInput>(null);
@@ -596,6 +598,7 @@ function ThreadNavigationSidebarPane(
     );
     const items: SidebarListItem[] = buildThreadListV2ListItems({
       items: threadListV2Layout.items,
+      profiles: organization.profiles,
       environmentLabel: (id) => savedConnectionsById[id]?.environmentLabel ?? "Device",
       pendingTasks: v2PendingTasks,
       snoozedCount: threadListV2Layout.snoozedCount,
@@ -616,6 +619,7 @@ function ThreadNavigationSidebarPane(
     return items;
   }, [
     listLayout.items,
+    organization.profiles,
     savedConnectionsById,
     nowMinute,
     options.selectedEnvironmentId,
@@ -834,6 +838,8 @@ function ThreadNavigationSidebarPane(
   );
   const sidebarItemsAreEqual = useCallback(
     (previous: SidebarListItem, item: SidebarListItem): boolean => {
+      if (previous.type === "v2-pinned-header" || item.type === "v2-pinned-header")
+        return previous.type === item.type;
       if (previous.type === "v2-thread" && item.type === "v2-thread") {
         return (
           previous.key === item.key &&
@@ -907,6 +913,8 @@ function ThreadNavigationSidebarPane(
   const renderListItem = useCallback(
     ({ item }: { readonly item: SidebarListItem }) => {
       switch (item.type) {
+        case "v2-pinned-header":
+          return <ThreadListV2PinnedHeader pane="sidebar" />;
         case "v2-device":
           return (
             <ThreadListV2DeviceHeader
@@ -1412,5 +1420,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
 });
-import { useProfileThreads, profileRevealAtom, profileSelectionAtom } from "../../state/profiles";
+import {
+  useProfiles,
+  useProfileThreads,
+  profileRevealAtom,
+  profileSelectionAtom,
+} from "../../state/profiles";
 import { ProfilesPanel } from "../home/ProfilesPanel";

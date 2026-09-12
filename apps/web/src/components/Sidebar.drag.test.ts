@@ -940,7 +940,38 @@ it("keeps device headers above their rows when removing the other device's last 
     sidebarMarkerId("settled-header"),
   );
   expect(moved.get("sidebar-marker-device-a")?.scaleY).toBe(0);
-  expect(moved.get("sidebar-marker-device-b")?.scaleY).toBe(0);
+  expect(moved.get("sidebar-marker-device-b")?.scaleY).toBe(1);
   const base = layout(items, "a", sidebarMarkerId("settled-header"));
-  expect(base.rects[5]!.top + moved.get("b")!.y).toBe(base.rects[0]!.top + 2);
+  expect(base.rects[5]!.top + moved.get("b")!.y).toBe(base.rects[0]!.top + 31);
+});
+
+it("keeps Spaces above the visible profile Pinned header during reordering", () => {
+  const items = [
+    marker("spaces"),
+    pinnedHeader,
+    thread("profile-pin", "pinned"),
+    marker("controls"),
+    thread("space-pin", "pinned"),
+    divider,
+    thread("a", "active"),
+    thread("b", "active"),
+    settledHeader,
+  ];
+  const args = layout(items, "a", "b");
+  args.rects[1]!.height = 32;
+  args.rects[1]!.bottom += 32;
+  for (const rect of args.rects.slice(2)) {
+    rect.top += 32;
+    rect.bottom += 32;
+  }
+  const strategy = createSidebarSortingStrategy({
+    items,
+    settledOrder: [],
+    settledExpanded: true,
+    boundaryLabelHeight: 24,
+  });
+  expect(strategy({ ...args, index: 0 })).toEqual(stationary);
+  expect(strategy({ ...args, index: 1 })).toEqual(stationary);
+  expect(strategy({ ...args, index: 2 })).toEqual(stationary);
+  expect(resolveSidebarDropTarget(items, "profile-pin", sidebarMarkerId("spaces"))).toBeNull();
 });

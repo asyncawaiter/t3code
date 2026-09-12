@@ -40,7 +40,13 @@ export function withSidebarSpaceTargets(
       });
     }
     if (target) return target.acceptsThreads && canAssign(target.profileId) ? hits : [];
-    if (pointerWithin(args).some((collision) => collision.id === sidebarMarkerId("controls")))
+    if (
+      pointerWithin(args).some(
+        (collision) =>
+          collision.id === sidebarMarkerId("controls") ||
+          collision.id === sidebarMarkerId("spaces"),
+      )
+    )
       return [];
     return threadCollision({
       ...args,
@@ -229,6 +235,7 @@ export function createSidebarSortingStrategy(input: {
       if (groups[name].length > 0) projected.push(...groups[name]);
       else marker(`${name}-placeholder`);
     };
+    if (items.some((item) => item.kind === "marker" && item.marker === "spaces")) marker("spaces");
     marker("pinned-header");
     projected.push(...groups.pinned.filter((item) => !spacePins.has(item.key)));
     if (controlsIndex >= 0) marker("controls");
@@ -236,7 +243,6 @@ export function createSidebarSortingStrategy(input: {
     marker("pinned-divider");
     if (groups.active.some((item) => item.environmentId !== undefined)) {
       const activeGroups = Arr.groupBy(groups.active, (item) => item.environmentId ?? "");
-      const deviceCount = Object.keys(activeGroups).length;
       const order = [
         ...new Set([
           ...(input.deviceOrder ?? []),
@@ -247,7 +253,7 @@ export function createSidebarSortingStrategy(input: {
       for (const environmentId of order) {
         const rows = activeGroups[environmentId];
         if (!rows) continue;
-        if (deviceCount > 1) projected.push({ kind: "device", environmentId });
+        projected.push({ kind: "device", environmentId });
         projected.push(...rows);
       }
       if (groups.active.length === 0) marker("active-placeholder");
@@ -278,7 +284,7 @@ export function createSidebarSortingStrategy(input: {
       const height =
         item.kind === "marker" &&
         (item.marker === "pinned-header" || item.marker === "pinned-divider")
-          ? labelHeight
+          ? Math.max(labelHeight, rect?.height ?? 0)
           : item.kind === "marker" && item.marker.endsWith("placeholder")
             ? slimHeight
             : moved

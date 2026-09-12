@@ -103,13 +103,13 @@ On web and desktop, the filter button beside Search lists projects in the select
 Choosing a project shows a **Project: name** chip above the chats. Clear the chip to restore
 all projects. Choosing a Space or switching profiles clears that project filter.
 
-When active chats span multiple devices, device headers group them within the selected
-profile or Space. Each header shows the device name, chat count, and connection status.
-A view with one active device keeps the simpler list. Pinned, snoozed, and settled chats
+Active chats are grouped by device within the selected profile or Space, even when
+there is only one device. Each header shows the device name, chat count, and connection
+status. Pinned, snoozed, and settled chats
 keep their existing sections. Space tiles show names and counts; the plus-button preview
 shows the saved device and folder for new chats.
 Assigning a project to a profile does not assign its chats to a same-named space.
-Profile pins stay above the grid. A dot on a tile indicates work that needs attention.
+Profile pins appear in the **Pinned** section directly below the Space tiles. A dot on a tile indicates work that needs attention.
 
 Use the tag button on a chat row or its **Move to space** context-menu action to choose
 a space. These work in All as well as a specific profile. Choose **Default** to
@@ -122,7 +122,7 @@ to the target Space's profile. Drop on Default or the selected profile strip to 
 the Space assignment. Within the chat list, drag rows to reorder them or move them
 between Pinned, Active, and Settled.
 The **Pin** submenu offers one scope at a time: **Global** appears across profiles and
-spaces, **Profile** stays above the owning profile's grid, and **Space** stays in the
+spaces, **Profile** stays in the Pinned section below the owning profile's Space tiles, and **Space** stays in the
 chat's assigned space. Only that space is offered. Pinning never moves a chat.
 Chats outside spaces can use Global or Profile. Removing a space assignment returns
 its space pin to the profile level. **Unpin** keeps the chat's placement.

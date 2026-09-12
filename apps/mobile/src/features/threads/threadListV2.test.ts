@@ -970,9 +970,11 @@ describe("buildThreadListV2ListItems", () => {
             ? item.item.thread.id
             : item.type === "v2-snoozed-shelf"
               ? "snoozed-shelf"
-              : "settled-shelf",
+              : item.type === "v2-device"
+                ? "device"
+                : "settled-shelf",
       ),
-    ).toEqual(["active", "queued-1", "queued-2", "settled-shelf", "settled"]);
+    ).toEqual(["device", "active", "queued-1", "queued-2", "settled-shelf", "settled"]);
     // Only the leading queued row labels the section, exactly like Settled.
     expect(
       items.filter((item) => item.type === "v2-pending" && item.showPendingDivider),
@@ -991,7 +993,7 @@ describe("buildThreadListV2ListItems", () => {
       pendingTasks: [makePendingTask("queued-1")],
     });
 
-    expect(items.map((item) => item.type)).toEqual(["v2-thread", "v2-pending"]);
+    expect(items.map((item) => item.type)).toEqual(["v2-device", "v2-thread", "v2-pending"]);
   });
 
   it("keeps the settled shelf between active and settled rows when nothing is queued", () => {
@@ -1003,6 +1005,7 @@ describe("buildThreadListV2ListItems", () => {
     });
 
     expect(items.map((item) => item.key)).toEqual([
+      `v2-device:${environmentId}`,
       `v2-thread:${environmentId}:active`,
       "v2-settled-shelf",
       `v2-thread:${environmentId}:settled`,
@@ -1041,6 +1044,7 @@ describe("buildThreadListV2ListItems", () => {
     });
 
     expect(items.map((item) => item.type)).toEqual([
+      "v2-device",
       "v2-thread",
       "v2-pending",
       "v2-snoozed-shelf",
@@ -1294,6 +1298,57 @@ describe("mobile move availability", () => {
   });
 });
 
+describe("profile pin placement", () => {
+  it("places profile pins under Pinned before space pins without changing their scopes", () => {
+    const spacePin = makeThread({
+      id: ThreadId.make("space-pin"),
+      title: "Space pin",
+      pinnedAt: NOW,
+      pinOrderKey: "a",
+    });
+    const profilePin = makeThread({
+      id: ThreadId.make("profile-pin"),
+      title: "Profile pin",
+      pinnedAt: NOW,
+      pinOrderKey: "b",
+    });
+    const projectKey = `${environmentId}:${spacePin.projectId}`;
+    const spaceThread = { threadKey: `${environmentId}:space-pin`, projectKey };
+    const profiles = [
+      {
+        id: "personal",
+        name: "Personal",
+        color: "gray" as const,
+        projectKeys: [projectKey],
+        spaces: [{ id: "work", name: "Work", threads: [spaceThread] }],
+        threadPins: [
+          { ...spaceThread, spaceId: "work" },
+          { threadKey: `${environmentId}:profile-pin`, projectKey, spaceId: null },
+        ],
+      },
+    ];
+    const layout = buildThreadListV2Items({
+      threads: [spacePin, profilePin],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+    const rows = buildThreadListV2ListItems({ ...layout, profiles, pendingTasks: [] });
+    expect(rows.map((row) => (row.type === "v2-thread" ? row.item.thread.id : row.type))).toEqual([
+      "v2-pinned-header",
+      "profile-pin",
+      "space-pin",
+    ]);
+    const spaceOnly = buildThreadListV2ListItems({
+      ...layout,
+      items: layout.items.filter((row) => row.thread.id === spacePin.id),
+      profiles,
+      pendingTasks: [],
+    });
+    expect(spaceOnly.map((row) => row.type)).toEqual(["v2-thread"]);
+  });
+});
+
 describe("device groups", () => {
   it("groups only active chats, preserving pins, pending tasks, and settled history", () => {
     const remote = EnvironmentId.make("remote");
@@ -1334,6 +1389,7 @@ describe("device groups", () => {
             : item.type,
       ),
     ).toEqual([
+      "v2-pinned-header",
       "pin",
       "Alpha:1",
       "remote",
@@ -1351,11 +1407,9 @@ describe("device groups", () => {
       items: layout.items.filter((item) => item.thread.environmentId !== remote),
       pendingTasks: [],
     });
-    expect(
-      single.some(
-        (item) => item.type === "v2-device" || (item.type === "v2-thread" && item.hideEnvironment),
-      ),
-    ).toBe(false);
+    expect(single.filter((item) => item.type === "v2-device")).toHaveLength(1);
+    expect(single.some((item) => item.type === "v2-thread" && item.hideEnvironment)).toBe(true);
+    expect(buildThreadListV2ListItems({ items: [], pendingTasks: [] })).toEqual([]);
     const ordered = threads.slice(0, 3);
     const assignments = createThreadMovePlanner({
       ordered,

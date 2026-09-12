@@ -25,10 +25,11 @@ import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "../logicalProject";
+import { useEnvironments } from "../state/environments";
 import { useProjects, readProjects } from "../state/entities";
 import { useUiStateStore } from "../uiStateStore";
 import { ProjectLocationPicker } from "./ProjectLocationPicker";
-import { Dialog, DialogPopup, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "./ui/select";
 
@@ -40,6 +41,7 @@ export function ChatCreationDialog() {
 function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const navigate = useNavigate();
   const projects = useProjects();
+  const { environments } = useEnvironments();
   const profiles = usePrimarySettings((settings) => settings.profiles);
   const { activeThread, activeDraftThread, profileProjects, handleNewThread } =
     useHandleNewThread();
@@ -85,6 +87,11 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
       ? { environmentId: initialProject.environmentId, workspaceRoot: initialProject.workspaceRoot }
       : null,
   );
+  const locationAvailable = environments.some(
+    (environment) =>
+      environment.environmentId === location?.environmentId &&
+      environment.connection.phase === "connected",
+  );
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const submitButton = useRef<HTMLButtonElement>(null);
@@ -95,7 +102,7 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const profile = profiles.find((item) => item.id === profileId);
   const close = () => useChatCreationStore.setState({ request: null });
   const submit = async () => {
-    if (!location || pending.current) return;
+    if (!location || !locationAvailable || pending.current) return;
     pending.current = true;
     setBusy(true);
     setError(null);
@@ -198,24 +205,26 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
       }}
     >
       <DialogPopup
-        className="w-[360px] overflow-hidden p-0"
+        className="max-w-md overflow-hidden"
         showCloseButton={!busy}
-        initialFocus={location ? submitButton : undefined}
+        initialFocus={locationAvailable ? submitButton : undefined}
       >
-        <DialogTitle className="px-3.5 pb-2 pt-4 text-sm">
-          {request.draftId ? "Chat location" : "New chat"}
-        </DialogTitle>
+        <DialogHeader className="px-5 pb-4 pt-5">
+          <DialogTitle className="font-sans text-base">
+            {request.draftId ? "Chat location" : "New chat"}
+          </DialogTitle>
+        </DialogHeader>
         <form
-          className="space-y-3"
+          className="min-h-0 overflow-y-auto"
           onSubmit={(event) => {
             event.preventDefault();
             void submit();
           }}
         >
-          <fieldset disabled={busy} className="space-y-2 px-3">
-            <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/50 p-1">
-              <label className="min-w-0 text-[10px] text-muted-foreground">
-                <span className="px-2">Profile</span>
+          <fieldset disabled={busy} className="min-w-0 space-y-4 px-5 pb-5">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">
+                <span>Profile</span>
                 <Select
                   value={profileId}
                   onValueChange={(id) => {
@@ -225,12 +234,7 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                     }
                   }}
                 >
-                  <SelectTrigger
-                    size="compact"
-                    variant="ghost"
-                    className="w-full min-w-0 text-xs sm:text-xs"
-                    aria-label="Chat profile"
-                  >
+                  <SelectTrigger className="w-full min-w-0 font-normal" aria-label="Chat profile">
                     <SelectValue>{profile?.name ?? "All"}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
@@ -243,19 +247,14 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                   </SelectPopup>
                 </Select>
               </label>
-              <label className="min-w-0 text-[10px] text-muted-foreground">
-                <span className="px-2">Space</span>
+              <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">
+                <span>Space</span>
                 <Select
                   value={spaceId ?? "outside"}
                   disabled={!profile}
                   onValueChange={(id) => setSpaceId(id === "outside" ? null : id)}
                 >
-                  <SelectTrigger
-                    size="compact"
-                    variant="ghost"
-                    className="w-full min-w-0 text-xs sm:text-xs"
-                    aria-label="Chat space"
-                  >
+                  <SelectTrigger className="w-full min-w-0 font-normal" aria-label="Chat space">
                     <SelectValue>
                       {profile?.spaces?.find((space) => space.id === spaceId)?.name ?? "Default"}
                     </SelectValue>
@@ -274,24 +273,25 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
             <ProjectLocationPicker value={location} onChange={setLocation} disabled={busy} />
           </fieldset>
           {error && (
-            <p role="alert" className="text-xs text-destructive">
+            <p
+              role="alert"
+              className="mx-5 mb-4 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-relaxed text-destructive"
+            >
               {error}
             </p>
           )}
-          <div className="flex justify-end gap-1.5 border-t border-border/50 bg-muted/30 px-3 py-2">
-            <Button size="compact" variant="ghost" disabled={busy} onClick={close}>
+          <DialogFooter className="px-5 py-3">
+            <Button variant="ghost" disabled={busy} onClick={close}>
               Cancel
             </Button>
             <Button
               ref={submitButton}
-              size="compact"
-              className="border-zinc-700 bg-zinc-700 text-white hover:bg-zinc-600 dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-300"
               type="submit"
-              disabled={!location || busy}
+              disabled={!location || !locationAvailable || busy}
             >
               {busy ? "Opening..." : request.draftId ? "Apply location" : "Open chat"}
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogPopup>
     </Dialog>

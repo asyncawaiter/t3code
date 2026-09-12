@@ -722,13 +722,13 @@ function SidebarDragBoundary(props: {
 
 // Shelf headers stay visible and keep their measured height while dragging.
 function SidebarSectionHeader(props: {
-  marker: "snoozed-header" | "settled-header";
+  marker: "pinned-header" | "snoozed-header" | "settled-header";
   label: string;
   // While dragging, the settled header reads at full strength and takes the
   // accent while the lifted row is over it.
   dragging?: boolean;
   isDropTarget?: boolean;
-  toggle: { expanded: boolean; onToggle: () => void };
+  toggle?: { expanded: boolean; onToggle: () => void };
 }) {
   const snoozed = props.marker === "snoozed-header";
   const className = cn(
@@ -749,13 +749,15 @@ function SidebarSectionHeader(props: {
           props.isDropTarget && "bg-primary/50",
         )}
       />
-      <ChevronDownIcon
-        aria-hidden
-        className={cn(
-          "size-3 shrink-0 transition-transform",
-          props.toggle.expanded && "rotate-180",
-        )}
-      />
+      {props.toggle && (
+        <ChevronDownIcon
+          aria-hidden
+          className={cn(
+            "size-3 shrink-0 transition-transform",
+            props.toggle.expanded && "rotate-180",
+          )}
+        />
+      )}
     </>
   );
   return (
@@ -764,15 +766,21 @@ function SidebarSectionHeader(props: {
       data-testid={`sidebar-${props.marker}`}
       className="mx-0.5 h-8"
     >
-      <button
-        type="button"
-        onClick={props.toggle.onToggle}
-        aria-expanded={props.toggle.expanded}
-        data-testid={`sidebar-${snoozed ? "snoozed" : "settled"}-shelf-toggle`}
-        className={cn(className, "cursor-pointer")}
-      >
-        {content}
-      </button>
+      {props.toggle ? (
+        <button
+          type="button"
+          onClick={props.toggle.onToggle}
+          aria-expanded={props.toggle.expanded}
+          data-testid={`sidebar-${snoozed ? "snoozed" : "settled"}-shelf-toggle`}
+          className={cn(className, "cursor-pointer")}
+        >
+          {content}
+        </button>
+      ) : (
+        <div role="heading" aria-level={3} className={className}>
+          {content}
+        </div>
+      )}
     </SortableSidebarMarker>
   );
 }
@@ -2906,7 +2914,6 @@ export default function Sidebar() {
     () => activeDeviceGroups.flatMap(([, rows]) => rows),
     [activeDeviceGroups],
   );
-  const showDeviceGroups = activeDeviceGroups.length > 1;
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3567,9 +3574,15 @@ export default function Sidebar() {
         settledThreads.length ===
       0
     ) {
-      return [{ kind: "marker", marker: "controls" }];
+      return [
+        { kind: "marker", marker: "spaces" },
+        { kind: "marker", marker: "controls" },
+      ];
     }
-    const items: SidebarListItem[] = [{ kind: "marker", marker: "pinned-header" }];
+    const items: SidebarListItem[] = [
+      { kind: "marker", marker: "spaces" },
+      { kind: "marker", marker: "pinned-header" },
+    ];
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     const controlsIndex = pinnedRows.findIndex(
       (item) => item.kind === "thread" && pinIndex.get(item.key)?.spaceId,
@@ -3583,7 +3596,7 @@ export default function Sidebar() {
     items.push({ kind: "marker", marker: "pinned-divider" });
     items.push({ kind: "marker", marker: "active-placeholder" });
     for (const [environmentId, rows] of activeDeviceGroups) {
-      if (showDeviceGroups) items.push({ kind: "device", environmentId });
+      items.push({ kind: "device", environmentId });
       items.push(...rowsOf(rows, "active"));
     }
     if (snoozedThreads.length > 0) {
@@ -3598,7 +3611,6 @@ export default function Sidebar() {
   }, [
     activeThreads,
     activeDeviceGroups,
-    showDeviceGroups,
     pinnedThreads,
     pinIndex,
     renderedSettledThreads,
@@ -5325,7 +5337,7 @@ export default function Sidebar() {
                             jumpLabel={
                               showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
-                            hideEnvironment={section === "active" && showDeviceGroups}
+                            hideEnvironment={section === "active"}
                             currentEnvironmentId={primaryEnvironmentId}
                             environmentLabel={
                               environmentLabelById.get(thread.environmentId) ?? null
@@ -5513,6 +5525,7 @@ export default function Sidebar() {
                           </SortableContext>
                         </li>,
                       );
+                      const spaceTiles = items.splice(0);
                       if (projectFilterChip)
                         items.push(
                           <li key="project-filter" className="mb-2 list-none">
@@ -5576,6 +5589,13 @@ export default function Sidebar() {
                           continue;
                         }
                         switch (item.marker) {
+                          case "spaces":
+                            items.push(
+                              <SortableSidebarMarker key="spaces" marker="spaces">
+                                <ul className="flex flex-col gap-px">{spaceTiles}</ul>
+                              </SortableSidebarMarker>,
+                            );
+                            break;
                           case "controls":
                             items.push(
                               <SortableSidebarMarker key="controls" marker="controls">
@@ -5585,13 +5605,30 @@ export default function Sidebar() {
                             break;
                           case "pinned-header":
                             items.push(
-                              <SidebarDragBoundary
-                                key="pinned-header"
-                                marker="pinned-header"
-                                label="Pinned"
-                                visible={from !== null}
-                                isDropTarget={dragTargetSection === "pinned"}
-                              />,
+                              pinnedThreads.some(
+                                (thread) =>
+                                  !pinIndex.get(
+                                    scopedThreadKey(
+                                      scopeThreadRef(thread.environmentId, thread.id),
+                                    ),
+                                  )?.spaceId,
+                              ) ? (
+                                <SidebarSectionHeader
+                                  key="pinned-header"
+                                  marker="pinned-header"
+                                  label={`Pinned (${activeProfile.name})`}
+                                  dragging={from !== null}
+                                  isDropTarget={dragTargetSection === "pinned"}
+                                />
+                              ) : (
+                                <SidebarDragBoundary
+                                  key="pinned-header"
+                                  marker="pinned-header"
+                                  label="Pinned"
+                                  visible={from !== null}
+                                  isDropTarget={dragTargetSection === "pinned"}
+                                />
+                              ),
                             );
                             break;
                           case "pinned-divider":
