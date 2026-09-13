@@ -1,7 +1,20 @@
+import type { ModelFavorite } from "@t3tools/contracts";
+import {
+  modelFavoriteKey,
+  modelFavoriteOptions,
+  modelFavoriteLabel,
+  modelFavoriteUnavailable,
+} from "../../modelFavorites";
+import { getProviderModelCapabilities } from "../../providerModels";
+import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
+import type {
+  EnvironmentId as FavoriteEnvironmentId,
+  ProviderOptionSelection,
+} from "@t3tools/contracts";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
   type ProviderInstanceId,
-  type ProviderDriverKind,
+  ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
@@ -16,7 +29,6 @@ import {
   modelPickerLegacySectionKey,
   modelPickerModelKey,
   parseModelPickerLegacySectionKey,
-  parseModelPickerModelKey,
 } from "./modelPickerKeys";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import {
@@ -48,6 +60,9 @@ import {
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 
 type ModelPickerItem = {
+  key: string;
+  favorite?: ModelFavorite;
+  disabledReason?: string | null;
   slug: string;
   name: string;
   shortName?: string;
@@ -121,6 +136,8 @@ function ModelListSeparator() {
 
 export const ModelPickerContent = memo(function ModelPickerContent(props: {
   /** The instance currently selected in the composer (combobox "value"). */
+  environmentId?: FavoriteEnvironmentId;
+  modelOptions?: ReadonlyArray<ProviderOptionSelection> | undefined;
   activeInstanceId: ProviderInstanceId;
   model: string;
   /**
@@ -150,7 +167,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onRequestClose?: () => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
-  onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  onInstanceModelChange: (
+    instanceId: ProviderInstanceId,
+    model: string,
+    options?: ReadonlyArray<ProviderOptionSelection>,
+  ) => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -165,7 +186,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const modelListRef = useRef<LegendListRef | null>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
-  const favorites = useClientSettings((s) => s.favorites ?? []);
+  const allFavorites = useClientSettings((s) => s.favorites ?? []);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = props.environmentId ?? primaryEnvironmentId;
+  const environment = useEnvironment(environmentId);
+  const favorites = useMemo(
+    () =>
+      allFavorites.filter(
+        (favorite) => !favorite.environmentId || favorite.environmentId === environmentId,
+      ),
+    [allFavorites, environmentId],
+  );
   const activeEntry = props.instanceEntries.find(
     (entry) => entry.instanceId === props.activeInstanceId,
   );
@@ -199,11 +230,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     );
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
     () => {
-      if (
-        props.lockedProvider !== null ||
-        activeInstanceHasSelectableUnavailableModel ||
-        activeInstanceNeedsSetup
-      ) {
+      if (activeInstanceHasSelectableUnavailableModel || activeInstanceNeedsSetup) {
         // Keep the active instance visible when it is locked or needs setup.
         return props.activeInstanceId;
       }
@@ -328,6 +355,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           continue;
         }
         out.push({
+          key: modelPickerModelKey(instanceId, model.slug),
           slug: model.slug,
           name: model.name,
           ...(model.shortName ? { shortName: model.shortName } : {}),
@@ -337,7 +365,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
-          instanceDisplayName: entry.displayName,
+          instanceDisplayName: entry.snapshot.auth.email ?? entry.displayName,
           ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
           ...(entry.continuationGroupKey
             ? { continuationGroupKey: entry.continuationGroupKey }
@@ -349,6 +377,88 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, activeModelSlug]);
 
   const isLocked = props.lockedProvider !== null;
+  const makeFavorite = useCallback(
+    (instanceId: ProviderInstanceId, model: string): ModelFavorite => {
+      const entry = entryByInstanceId.get(instanceId);
+      const selections =
+        instanceId === props.activeInstanceId && model === activeModelSlug
+          ? props.modelOptions
+          : undefined;
+      const modelLabel = entry?.models.find((item) => item.slug === model)?.name;
+      return {
+        provider: instanceId,
+        model,
+        ...(modelLabel ? { modelLabel } : {}),
+        ...(environmentId ? { environmentId } : {}),
+        ...(environment?.label ? { environmentLabel: environment.label } : {}),
+        ...(entry?.snapshot.auth.email ? { accountEmail: entry.snapshot.auth.email } : {}),
+        options: entry
+          ? modelFavoriteOptions(
+              getProviderModelCapabilities(entry.models, model, entry.driverKind),
+              selections,
+            )
+          : [],
+      };
+    },
+    [
+      entryByInstanceId,
+      props.activeInstanceId,
+      props.modelOptions,
+      activeModelSlug,
+      environmentId,
+      environment?.label,
+    ],
+  );
+  const currentFavorite = useMemo(
+    () => makeFavorite(props.activeInstanceId, activeModelSlug),
+    [makeFavorite, props.activeInstanceId, activeModelSlug],
+  );
+  const currentFavoriteSaved = favorites.some(
+    (favorite) => modelFavoriteKey(favorite) === modelFavoriteKey(currentFavorite),
+  );
+  const favoriteModels = useMemo(
+    (): ModelPickerItem[] =>
+      favorites.map((favorite) => {
+        const entry = entryByInstanceId.get(favorite.provider);
+        const model = flatModels.find(
+          (item) => item.instanceId === favorite.provider && item.slug === favorite.model,
+        );
+        return {
+          ...model,
+          key: modelFavoriteKey(favorite),
+          favorite,
+          slug: favorite.model,
+          name: model?.name ?? favorite.model,
+          instanceId: favorite.provider,
+          driverKind: entry?.driverKind ?? ProviderDriverKind.make("codex"),
+          instanceDisplayName: [
+            environment?.label ?? favorite.environmentLabel,
+            favorite.accountEmail ??
+              entry?.snapshot.auth.email ??
+              entry?.displayName ??
+              favorite.provider,
+          ]
+            .filter(Boolean)
+            .join(" / "),
+          disabledReason:
+            (entry && !matchesLockedProvider(entry)
+              ? "Start a new chat to use this login"
+              : null) ??
+            modelFavoriteUnavailable(
+              favorite,
+              entry?.snapshot,
+              environment?.connection.phase === "connected",
+            ) ??
+            (!model || model.isUnavailable ? "Model unavailable" : null),
+        };
+      }),
+    [favorites, flatModels, entryByInstanceId, environment, matchesLockedProvider],
+  );
+  const itemByKey = useMemo(
+    () => new Map([...flatModels, ...favoriteModels].map((model) => [model.key, model])),
+    [flatModels, favoriteModels],
+  );
+
   const isSearching = searchQuery.trim().length > 0;
   const lockedDisabledInstanceIds = useMemo(() => {
     if (!isLocked) {
@@ -378,7 +488,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return [...available, ...disabled];
   }, [instanceEntries, isLocked, matchesLockedProvider]);
-  const showSidebar = !isSearching && sidebarInstanceEntries.length > 0;
+  const showSidebar = !isSearching && (sidebarInstanceEntries.length > 0 || favorites.length > 0);
   const instanceOrder = useMemo(
     () => instanceEntries.map((entry) => entry.instanceId),
     [instanceEntries],
@@ -386,7 +496,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   // Filter models based on search query and selected instance
   const filteredModels = useMemo(() => {
-    let result = flatModels;
+    let result = isSearching
+      ? [...favoriteModels, ...flatModels]
+      : selectedInstanceId === "favorites"
+        ? favoriteModels
+        : flatModels;
 
     // Apply tokenized fuzzy search across the combined provider/model search fields.
     if (searchQuery.trim()) {
@@ -395,7 +509,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           model,
           score: scoreModelPickerSearch(
             {
-              name: model.name,
+              name: model.favorite
+                ? `${model.name} ${modelFavoriteLabel(model.favorite)}`
+                : model.name,
               ...(model.shortName ? { shortName: model.shortName } : {}),
               ...(model.subProvider ? { subProvider: model.subProvider } : {}),
               driverKind: model.driverKind,
@@ -430,7 +546,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       if (props.lockedProvider !== null) {
         const lockedProviderMatches: Array<(typeof rankedMatches)[number]> = [];
         for (const rankedModel of rankedMatches) {
-          if (matchesLockedProvider(rankedModel.model)) {
+          if (rankedModel.model.favorite || matchesLockedProvider(rankedModel.model)) {
             lockedProviderMatches.push(rankedModel);
           }
         }
@@ -462,17 +578,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         .map((rankedModel) => rankedModel.model);
     }
 
-    if (props.lockedProvider !== null) {
-      result = result.filter((m) => matchesLockedProvider(m));
-      if (selectedInstanceId === "favorites") {
-        result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
-      } else {
-        result = result.filter((m) => m.instanceId === selectedInstanceId);
-      }
-    } else if (selectedInstanceId === "favorites") {
-      result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
-    } else {
-      result = result.filter((m) => m.instanceId === selectedInstanceId);
+    if (selectedInstanceId !== "favorites") {
+      result = result.filter(
+        (model) => model.instanceId === selectedInstanceId && matchesLockedProvider(model),
+      );
     }
 
     return sortProviderModelItems(result, {
@@ -482,6 +591,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     });
   }, [
     favoritesSet,
+    favoriteModels,
+    isSearching,
     flatModels,
     instanceOrder,
     matchesLockedProvider,
@@ -547,7 +658,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, []);
 
   const handleModelSelect = useCallback(
-    (modelSlug: string, instanceId: ProviderInstanceId) => {
+    (key: string) => {
+      const item = itemByKey.get(key);
+      if (!item || item.disabledReason) return;
+      const { slug: modelSlug, instanceId } = item;
       if (getModelDisabledReason?.(instanceId, modelSlug)) {
         return;
       }
@@ -564,24 +678,30 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       // normalization rules, so pass the driver kind here.
       const resolvedModel = resolveSelectableModel(entry.driverKind, modelSlug, options);
       if (resolvedModel) {
-        onInstanceModelChange(instanceId, resolvedModel);
+        onInstanceModelChange(instanceId, resolvedModel, item.favorite?.options);
       }
     },
-    [entryByInstanceId, getModelDisabledReason, modelOptionsByInstance, onInstanceModelChange],
+    [
+      itemByKey,
+      entryByInstanceId,
+      getModelDisabledReason,
+      modelOptionsByInstance,
+      onInstanceModelChange,
+    ],
   );
 
   const toggleFavorite = useCallback(
-    (instanceId: ProviderInstanceId, model: string) => {
-      const newFavorites = [...favorites];
-      const index = newFavorites.findIndex((f) => f.provider === instanceId && f.model === model);
-      if (index >= 0) {
-        newFavorites.splice(index, 1);
-      } else {
-        newFavorites.push({ provider: instanceId, model });
-      }
-      updateSettings({ favorites: newFavorites });
+    (item: ModelPickerItem) => {
+      const favorite = item.favorite ?? makeFavorite(item.instanceId, item.slug);
+      const key = modelFavoriteKey(favorite);
+      const exists = allFavorites.some((value) => modelFavoriteKey(value) === key);
+      updateSettings({
+        favorites: exists
+          ? allFavorites.filter((value) => modelFavoriteKey(value) !== key)
+          : [...allFavorites, favorite],
+      });
     },
-    [favorites, updateSettings],
+    [allFavorites, makeFavorite, updateSettings],
   );
 
   const modelJumpCommandByKey = useMemo(() => {
@@ -591,14 +711,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     >();
     let selectableModelIndex = 0;
     for (const model of visibleModels) {
-      if (getModelDisabledReason?.(model.instanceId, model.slug)) {
+      if (model.disabledReason || getModelDisabledReason?.(model.instanceId, model.slug)) {
         continue;
       }
       const jumpCommand = modelPickerJumpCommandForIndex(selectableModelIndex);
       if (!jumpCommand) {
         return mapping;
       }
-      mapping.set(modelPickerModelKey(model.instanceId, model.slug), jumpCommand);
+      mapping.set(model.key, jumpCommand);
       selectableModelIndex += 1;
     }
     return mapping;
@@ -609,19 +729,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   );
   const allItemKeys = useMemo(
     (): string[] => [
-      ...flatModels.map((model) => modelPickerModelKey(model.instanceId, model.slug)),
+      ...[...flatModels, ...favoriteModels].map((model) => model.key),
       ...new Set(
         flatModels
           .filter((model) => model.isLegacy)
           .map((model) => modelPickerLegacySectionKey(model.instanceId)),
       ),
     ],
-    [flatModels],
+    [flatModels, favoriteModels],
   );
   const filteredItemKeys = useMemo((): string[] => {
-    const modelKeys = visibleModels.map((model) =>
-      modelPickerModelKey(model.instanceId, model.slug),
-    );
+    const modelKeys = visibleModels.map((model) => model.key);
     if (!legacySection) {
       return modelKeys;
     }
@@ -630,11 +748,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [legacySection, visibleModels]);
   const filteredModelByKey = useMemo(
     (): ReadonlyMap<string, ModelPickerItem> =>
-      new Map(
-        visibleModels.map(
-          (model) => [modelPickerModelKey(model.instanceId, model.slug), model] as const,
-        ),
-      ),
+      new Map(visibleModels.map((model) => [model.key, model] as const)),
     [visibleModels],
   );
   const updateModelListScrollFades = useCallback(() => {
@@ -673,8 +787,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return mapping.size > 0 ? mapping : EMPTY_MODEL_JUMP_LABELS;
   }, [keybindings, modelJumpCommandByKey, modelJumpShortcutContext]);
   const modelListExtraData = useMemo(
-    () => ({ favoritesSet, modelJumpLabelByKey }),
-    [favoritesSet, modelJumpLabelByKey],
+    () => ({ favoritesSet, modelJumpLabelByKey, allFavorites, currentFavorite }),
+    [favoritesSet, modelJumpLabelByKey, allFavorites, currentFavorite],
   );
 
   useEffect(() => {
@@ -698,11 +812,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       if (!targetModelKey) {
         return;
       }
-      const model = parseModelPickerModelKey(targetModelKey);
-      if (!model) {
-        return;
-      }
-      handleModelSelect(model.slug, model.instanceId);
+      handleModelSelect(targetModelKey);
     };
 
     window.addEventListener("keydown", onWindowKeyDown, true);
@@ -729,7 +839,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   return (
     <TooltipProvider delay={0}>
       <div
-        className="relative flex h-screen max-h-86.5 w-screen max-w-90 flex-row overflow-hidden"
+        className="relative flex h-screen max-h-104 w-screen max-w-110 flex-row overflow-hidden"
         data-model-picker-content="true"
       >
         {/* Sidebar */}
@@ -759,7 +869,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           autoHighlight
           open
           virtualized
-          value={activeModelKey}
+          value={
+            selectedInstanceId === "favorites" ? modelFavoriteKey(currentFavorite) : activeModelKey
+          }
           onItemHighlighted={(modelKey, eventDetails) => {
             highlightedModelKeyRef.current = typeof modelKey === "string" ? modelKey : null;
             if (eventDetails.reason === "keyboard" && eventDetails.index >= 0) {
@@ -778,10 +890,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               toggleLegacySection(legacyInstanceId);
               return;
             }
-            const model = parseModelPickerModelKey(modelKey);
-            if (model) {
-              handleModelSelect(model.slug, model.instanceId);
-            }
+            handleModelSelect(modelKey);
           }}
         >
           <div
@@ -790,6 +899,22 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               showSidebar && "border-l border-border/70",
             )}
           >
+            {environmentId && activeModelSlug && activeEntry && (
+              <div className="border-b border-border/70 px-3 py-2">
+                <div className="break-all text-xs text-muted-foreground">
+                  {environment?.label} / {currentFavorite.accountEmail ?? activeEntry.displayName}
+                </div>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="mt-1 w-full justify-start"
+                  disabled={currentFavoriteSaved || !isProviderInstancePickerReady(activeEntry)}
+                  onClick={() => updateSettings({ favorites: [...allFavorites, currentFavorite] })}
+                >
+                  {currentFavoriteSaved ? "Setup saved" : "Save current setup"}
+                </Button>
+              </div>
+            )}
             {/* Search bar */}
             <div className="px-2 pt-2">
               <div className="border-b border-border/70 pb-2.5 transition-colors focus-within:border-ring">
@@ -824,10 +949,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         toggleLegacySection(legacyInstanceId);
                         return;
                       }
-                      const model = parseModelPickerModelKey(highlightedModelKeyRef.current);
-                      if (model) {
-                        handleModelSelect(model.slug, model.instanceId);
-                      }
+                      handleModelSelect(highlightedModelKeyRef.current);
                       return;
                     }
                     e.stopPropagation();
@@ -879,9 +1001,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       return null;
                     }
                     const disabledReason =
-                      getModelDisabledReason?.(model.instanceId, model.slug) ?? null;
+                      model.disabledReason ??
+                      getModelDisabledReason?.(model.instanceId, model.slug) ??
+                      null;
                     return (
                       <ModelListRow
+                        itemKey={model.key}
+                        favoriteLabel={
+                          model.favorite?.options
+                            ? modelFavoriteLabel(model.favorite).split(" · ").slice(1).join(" · ")
+                            : undefined
+                        }
                         key={modelKey}
                         index={index}
                         model={model}
@@ -889,10 +1019,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         driverKind={model.driverKind}
                         providerDisplayName={model.instanceDisplayName}
                         providerAccentColor={model.instanceAccentColor}
-                        isFavorite={favoritesSet.has(
-                          providerModelKey(model.instanceId, model.slug),
-                        )}
-                        isSelected={modelKey === activeModelKey}
+                        isFavorite={
+                          !!model.favorite ||
+                          allFavorites.some(
+                            (favorite) =>
+                              modelFavoriteKey(favorite) ===
+                              modelFavoriteKey(makeFavorite(model.instanceId, model.slug)),
+                          )
+                        }
+                        isSelected={
+                          model.favorite
+                            ? modelKey === modelFavoriteKey(currentFavorite)
+                            : modelKey === activeModelKey
+                        }
                         showProvider
                         preferShortName={!isLocked}
                         useTriggerLabel={false}
@@ -900,7 +1039,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         unavailable={model.isUnavailable === true}
                         jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                         disabledReason={disabledReason}
-                        onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
+                        onToggleFavorite={() => toggleFavorite(model)}
                       />
                     );
                   }}

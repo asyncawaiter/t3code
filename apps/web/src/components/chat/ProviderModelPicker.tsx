@@ -1,3 +1,7 @@
+import type {
+  EnvironmentId as FavoriteEnvironmentId,
+  ProviderOptionSelection,
+} from "@t3tools/contracts";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
   type ProviderInstanceId,
@@ -31,6 +35,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
    * The instance currently selected in the composer. Drives the trigger
    * icon, label and the default-highlighted combobox row.
    */
+  environmentId?: FavoriteEnvironmentId;
+  modelOptions?: ReadonlyArray<ProviderOptionSelection> | undefined;
   activeInstanceId: ProviderInstanceId;
   model: string;
   lockedProvider: ProviderDriverKind | null;
@@ -53,7 +59,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onOpenChange?: (open: boolean) => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
-  onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  onInstanceModelChange: (
+    instanceId: ProviderInstanceId,
+    model: string,
+    options?: ReadonlyArray<ProviderOptionSelection>,
+  ) => void;
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
@@ -146,9 +156,13 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
-  const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
+  const handleInstanceModelChange = (
+    instanceId: ProviderInstanceId,
+    model: string,
+    options?: ReadonlyArray<ProviderOptionSelection>,
+  ) => {
     if (props.disabled) return;
-    props.onInstanceModelChange(instanceId, model);
+    props.onInstanceModelChange(instanceId, model, options);
     setIsMenuOpen(false);
   };
 
@@ -227,6 +241,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         viewportClassName="overflow-hidden! rounded-[calc(var(--radius-lg)-1px)] p-0 [clip-path:inset(0_round_calc(var(--radius-lg)-1px))]"
       >
         <ModelPickerContent
+          {...(props.environmentId ? { environmentId: props.environmentId } : {})}
+          modelOptions={props.modelOptions}
           activeInstanceId={activeInstanceId}
           model={props.model}
           lockedProvider={props.lockedProvider}

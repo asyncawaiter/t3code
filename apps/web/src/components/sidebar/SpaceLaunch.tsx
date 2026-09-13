@@ -70,6 +70,8 @@ function LaunchModel({
       )}
       {resolved ? (
         <ProviderModelPicker
+          environmentId={environmentId}
+          modelOptions={resolved.options}
           activeInstanceId={resolved.instanceId}
           model={resolved.model}
           lockedProvider={null}
@@ -77,8 +79,8 @@ function LaunchModel({
           modelOptionsByInstance={options}
           triggerVariant="outline"
           triggerClassName="w-full justify-between"
-          onInstanceModelChange={(instanceId, model) =>
-            onChange(createModelSelection(instanceId, model))
+          onInstanceModelChange={(instanceId, model, options) =>
+            onChange(createModelSelection(instanceId, model, options))
           }
         />
       ) : (

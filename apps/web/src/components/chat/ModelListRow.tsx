@@ -17,6 +17,8 @@ import { modelPickerModelKey } from "./modelPickerKeys";
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
+  itemKey?: string;
+  favoriteLabel?: string | undefined;
   model: ModelEsque;
   /** Instance the model belongs to — the routing key used in combobox values. */
   instanceId: ProviderInstanceId;
@@ -49,7 +51,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
     <ComboboxItem
       hideIndicator
       index={props.index}
-      value={modelPickerModelKey(props.instanceId, props.model.slug)}
+      value={props.itemKey ?? modelPickerModelKey(props.instanceId, props.model.slug)}
       disabled={Boolean(props.disabledReason)}
       contentClassName="flex w-full items-center gap-3"
       className={cn(
@@ -68,6 +70,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
                   props.model,
                   props.preferShortName ? { preferShortName: true } : undefined,
                 )}
+            {props.favoriteLabel ? ` · ${props.favoriteLabel}` : ""}
           </div>
           {props.showNewBadge ? (
             <span
@@ -114,7 +117,6 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 onKeyDown={(event) => {
                   event.stopPropagation();
                 }}
-                disabled={Boolean(props.disabledReason)}
                 aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
               >
                 <StarIcon

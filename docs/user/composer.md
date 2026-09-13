@@ -6,13 +6,39 @@ include a skill when the task needs more context.
 Messages can contain up to 120,000 characters. Longer drafts stay in the composer
 so you can shorten them or split them into several messages.
 
-The account usage strip above the composer shows the selected provider's reported quota
+The account usage meter beside the context-window meter in the bottom toolbar shows the selected provider's reported quota
 windows with compact bars and percentages. Claude's overall and Fable quotas appear separately
-when reported. The strip stays visible in the compact composer.
+when reported. The usage meter stays visible in the compact composer.
 
 On web and desktop, hover or click it for reset countdowns, plan and banked resets.
 Missing quota data shows `--` with a loading or unavailable explanation. The context-window
 meter is separate, and `/usage-limits` still opens the provider limits report.
+
+The strip below the composer shows the chat's device, selected provider, and login
+email when reported by the provider. Changing providers or choosing a favorite
+updates this account label before you send. Long labels can be hovered to read
+them in full.
+
+## Save model setups
+
+On web and desktop, choose a model, reasoning effort, and Fast setting, then open
+the model picker and select **Save current setup**. Favorites remember the device,
+provider login, model, and model options together. You can save multiple setups
+for the same model, such as Astra Medium and Astra Max.
+
+Each favorite shows its model and options, with the device and login email below.
+When an email is unavailable, the provider name appears instead. The picker opens
+to Favorites when the current device has saved setups. Click a setup or use its
+shown keyboard shortcut to restore it. Use its star to remove it.
+
+An existing chat shows favorites for its device. Unavailable devices, logins,
+models, or saved options cannot be selected; a changed login requires signing back
+in to the saved account. Existing model-only favorites remain available without
+adding options. Save a complete setup to give one a specific device and login.
+
+In **New chat**, choose a **Favorite setup** to fill in its device and login, then
+choose the project folder. The new chat starts with the saved model and options.
+Favorites are saved in the current client.
 
 ## Attach files
 

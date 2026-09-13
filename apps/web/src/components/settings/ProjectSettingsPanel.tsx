@@ -1069,6 +1069,8 @@ function ProjectDetail({
               resolvedSelection && activeEntry ? (
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   <ProviderModelPicker
+                    environmentId={representative.environmentId}
+                    modelOptions={resolvedSelection.options}
                     activeInstanceId={resolvedSelection.instanceId}
                     model={resolvedSelection.model}
                     lockedProvider={null}
@@ -1082,8 +1084,8 @@ function ProjectDetail({
                         search: { environmentId: representative.environmentId, instanceId },
                       });
                     }}
-                    onInstanceModelChange={(instanceId, model) => {
-                      setDefaultModel(createModelSelection(instanceId, model));
+                    onInstanceModelChange={(instanceId, model, options) => {
+                      setDefaultModel(createModelSelection(instanceId, model, options));
                     }}
                   />
                   <TraitsPicker

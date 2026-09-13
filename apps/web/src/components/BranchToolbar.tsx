@@ -11,6 +11,8 @@ import {
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import type { ProviderInstanceEntry } from "../providerInstances";
+import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useThread, useThreadShellsForProjectRefs } from "../state/entities";
 import {
@@ -50,6 +52,7 @@ interface BranchToolbarProps {
   environmentId: EnvironmentId;
   threadId: ThreadId;
   showGitControls: boolean;
+  provider?: ProviderInstanceEntry | null;
   draftId?: DraftId;
   onEnvModeChange: (mode: EnvMode) => void;
   effectiveEnvModeOverride?: EnvMode;
@@ -441,6 +444,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   environmentId,
   threadId,
   showGitControls,
+  provider,
   draftId,
   onEnvModeChange,
   effectiveEnvModeOverride,
@@ -530,6 +534,22 @@ export const BranchToolbar = memo(function BranchToolbar({
   const [stripElement, setStripElement] = useState<HTMLDivElement | null>(null);
   const labelsOverflow = useLabelsOverflow(stripElement);
 
+  const ProviderIcon = provider ? PROVIDER_ICON_BY_PROVIDER[provider.driverKind] : null;
+  const providerLabel = provider
+    ? [provider.displayName, provider.snapshot.auth.email].filter(Boolean).join(" / ")
+    : null;
+  const providerIndicator = providerLabel ? (
+    <span
+      title={providerLabel}
+      aria-label={`Provider and account: ${providerLabel}`}
+      data-composer-context-control
+      className="inline-flex min-w-0 max-w-72 shrink items-center gap-1 px-1"
+    >
+      {ProviderIcon ? <ProviderIcon className="size-3 shrink-0" /> : null}
+      <span className="truncate">{providerLabel}</span>
+    </span>
+  ) : null;
+
   if (!hasActiveThread || !activeProject) return null;
 
   return (
@@ -562,9 +582,10 @@ export const BranchToolbar = memo(function BranchToolbar({
             previousWorktreeLabel={previousWorktreeLabel}
             onUsePreviousWorktree={onUsePreviousWorktree}
           />
+          {providerIndicator}
         </div>
       ) : null}
-      {showGitControls || showEnvironmentIndicator ? (
+      {showGitControls || showEnvironmentIndicator || provider ? (
         <div
           className={cn(
             "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
@@ -582,7 +603,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 availableEnvironments={availableEnvironments}
                 {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
               />
-              {showGitControls ? (
+              {showGitControls || provider ? (
                 <Separator
                   orientation="vertical"
                   className="mx-0.5 h-3.5!"
@@ -591,6 +612,14 @@ export const BranchToolbar = memo(function BranchToolbar({
               ) : null}
             </>
           )}
+          {providerIndicator}
+          {provider && showGitControls ? (
+            <Separator
+              orientation="vertical"
+              className="mx-0.5 h-3.5!"
+              data-composer-context-control
+            />
+          ) : null}
           {showGitControls ? (
             <BranchToolbarEnvModeSelector
               envLocked={envModeLocked}

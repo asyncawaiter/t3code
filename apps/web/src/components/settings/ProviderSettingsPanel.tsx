@@ -1,3 +1,4 @@
+import { modelFavoriteOptions } from "../../modelFavorites";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
@@ -115,13 +116,6 @@ function withoutProviderInstanceKey<V>(
   const next = { ...record } as Record<ProviderInstanceId, V>;
   delete next[key];
   return next;
-}
-
-function withoutProviderInstanceFavorites(
-  favorites: ReadonlyArray<{ readonly provider: ProviderInstanceId; readonly model: string }>,
-  instanceId: ProviderInstanceId,
-) {
-  return favorites.filter((favorite) => favorite.provider !== instanceId);
 }
 
 const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
@@ -843,8 +837,34 @@ export function EnvironmentProviderSettings({
     ];
     updateSettings({
       favorites: [
-        ...withoutProviderInstanceFavorites(settings.favorites ?? [], instanceId),
-        ...favoriteModels.map((model) => ({ provider: instanceId, model })),
+        ...(settings.favorites ?? []).filter(
+          (favorite) =>
+            favorite.provider !== instanceId ||
+            (favorite.environmentId && favorite.environmentId !== environmentId),
+        ),
+        ...favoriteModels.flatMap((model) => {
+          const existing = (settings.favorites ?? []).filter(
+            (favorite) =>
+              favorite.provider === instanceId &&
+              favorite.model === model &&
+              (!favorite.environmentId || favorite.environmentId === environmentId),
+          );
+          const provider = serverProviders.find((item) => item.instanceId === instanceId);
+          return existing.length
+            ? existing
+            : [
+                {
+                  provider: instanceId,
+                  model,
+                  environmentId,
+                  environmentLabel,
+                  ...(provider?.auth.email ? { accountEmail: provider.auth.email } : {}),
+                  options: modelFavoriteOptions(
+                    provider?.models.find((item) => item.slug === model)?.capabilities ?? {},
+                  ),
+                },
+              ];
+        }),
       ],
     });
   };
@@ -884,7 +904,10 @@ export function EnvironmentProviderSettings({
       modelOrder: [],
     };
     const favoriteModels = Arr.filterMap(settings.favorites ?? [], (favorite) =>
-      favorite.provider === row.instanceId ? Result.succeed(favorite.model) : Result.failVoid,
+      favorite.provider === row.instanceId &&
+      (!favorite.environmentId || favorite.environmentId === environmentId)
+        ? Result.succeed(favorite.model)
+        : Result.failVoid,
     );
     const resetLabel = driverOption?.label ?? String(row.driver);
 

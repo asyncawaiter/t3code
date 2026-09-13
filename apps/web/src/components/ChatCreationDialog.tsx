@@ -1,3 +1,9 @@
+import type { ModelFavorite } from "@t3tools/contracts";
+import { createModelSelection } from "@t3tools/shared/model";
+import { modelFavoriteUnavailable } from "../modelFavorites";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { serverEnvironment } from "../state/server";
+import { FavoriteSetupPicker } from "./FavoriteSetupPicker";
 import { useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { ALL_PROFILE_ID, moveThreadsToSpace, spaceForThread } from "@t3tools/contracts";
@@ -92,6 +98,7 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
       environment.environmentId === location?.environmentId &&
       environment.connection.phase === "connected",
   );
+  const [favorite, setFavorite] = useState<ModelFavorite | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const submitButton = useRef<HTMLButtonElement>(null);
@@ -122,6 +129,18 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
             "Reattach the saved files before moving this draft to another device. Its current location and attachments have been kept.",
           );
       }
+      if (favorite) {
+        const provider = appAtomRegistry
+          .get(serverEnvironment.providersValueAtom(location.environmentId))
+          ?.find((item) => item.instanceId === favorite.provider);
+        const reason = modelFavoriteUnavailable(favorite, provider, locationAvailable);
+        if (favorite.environmentId !== location.environmentId)
+          throw new Error("Choose this favorite's device.");
+        if (reason) throw new Error(reason);
+      }
+      const favoriteSelection = favorite
+        ? createModelSelection(favorite.provider, favorite.model, favorite.options)
+        : undefined;
       const resolved = await resolveProject(location, profileId);
       const projectKey = scopedProjectKey(resolved.projectRef);
       if (request.draftId) {
@@ -184,9 +203,24 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
               });
           }
         }
+        if (favoriteSelection)
+          store.setModelSelection(request.draftId, favoriteSelection, {
+            explicit: true,
+            replaceOptions: true,
+          });
       } else {
-        const opened = await handleNewThread(resolved.projectRef, { spaceId });
+        const opened = await handleNewThread(resolved.projectRef, {
+          spaceId,
+          ...(favoriteSelection ? { modelSelection: favoriteSelection } : {}),
+        });
         if (!opened) throw new Error("The draft changed while opening. Try again.");
+        if (favoriteSelection)
+          useComposerDraftStore
+            .getState()
+            .setModelSelection(opened.draftId, favoriteSelection, {
+              explicit: true,
+              replaceOptions: true,
+            });
       }
       revealChatLocation(profileId, spaceId);
       close();
@@ -270,7 +304,36 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                 </Select>
               </label>
             </div>
-            <ProjectLocationPicker value={location} onChange={setLocation} disabled={busy} />
+            <FavoriteSetupPicker
+              value={favorite}
+              onChange={(next) => {
+                setFavorite(next);
+                if (next?.environmentId && next.environmentId !== location?.environmentId) {
+                  const project = projects.find(
+                    (item) => item.environmentId === next.environmentId,
+                  );
+                  setLocation(
+                    project
+                      ? {
+                          environmentId: project.environmentId,
+                          workspaceRoot: project.workspaceRoot,
+                        }
+                      : null,
+                  );
+                }
+              }}
+            />
+            <ProjectLocationPicker
+              key={favorite?.environmentId ?? "location"}
+              initialEnvironmentId={favorite?.environmentId}
+              value={location}
+              onChange={(next) => {
+                setLocation(next);
+                if (next && favorite && next.environmentId !== favorite.environmentId)
+                  setFavorite(null);
+              }}
+              disabled={busy}
+            />
           </fieldset>
           {error && (
             <p

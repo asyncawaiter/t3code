@@ -205,6 +205,8 @@ export function SourceControlWritingSettingsSection() {
             ) : null}
             {usesDedicatedModel && canEnableDedicatedModel ? (
               <ProviderModelPicker
+                {...(environmentId ? { environmentId } : {})}
+                modelOptions={activeSelection.options}
                 activeInstanceId={activeSelection.instanceId}
                 model={activeSelection.model}
                 lockedProvider={null}
@@ -223,9 +225,13 @@ export function SourceControlWritingSettingsSection() {
                       },
                     }
                   : {})}
-                onInstanceModelChange={(instanceId, model) => {
+                onInstanceModelChange={(instanceId, model, options) => {
                   updateSettings({
-                    sourceControlWriterModelSelection: createModelSelection(instanceId, model),
+                    sourceControlWriterModelSelection: createModelSelection(
+                      instanceId,
+                      model,
+                      options,
+                    ),
                   });
                 }}
               />

@@ -1,3 +1,4 @@
+import type { ProviderOptionSelection } from "@t3tools/contracts";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
   questionAttachmentDraftId,
@@ -1358,7 +1359,11 @@ export interface ChatComposerProps {
     cursorAdjacentToMention: boolean,
   ) => void;
 
-  onProviderModelSelect: (instanceId: ProviderInstanceId, model: string) => void;
+  onProviderModelSelect: (
+    instanceId: ProviderInstanceId,
+    model: string,
+    options?: ReadonlyArray<ProviderOptionSelection>,
+  ) => void;
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
@@ -4117,6 +4122,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       <ProviderModelPicker
         isComposerOwned
         compact={composerControlsCompact}
+        environmentId={environmentId}
+        modelOptions={selectedModelOptionsForDispatch}
         activeInstanceId={selectedInstanceId}
         model={selectedModelForPickerWithCustomFallback}
         lockedProvider={lockedProvider}

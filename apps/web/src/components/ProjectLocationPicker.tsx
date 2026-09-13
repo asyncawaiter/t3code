@@ -17,6 +17,7 @@ import { useProjects } from "../state/entities";
 import { filesystemEnvironment } from "../state/filesystem";
 import { useEnvironmentQuery } from "../state/query";
 import { ensureBrowseDirectoryPath } from "../lib/projectPaths";
+import type { EnvironmentId } from "@t3tools/contracts";
 import type { ChatLocation } from "../hooks/useChatCreation";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -27,8 +28,10 @@ export function ProjectLocationPicker({
   value,
   onChange,
   disabled = false,
+  initialEnvironmentId,
 }: {
   value: ChatLocation | null;
+  initialEnvironmentId?: EnvironmentId | undefined;
   onChange: (value: ChatLocation | null) => void;
   disabled?: boolean;
 }) {
@@ -36,6 +39,7 @@ export function ProjectLocationPicker({
   const projects = useProjects();
   const [deviceId, setDeviceId] = useState(
     value?.environmentId ??
+      initialEnvironmentId ??
       environments.find((env) => env.connection.phase === "connected")?.environmentId ??
       null,
   );

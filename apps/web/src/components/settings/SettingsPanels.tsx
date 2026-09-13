@@ -2748,6 +2748,8 @@ export function GeneralSettingsPanel() {
             ) : (
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <ProviderModelPicker
+                  {...(environmentId ? { environmentId } : {})}
+                  modelOptions={settings.textGenerationModelSelection.options}
                   activeInstanceId={textGenInstanceId}
                   model={textGenModel}
                   lockedProvider={null}
@@ -2765,12 +2767,16 @@ export function GeneralSettingsPanel() {
                         },
                       }
                     : {})}
-                  onInstanceModelChange={(instanceId, model) => {
+                  onInstanceModelChange={(instanceId, model, options) => {
                     updateSettings({
                       textGenerationModelSelection: resolveAppModelSelectionState(
                         {
                           ...settings,
-                          textGenerationModelSelection: createModelSelection(instanceId, model),
+                          textGenerationModelSelection: createModelSelection(
+                            instanceId,
+                            model,
+                            options,
+                          ),
                         },
                         textGenerationProviders,
                       ),

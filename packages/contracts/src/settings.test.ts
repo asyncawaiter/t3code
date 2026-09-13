@@ -754,3 +754,36 @@ describe("ServerSettings environment icon", () => {
     expect(encodeServerSettings(linuxSettings).environmentIcon).toBe("linux");
   });
 });
+
+describe("model setup favorites", () => {
+  it("round trips complete setups alongside legacy model-only favorites", () => {
+    const favorites = [
+      { provider: "codex", model: "astra" },
+      {
+        provider: "codex",
+        model: "astra",
+        environmentId: "device-a",
+        environmentLabel: "Godel",
+        accountEmail: "user@example.com",
+        options: [
+          { id: "reasoningEffort", value: "medium" },
+          { id: "fastMode", value: false },
+        ],
+      },
+      {
+        provider: "codex",
+        model: "astra",
+        environmentId: "device-a",
+        accountEmail: "user@example.com",
+        options: [
+          { id: "reasoningEffort", value: "max" },
+          { id: "fastMode", value: true },
+        ],
+      },
+    ];
+    expect(
+      decodeClientSettings(encodeClientSettings(decodeClientSettings({ favorites }))).favorites,
+    ).toEqual(favorites);
+    expect(decodeClientSettingsPatch({ favorites }).favorites).toEqual(favorites);
+  });
+});

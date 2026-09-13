@@ -229,6 +229,8 @@ export function ProjectDefaultsSettings({
                 className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 disabled:opacity-50"
               >
                 <ProviderModelPicker
+                  {...(representative ? { environmentId: representative.environmentId } : {})}
+                  modelOptions={selection.options}
                   activeInstanceId={selection.instanceId}
                   model={selection.model}
                   lockedProvider={null}
@@ -245,8 +247,8 @@ export function ProjectDefaultsSettings({
                         search: { environmentId: representative.environmentId, instanceId },
                       });
                   }}
-                  onInstanceModelChange={(instanceId, model) =>
-                    setModel(createModelSelection(instanceId, model))
+                  onInstanceModelChange={(instanceId, model, options) =>
+                    setModel(createModelSelection(instanceId, model, options))
                   }
                 />
                 {!mixedModel ? (
