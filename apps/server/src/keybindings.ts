@@ -488,7 +488,15 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
+      // Move only the old shipped chat-number shortcuts; retain customized bindings.
+      const customConfig = runtimeConfig.keybindings.map((rule) => {
+        const number = /^thread\.jump\.([1-9])$/.exec(rule.command)?.[1];
+        if (!number || rule.key !== `mod+${number}` || rule.when !== undefined) return rule;
+        return DEFAULT_KEYBINDINGS.find((entry) => entry.command === rule.command) ?? rule;
+      });
+      const migrated = customConfig.some(
+        (rule, index) => rule !== runtimeConfig.keybindings[index],
+      );
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -525,7 +533,7 @@ const make = Effect.gen(function* () {
           reason: "shortcut context already used by existing rule",
         });
       }
-      if (missingDefaults.length === 0) {
+      if (missingDefaults.length === 0 && !migrated) {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
@@ -554,7 +562,7 @@ const make = Effect.gen(function* () {
           commands: skippedDefaults.map((rule) => rule.command),
         });
       }
-      if (defaultsToAppend.length === 0) {
+      if (defaultsToAppend.length === 0 && !migrated) {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }

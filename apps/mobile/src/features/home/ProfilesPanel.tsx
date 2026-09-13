@@ -220,18 +220,9 @@ export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
     ]);
   const requireWritable = () => {
     if (state.writable) return true;
-    const label =
-      environments.find((env) => env.environmentId === state.sourceId)?.environmentLabel ??
-      "the shared profile source";
     Alert.alert(
       "Space changes unavailable",
-      state.conflict
-        ? "Devices have conflicting profile sources. Choose the shared source to continue."
-        : `Connect or update ${label} to save Space changes or open a chat in this Space.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Shared source", onPress: sourceMenu },
-      ],
+      sync.error ?? "Loading saved organization. Try again when your profiles appear.",
     );
     return false;
   };
@@ -458,6 +449,36 @@ export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
           <SymbolView name="ellipsis" size={20} tintColorClassName="accent-icon-muted" />
         </Pressable>
       </View>
+      {sync.pending && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() =>
+            Alert.alert(
+              "Pending organization sync",
+              sync.error ??
+                "Edits are saved on this device and sync when the shared source reconnects.",
+              [
+                { text: "Cancel", style: "cancel" },
+                { text: "Retry", onPress: sync.retry },
+                {
+                  text: "Discard pending edits",
+                  style: "destructive",
+                  onPress: () =>
+                    void sync
+                      .discard()
+                      .catch((error: unknown) =>
+                        Alert.alert("Could not discard edits", String(error)),
+                      ),
+                },
+              ],
+            )
+          }
+        >
+          <Text className="text-xs text-foreground-muted">
+            {sync.error ? "Organization needs attention" : "Pending sync"}
+          </Text>
+        </Pressable>
+      )}
       {sync.failed && (
         <Pressable
           accessibilityRole="button"
@@ -472,11 +493,12 @@ export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
       {(!state.writable || state.conflict) && (
         <Pressable onPress={sourceMenu} accessibilityRole="button">
           <Text className="text-xs text-foreground-muted">
-            {state.conflict
-              ? "Choose the shared profile source"
-              : state.sourceId
-                ? "Organization is read-only. Connect the source to edit."
-                : "Choose a device to store shared profiles"}
+            {sync.error ??
+              (state.conflict
+                ? "Choose the shared profile source"
+                : state.sourceId
+                  ? "Loading saved organization. Sync requires the shared source."
+                  : "Choose a device to store shared profiles")}
           </Text>
         </Pressable>
       )}

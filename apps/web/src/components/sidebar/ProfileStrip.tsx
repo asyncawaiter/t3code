@@ -25,6 +25,7 @@ export interface ProfileStripProps {
   profiles: ReadonlyArray<Profile>;
   activeProfileId: string | null;
   onSelect: (id: string) => void;
+  shortcuts?: ReadonlyArray<string | null>;
 }
 
 export function ProfileDot({ color, className }: { color: Profile["color"]; className?: string }) {
@@ -40,6 +41,7 @@ export function ProfileStrip({
   profiles,
   activeProfileId,
   onSelect,
+  shortcuts,
 }: ProfileStripProps) {
   const selectedId =
     profiles.find((profile) => profile.id === activeProfileId)?.id ?? profiles[0]?.id;
@@ -75,7 +77,7 @@ export function ProfileStrip({
         role="group"
         aria-label="Switch profile"
       >
-        {profiles.map((profile) => {
+        {profiles.map((profile, index) => {
           const selected = profile.id === selectedId;
           return (
             <Tooltip key={profile.id}>
@@ -88,9 +90,9 @@ export function ProfileStrip({
                     aria-pressed={selected}
                     onClick={() => onSelect(profile.id)}
                     className={cn(
-                      "flex h-9 shrink-0 items-center justify-center rounded-full px-3 text-xs font-medium outline-none transition-[flex-grow,background-color,color] duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-inset",
+                      "flex h-9 shrink-0 items-center justify-center rounded-full px-3 text-xs font-medium outline-none transition-[flex-grow,background-color,color] duration-150 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-inset",
                       selected
-                        ? "grow bg-zinc-700 text-zinc-50 dark:bg-zinc-300 dark:text-zinc-900"
+                        ? "grow bg-sidebar-row-active text-sidebar-foreground ring-1 ring-inset ring-sidebar-border"
                         : "grow-0 bg-sidebar-foreground/5 text-sidebar-muted-foreground hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground",
                     )}
                   />
@@ -108,14 +110,17 @@ export function ProfileStrip({
                     if (selected && event.propertyName === "max-width") revealSelected();
                   }}
                   className={cn(
-                    "overflow-hidden whitespace-nowrap transition-[max-width,margin,opacity] duration-200 motion-reduce:transition-none",
+                    "overflow-hidden whitespace-nowrap transition-[max-width,margin,opacity] duration-150 motion-reduce:transition-none",
                     selected ? "ml-2 max-w-48 opacity-100" : "ml-0 max-w-0 opacity-0",
                   )}
                 >
                   {profile.name}
                 </span>
               </TooltipTrigger>
-              <TooltipPopup>{profile.name}</TooltipPopup>
+              <TooltipPopup>
+                {profile.name}
+                {shortcuts?.[index] ? ` (${shortcuts[index]})` : ""}
+              </TooltipPopup>
             </Tooltip>
           );
         })}

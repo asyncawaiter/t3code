@@ -20,6 +20,30 @@ export const THREAD_JUMP_KEYBINDING_COMMANDS = [
 ] as const;
 export type ThreadJumpKeybindingCommand = (typeof THREAD_JUMP_KEYBINDING_COMMANDS)[number];
 
+export const SPACE_JUMP_KEYBINDING_COMMANDS = [
+  "space.jump.1",
+  "space.jump.2",
+  "space.jump.3",
+  "space.jump.4",
+  "space.jump.5",
+  "space.jump.6",
+  "space.jump.7",
+  "space.jump.8",
+  "space.jump.9",
+] as const;
+
+export const PROFILE_JUMP_KEYBINDING_COMMANDS = [
+  "profile.jump.1",
+  "profile.jump.2",
+  "profile.jump.3",
+  "profile.jump.4",
+  "profile.jump.5",
+  "profile.jump.6",
+  "profile.jump.7",
+  "profile.jump.8",
+  "profile.jump.9",
+] as const;
+
 export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [
   "modelPicker.jump.1",
   "modelPicker.jump.2",
@@ -83,6 +107,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
   ...PROFILE_KEYBINDING_COMMANDS,
+  ...PROFILE_JUMP_KEYBINDING_COMMANDS,
+  ...SPACE_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 
 export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([

@@ -215,7 +215,7 @@ export function SpaceLaunch({
             className={cn(
               "absolute bottom-1 right-1 [--control-icon-color:currentColor]",
               selected
-                ? "text-zinc-50 hover:bg-white/10 hover:text-zinc-50 dark:text-zinc-900 dark:hover:bg-black/10 dark:hover:text-zinc-900"
+                ? "text-sidebar-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
                 : "text-sidebar-muted-foreground",
             )}
           />

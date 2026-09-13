@@ -3,6 +3,22 @@
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
 also lists the command IDs and defaults available in your version.
 
+## Sidebar navigation
+
+On macOS, numbered shortcuts have separate scopes:
+
+- `Cmd+1` through `Cmd+9`: select a Space in the current profile. Default is first.
+- `Cmd+Option+1` through `Cmd+Option+9`: select a profile. All is first.
+- `Cmd+Control+1` through `Cmd+Control+9`: open a chat in the current sidebar order.
+
+Space tiles display their configured shortcut, and profile tooltips show theirs. Reordering
+Spaces or profiles changes their numbered positions. These shortcuts leave focused terminals
+alone. When the model picker is open, `Cmd+1` through `Cmd+9` select its models instead.
+The old default chat-number bindings move automatically; customized shortcuts are retained.
+
+On Windows and Linux, Space and profile shortcuts use Control instead of Command.
+Chat shortcuts use Meta+Control; change them in Settings if your desktop reserves that chord.
+
 ## Edit the configuration file
 
 Keybindings live on the environment's machine, in

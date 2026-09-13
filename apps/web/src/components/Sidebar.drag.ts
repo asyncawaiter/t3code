@@ -273,6 +273,10 @@ export function createSidebarSortingStrategy(input: {
     for (const item of projected) {
       const index = indices.get(sidebarListItemId(item));
       const rect = index === undefined ? undefined : rects[index];
+      // Keep section and device spacing when projecting the reordered list.
+      const previousRect = index === undefined || index === 0 ? undefined : rects[index - 1];
+      top +=
+        rect && previousRect ? Math.max(0, rect.top - previousRect.bottom) : index === 0 ? 0 : 1;
       if (index !== undefined && rect) result[index] = { ...stationary, y: top - rect.top };
       const fallback =
         item.kind === "device"
@@ -290,7 +294,7 @@ export function createSidebarSortingStrategy(input: {
             : moved
               ? fallback
               : (rect?.height ?? fallback);
-      top += height + 1;
+      top += height;
     }
     result[activeIndex] = stationary;
     return result;

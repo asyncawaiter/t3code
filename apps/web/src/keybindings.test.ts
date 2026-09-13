@@ -1,3 +1,4 @@
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { assert, describe, it } from "vite-plus/test";
 
 import {
@@ -1056,4 +1057,21 @@ describe("plus key parsing", () => {
       }),
     );
   });
+});
+
+it("keeps Space, profile, and chat digits distinct and yields to the model picker", () => {
+  const resolve = (modifiers: Partial<KeyboardEvent>, modelPickerOpen = false) =>
+    resolveShortcutCommand(
+      event({ key: "1", code: "Digit1", metaKey: true, ...modifiers }),
+      DEFAULT_RESOLVED_KEYBINDINGS,
+      {
+        platform: "MacIntel",
+        context: { terminalFocus: false, modelPickerOpen },
+      },
+    );
+  assert.equal(resolve({}), "space.jump.1");
+  assert.equal(resolve({ altKey: true }), "profile.jump.1");
+  assert.equal(resolve({ ctrlKey: true }), "thread.jump.1");
+  assert.equal(resolve({}, true), "modelPicker.jump.1");
+  assert.isNull(resolve({ shiftKey: true }));
 });

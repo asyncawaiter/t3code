@@ -5,14 +5,16 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { profileSourceAtom, serverEnvironment } from "../../state/server";
 import { useEnvironments } from "../../state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { profileEdits } from "../../state/profileEdits";
 import { cacheProfiles } from "../../state/profileSyncCache";
-import { useProfilesLoaded } from "../../hooks/useProfileSync";
+import { useProfileSyncConnection, useSyncProfileEdits } from "../../hooks/useProfileSync";
 import { Button } from "../ui/button";
 
 export function ProfileSyncStatus({ settings = false }: { settings?: boolean }) {
   const source = useAtomValue(profileSourceAtom);
   const { environments } = useEnvironments();
-  const writable = useProfilesLoaded();
+  const writable = useProfileSyncConnection();
+  const edits = useSyncProfileEdits();
   const persist = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const attempted = useRef(new Set<string>());
   const requestedSource = useRef<EnvironmentId | null>(null);
@@ -28,7 +30,7 @@ export function ProfileSyncStatus({ settings = false }: { settings?: boolean }) 
 
   useEffect(() => {
     if (!source.sourceId || !source.config || source.conflict) return;
-    cacheProfiles({ sourceId: source.sourceId, profiles: source.profiles });
+    cacheProfiles({ sourceId: source.sourceId, profiles: source.config.settings.profiles });
   }, [source]);
 
   // Advertise only the source identity. Never overwrite another server's legacy collection.
@@ -55,6 +57,7 @@ export function ProfileSyncStatus({ settings = false }: { settings?: boolean }) 
 
   const chooseSource = useCallback(
     async (id: EnvironmentId) => {
+      if (edits.draft && edits.draft.sourceId !== id) return;
       requestedSource.current = id;
       setBusy(true);
       setFailure(false);
@@ -72,11 +75,12 @@ export function ProfileSyncStatus({ settings = false }: { settings?: boolean }) 
       setFailure(results.some((result) => result._tag === "Failure"));
       setBusy(false);
     },
-    [persist, targets],
+    [edits.draft, persist, targets],
   );
 
-  if (!settings && !source.conflict && writable && !failure) return null;
-  if (!settings && !source.conflict && !source.sourceId && !failure) return null;
+  if (!settings && !edits.draft && !edits.error && !source.conflict && writable && !failure)
+    return null;
+  if (!settings && !edits.error && !source.conflict && !source.sourceId && !failure) return null;
   if (!settings)
     return (
       <div
@@ -84,11 +88,15 @@ export function ProfileSyncStatus({ settings = false }: { settings?: boolean }) 
         role="status"
       >
         <span>
-          {source.conflict
-            ? "Choose a profile source"
-            : failure
-              ? "Profile sync needs attention"
-              : "Profile organization is read-only"}
+          {edits.error
+            ? "Organization needs attention"
+            : edits.draft
+              ? "Pending sync"
+              : source.conflict
+                ? "Choose a profile source"
+                : failure
+                  ? "Profile sync needs attention"
+                  : "Organization saved on this device"}
         </span>
         <Link
           to="/settings/general"
@@ -100,11 +108,44 @@ export function ProfileSyncStatus({ settings = false }: { settings?: boolean }) 
     );
   return (
     <div className="space-y-2 px-2 py-1 text-xs text-muted-foreground" role="status">
+      {edits.error && !edits.draft && <p>{edits.error}</p>}
+      {edits.draft && (
+        <div className="space-y-1">
+          <p>
+            Pending organization edits are saved on this device. They sync when the shared source
+            reconnects.
+          </p>
+          {edits.error && <p>{edits.error}</p>}
+          <Button variant="ghost" size="xs" onClick={() => void edits.retry()}>
+            Retry sync
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Discard this device's pending profile and Space edits and use the shared version?",
+                )
+              )
+                void profileEdits
+                  .discard()
+                  .catch((error: unknown) =>
+                    window.alert(
+                      error instanceof Error ? error.message : "Could not discard pending edits.",
+                    ),
+                  );
+            }}
+          >
+            Discard pending edits
+          </Button>
+        </div>
+      )}
       <p>
         {source.conflict
           ? "Devices have different profile collections. Choose the shared source in Manage profiles. Existing collections will be retained."
           : !writable
-            ? `Profile organization is read-only. Connect or update ${sourceDevice?.label ?? "the profile source"}; chats remain available on their hosts.`
+            ? `Organization edits save on this device. Connect or update ${sourceDevice?.label ?? "the profile source"} to sync them.`
             : `Profiles and spaces are shared live from ${sourceDevice?.label ?? "this device"}.`}
       </p>
       <>
@@ -130,7 +171,11 @@ export function ProfileSyncStatus({ settings = false }: { settings?: boolean }) 
               <option value={source.sourceId}>{sourceDevice?.label ?? "Source unavailable"}</option>
             ) : null}
             {targets.map((target) => (
-              <option key={target.environmentId} value={target.environmentId}>
+              <option
+                key={target.environmentId}
+                value={target.environmentId}
+                disabled={!!edits.draft && edits.draft.sourceId !== target.environmentId}
+              >
                 {target.label} ({target.serverConfig?.settings.profiles.length ?? 0} profiles)
               </option>
             ))}

@@ -413,6 +413,34 @@ describe("sidebar collision detection", () => {
 });
 
 describe("sidebar drag projection", () => {
+  it("preserves device margins and the inactive gap before Settled during reorder", () => {
+    const items = [
+      pinnedHeader,
+      thread("p1", "pinned"),
+      thread("p2", "pinned"),
+      divider,
+      thread("a1", "active"),
+      settledHeader,
+      thread("s1", "settled"),
+    ];
+    const args = layout(items, "p2", "p1");
+    let top = 100;
+    args.rects = args.rects.map((rect, index) => {
+      top += index === 1 ? 8 : index === 5 ? 20 : 0;
+      const measured = { ...rect, top, bottom: top + rect.height };
+      top += rect.height;
+      return measured;
+    });
+    const strategy = createSidebarSortingStrategy({
+      items,
+      settledOrder: [],
+      settledExpanded: true,
+    });
+    const headerIndex = 5;
+    expect(strategy({ ...args, index: headerIndex })).toEqual(stationary);
+    expect(strategy({ ...args, index: 1 })?.y).toBe(82);
+  });
+
   const pinned = [
     pinnedHeader,
     thread("p1", "pinned"),

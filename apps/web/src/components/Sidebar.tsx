@@ -10,9 +10,12 @@ import {
   commonSpaceProfile,
   getSpaceDragData,
   spaceDragId,
+  spaceProjectKeys,
 } from "./sidebar/Spaces.logic";
 import { buildDashboard } from "@t3tools/client-runtime/state/dashboard";
 import {
+  SPACE_JUMP_KEYBINDING_COMMANDS,
+  PROFILE_JUMP_KEYBINDING_COMMANDS,
   spaceForThread,
   indexProfileSpaces,
   indexProfilePins,
@@ -55,6 +58,7 @@ import {
 import {
   ALL_PROFILE,
   ALL_PROFILE_ID,
+  mergeProfileEdits,
   findProfile,
   isProjectInProfile,
   nextProfileId,
@@ -160,7 +164,7 @@ import {
   usePrimarySettings,
   useUpdatePrimarySettings,
 } from "../hooks/useSettings";
-import { useProfileWriteBlockReason } from "../hooks/useProfileSync";
+import { useProfileWriteBlockReason, useSaveProfiles } from "../hooks/useProfileSync";
 import { moveProjectToProfile } from "./settings/ProjectSettingsPanel.logic";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -764,7 +768,7 @@ function SidebarSectionHeader(props: {
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className="mx-0.5 h-8"
+      className={cn("mx-0.5 h-8", props.marker === "settled-header" && "mt-5")}
     >
       {props.toggle ? (
         <button
@@ -1099,6 +1103,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   currentEnvironmentId: string | null;
   environmentLabel: string | null;
   hideEnvironment?: boolean;
+  deviceGroup?: { first: boolean; last: boolean; heading: boolean } | undefined;
+  deviceGroupsDragging?: boolean;
+  environmentTitle?: string | undefined;
   environmentMachine: EnvironmentMachineKind;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
@@ -1597,7 +1604,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             type="button"
             aria-label={`Move ${thread.title} to space`}
             aria-description="Drag to a Space or click to choose one."
-            className="inline-flex size-5 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            className="inline-flex size-5 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:pointer-events-none group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto"
             onClick={(event) => {
               event.stopPropagation();
               props.onOrganize(threadRef);
@@ -1657,18 +1664,46 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     )
   ) : null;
 
+  const deviceGroupClass =
+    props.deviceGroup &&
+    cn(
+      "mx-1 border-x border-sidebar-border/70 px-1",
+      props.deviceGroup.first && props.deviceGroup.heading && "mt-2 rounded-t-xl border-t pt-1",
+      props.deviceGroup.last && "mb-2 rounded-b-xl border-b pb-1",
+      props.deviceGroupsDragging && "border-transparent",
+    );
+  const deviceHeading = props.deviceGroup?.heading ? (
+    <div className="flex h-7 items-center gap-1.5 px-1.5 text-[10px] text-sidebar-muted-foreground">
+      <EnvironmentMachineIcon
+        kind={props.environmentMachine}
+        className="size-3 shrink-0"
+        aria-hidden
+      />
+      <Tooltip>
+        <TooltipTrigger render={<span role="heading" aria-level={3} />} className="truncate">
+          {props.environmentLabel ?? "Device"}
+        </TooltipTrigger>
+        <TooltipPopup>{props.environmentTitle ?? props.environmentLabel ?? "Device"}</TooltipPopup>
+      </Tooltip>
+    </div>
+  ) : null;
+
   if (variant === "slim") {
     return (
       <li
         data-thread-item
         {...sortableRootProps}
         className={cn(
-          // Matches the h-9 row so unrendered rows never shift the list when they paint.
-          "list-none [content-visibility:auto] [contain-intrinsic-size:auto_36px]",
+          deviceGroupClass,
+          "list-none [content-visibility:auto]",
+          props.deviceGroup?.heading
+            ? "[contain-intrinsic-size:auto_64px]"
+            : "[contain-intrinsic-size:auto_36px]",
           sortable?.isDragging && "relative z-20",
         )}
         data-current-thread={props.isActive || undefined}
       >
+        {deviceHeading}
         <Tooltip disabled={sortable?.isDragging}>
           <TooltipTrigger
             render={
@@ -1818,11 +1853,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       {...sortableRootProps}
       data-current-thread={props.isActive || undefined}
       className={cn(
-        // The 72px content and 2px border keep the original compact card height.
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_74px]",
+        deviceGroupClass,
+        "list-none py-0.5 [content-visibility:auto]",
+        props.deviceGroup?.heading
+          ? "[contain-intrinsic-size:auto_102px]"
+          : "[contain-intrinsic-size:auto_74px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
+      {deviceHeading}
       <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
         <TooltipTrigger
           render={
@@ -2194,6 +2233,7 @@ export default function Sidebar() {
   const profileWriteBlockReason = useProfileWriteBlockReason();
   const primarySettingsLoaded = profileWriteBlockReason === null;
   const updatePrimarySettings = useUpdatePrimarySettings();
+  const saveSpaceProfiles = useSaveProfiles();
   const latestProfilesRef = useRef(rawProfiles);
   latestProfilesRef.current = rawProfiles;
   const resolvedProfiles = useMemo(() => resolveProfiles(rawProfiles), [rawProfiles]);
@@ -2235,24 +2275,38 @@ export default function Sidebar() {
   } | null>(null);
   const changeSpaces = useCallback(
     (profile: Profile) => {
-      if (!primarySettingsLoaded || profile.id === ALL_PROFILE_ID) return;
-      const previous = latestProfilesRef.current.find((item) => item.id === profile.id);
-      const removed = previous?.spaces?.find(
-        (space) => !profile.spaces?.some((item) => item.id === space.id),
+      const baseProfiles = latestProfilesRef.current;
+      const saved = (async () => {
+        if (!primarySettingsLoaded || profile.id === ALL_PROFILE_ID)
+          throw new Error(profileWriteBlockReason ?? "Choose a profile first.");
+        await saveSpaceProfiles((current) =>
+          mergeProfileEdits(
+            current,
+            baseProfiles,
+            baseProfiles.map((item) => (item.id === profile.id ? profile : item)),
+          ),
+        );
+        const previous = baseProfiles.find((item) => item.id === profile.id);
+        const removed = previous?.spaces?.find(
+          (space) => !profile.spaces?.some((item) => item.id === space.id),
+        );
+        if (removed)
+          setDeletedSpace({
+            profileId: profile.id,
+            space: removed,
+            index: previous!.spaces!.indexOf(removed),
+          });
+      })();
+      void saved.catch((error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: "Space changes not saved",
+          description: error instanceof Error ? error.message : "Try again.",
+        }),
       );
-      if (removed)
-        setDeletedSpace({
-          profileId: profile.id,
-          space: removed,
-          index: previous!.spaces!.indexOf(removed),
-        });
-      updatePrimarySettings({
-        profiles: latestProfilesRef.current.map((item) =>
-          item.id === profile.id ? profile : item,
-        ),
-      });
+      return saved;
     },
-    [primarySettingsLoaded, updatePrimarySettings],
+    [primarySettingsLoaded, profileWriteBlockReason, saveSpaceProfiles],
   );
   const moveSpaceThreads = useCallback(
     (keys: string[], spaceId: string | null, profileId = activeProfile.id) => {
@@ -2515,7 +2569,7 @@ export default function Sidebar() {
   );
   const projectDisplayNameByKey = useMemo(
     () =>
-      new Map(
+      new Map<string, string>(
         allProjectGroups.flatMap((group) =>
           group.memberProjects.map(
             (project) => [`${project.environmentId}:${project.id}`, group.displayName] as const,
@@ -3620,6 +3674,25 @@ export default function Sidebar() {
     visibleSnoozedThreads,
     threadByKey,
   ]);
+  const deviceGroupByThread = useMemo(() => {
+    const groups = new Map<string, { first: boolean; last: boolean; heading: boolean }>();
+    sidebarListItems.forEach((item, index) => {
+      if (item.kind !== "thread") return;
+      const previous = sidebarListItems[index - 1];
+      const next = sidebarListItems[index + 1];
+      const sameGroup = (other: SidebarListItem | undefined) =>
+        other?.kind === "thread" &&
+        other.environmentId === item.environmentId &&
+        other.section === item.section;
+      const first = !sameGroup(previous);
+      groups.set(item.key, {
+        first,
+        last: !sameGroup(next),
+        heading: first && previous?.kind !== "device",
+      });
+    });
+    return groups;
+  }, [sidebarListItems]);
   useEffect(() => {
     if (
       dragState !== null &&
@@ -4647,6 +4720,20 @@ export default function Sidebar() {
         }
         return;
       }
+      const profileIndex = PROFILE_JUMP_KEYBINDING_COMMANDS.findIndex((item) => item === command);
+      const spaceIndex = SPACE_JUMP_KEYBINDING_COMMANDS.findIndex((item) => item === command);
+      if (profileIndex >= 0 || spaceIndex >= 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        const profile = resolvedProfiles[profileIndex];
+        if (profile) setActiveProfileId(profile.id === ALL_PROFILE_ID ? null : profile.id);
+        if (spaceIndex === 0) setSelectedSpaceId(OUTSIDE_SPACES);
+        else if (spaceIndex > 0) {
+          const space = activeProfile.spaces?.[spaceIndex - 1];
+          if (space) setSelectedSpaceId(space.id);
+        }
+        return;
+      }
       const jumpIndex = threadJumpIndexFromCommand(command ?? "");
       if (jumpIndex === null) return;
       navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
@@ -4655,6 +4742,8 @@ export default function Sidebar() {
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [
     activeProfileId,
+    activeProfile.spaces,
+    setSelectedSpaceId,
     keybindings,
     navigateToThread,
     orderedThreadKeys,
@@ -4666,8 +4755,7 @@ export default function Sidebar() {
   ]);
 
   // Same predicate as v1: hints show only while the held modifiers exactly
-  // match a thread-jump binding. Adding Shift (screenshots) or Alt no
-  // longer matches ⌘1..9, so the overlay hides for chords like ⌘⇧4.
+  // match the configured chat-jump binding, including custom modifiers.
   const shortcutModifiers = useShortcutModifierState();
   const terminalFocused = useTerminalFocus();
   const shouldShowJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
@@ -5154,6 +5242,10 @@ export default function Sidebar() {
               </div>
               <ProfileStrip
                 profiles={resolvedProfiles}
+                shortcuts={resolvedProfiles.map((_, index) => {
+                  const command = PROFILE_JUMP_KEYBINDING_COMMANDS[index];
+                  return command ? shortcutLabelForCommand(keybindings, command) : null;
+                })}
                 activeProfileId={activeProfileId}
                 onSelect={(id) => setActiveProfileId(id === ALL_PROFILE_ID ? null : id)}
               />
@@ -5263,11 +5355,7 @@ export default function Sidebar() {
               >
                 <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
                 <SortableContext items={sortableIds} strategy={sidebarSortingStrategy}>
-                  <ul
-                    ref={attachListMotionRef}
-                    role="list"
-                    className="relative flex flex-col gap-px"
-                  >
+                  <ul ref={attachListMotionRef} role="list" className="relative flex flex-col">
                     {(() => {
                       const renderThreadRowInner = (
                         thread: EnvironmentThreadShell,
@@ -5337,7 +5425,12 @@ export default function Sidebar() {
                             jumpLabel={
                               showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
-                            hideEnvironment={section === "active"}
+                            hideEnvironment
+                            deviceGroup={deviceGroupByThread.get(threadKey)}
+                            deviceGroupsDragging={dragState !== null}
+                            environmentTitle={
+                              serverConfigs.get(thread.environmentId)?.environment.label
+                            }
                             currentEnvironmentId={primaryEnvironmentId}
                             environmentLabel={
                               environmentLabelById.get(thread.environmentId) ?? null
@@ -5469,8 +5562,9 @@ export default function Sidebar() {
                             }
                             strategy={spaceSortingStrategy}
                           >
-                            <ul aria-label="Spaces" className="mt-1 grid grid-cols-2 gap-1.5">
+                            <ul aria-label="Spaces" className="mt-1 grid grid-cols-3 gap-1.5">
                               <DefaultSpaceTile
+                                shortcut={shortcutLabelForCommand(keybindings, "space.jump.1")}
                                 profileId={activeProfile.id}
                                 dropDisabled={!primarySettingsLoaded}
                                 count={spaceCounts.get(OUTSIDE_SPACES) ?? 0}
@@ -5481,12 +5575,34 @@ export default function Sidebar() {
                                   openChatCreation();
                                 }}
                               />
-                              {activeProfile.spaces?.map((space) => (
+                              {activeProfile.spaces?.map((space, index) => (
                                 <SpaceTile
                                   offerSetup={newSpaceSetupId === space.id}
                                   key={space.id}
                                   profile={activeProfile}
                                   space={space}
+                                  shortcut={
+                                    SPACE_JUMP_KEYBINDING_COMMANDS[index + 1]
+                                      ? shortcutLabelForCommand(
+                                          keybindings,
+                                          SPACE_JUMP_KEYBINDING_COMMANDS[index + 1]!,
+                                        )
+                                      : null
+                                  }
+                                  projects={spaceProjectKeys(space).map((key) => ({
+                                    key,
+                                    project: projectByKey.get(key) ?? null,
+                                    name:
+                                      projectDisplayNameByKey.get(key) ??
+                                      projectByKey.get(key)?.title ??
+                                      "Unavailable project",
+                                    device:
+                                      environmentLabelById.get(key.split(":")[0]!) ??
+                                      (key === space.newChatDefaults?.projectKey
+                                        ? space.newChatDefaults.deviceLabel
+                                        : null) ??
+                                      "Unavailable device",
+                                  }))}
                                   count={spaceCounts.get(space.id) ?? 0}
                                   attention={threads.some(
                                     (thread) =>
@@ -5554,20 +5670,29 @@ export default function Sidebar() {
                               key={sidebarListItemId(item)}
                               deviceId={item.environmentId}
                               data-testid="sidebar-device-header"
-                              className="flex h-7 items-center gap-1.5 px-2.5 text-[11px] text-sidebar-muted-foreground"
+                              className={cn(
+                                "mx-1 mt-2 flex h-8 items-center gap-1.5 rounded-t-xl border-x border-t border-sidebar-border/70 px-2.5 text-[10px] text-sidebar-muted-foreground",
+                                dragState && "border-transparent",
+                              )}
                             >
                               <EnvironmentMachineIcon
                                 kind={environmentMachineById.get(item.environmentId) ?? "server"}
                                 className="size-3 shrink-0"
                                 aria-hidden
                               />
-                              <span
-                                role="heading"
-                                aria-level={3}
-                                className="min-w-0 flex-1 truncate"
-                              >
-                                {environmentLabelById.get(item.environmentId) ?? "Device"}
-                              </span>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={<span role="heading" aria-level={3} />}
+                                  className="min-w-0 flex-1 truncate"
+                                >
+                                  {environmentLabelById.get(item.environmentId) ?? "Device"}
+                                </TooltipTrigger>
+                                <TooltipPopup>
+                                  {environment?.serverConfig?.environment.label ??
+                                    environment?.label ??
+                                    "Device"}
+                                </TooltipPopup>
+                              </Tooltip>
                               <span>
                                 {
                                   activeDeviceGroups.find(([id]) => id === item.environmentId)?.[1]
@@ -5683,7 +5808,7 @@ export default function Sidebar() {
                                 key="settled-shelf-header"
                                 marker="settled-header"
                                 label={
-                                  settledShelfExpanded
+                                  settledShelfExpanded && settledThreads.length > 0
                                     ? "Settled"
                                     : `Settled (${settledThreads.length})`
                                 }

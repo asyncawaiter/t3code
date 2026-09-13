@@ -19,6 +19,7 @@ import { connectionAtomRuntime } from "../connection/runtime";
 import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { environmentSession } from "./session";
 import { resolveProfileSource } from "@t3tools/client-runtime/state/profiles";
+import { profileEditsAtom } from "./profileEdits";
 import { readProfileCache } from "./profileSyncCache";
 
 // Opted in for every environment, not just the primary one. Only the primary
@@ -85,21 +86,28 @@ export const primaryServerWelcomeAtom = Atom.make(
 
 export const profileSourceAtom = Atom.make((get) => {
   const configs = get(environmentServerConfigsAtom);
-  const resolved = resolveProfileSource(configs, get(primaryEnvironmentIdAtom));
-  const config = resolved.sourceId ? configs.get(resolved.sourceId) : undefined;
+  const primaryId = get(primaryEnvironmentIdAtom);
+  const resolved = resolveProfileSource(configs, primaryId);
   const cached = readProfileCache();
+  const { draft } = get(profileEditsAtom);
+  const sourceId = draft?.sourceId ?? resolved.sourceId ?? cached?.sourceId ?? primaryId;
+  const config = sourceId ? configs.get(sourceId) : undefined;
   return {
-    ...resolved,
+    sourceId,
+    conflict:
+      resolved.conflict || !!(draft && resolved.sourceId && draft.sourceId !== resolved.sourceId),
     config: config ?? null,
     profiles:
-      config?.settings.profiles ?? (cached?.sourceId === resolved.sourceId ? cached.profiles : []),
+      draft?.profiles ??
+      config?.settings.profiles ??
+      (cached?.sourceId === sourceId ? cached.profiles : []),
   };
 }).pipe(Atom.withLabel("web-profile-source"));
 
 export const primaryServerSettingsAtom = Atom.make((get): ServerSettings => {
   const settings = get(primaryServerConfigAtom)?.settings ?? DEFAULT_SERVER_SETTINGS;
   const source = get(profileSourceAtom);
-  return { ...settings, profiles: source.conflict ? settings.profiles : source.profiles };
+  return { ...settings, profiles: source.profiles };
 }).pipe(Atom.withLabel("web-primary-server-settings"));
 
 export const primaryServerProvidersAtom = Atom.make(

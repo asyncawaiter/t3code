@@ -2,11 +2,13 @@ import {
   ALL_PROFILE_ID,
   indexProfilePins,
   indexProfileSpaces,
-  type Profile,
-  type EnvironmentId,
+  Profile,
+  mergeProfileEdits,
+  EnvironmentId,
   type ServerConfig,
   type ServerSettings,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 
 /** Discover one source, preserving divergent legacy collections until the user chooses. */
@@ -159,4 +161,141 @@ export function moveProjectToProfile(
       threadPins: profile.threadPins?.filter((pin) => pin.projectKey !== projectKey),
     };
   });
+}
+
+const ProfileEditDraft = Schema.NullOr(
+  Schema.Struct({
+    sourceId: EnvironmentId,
+    base: Schema.Array(Profile),
+    profiles: Schema.Array(Profile),
+  }),
+);
+const decodeProfileEditDraft = Schema.decodeUnknownSync(ProfileEditDraft);
+const decodeProfiles = Schema.decodeUnknownSync(Schema.Array(Profile));
+export type ProfileEditState = {
+  loaded: boolean;
+  draft: typeof ProfileEditDraft.Type;
+  error: string | null;
+};
+
+/** Persist organization edits before exposing them, then merge against fresh shared settings. */
+export function createProfileEditQueue(storage: {
+  read: () => Promise<string | null>;
+  write: (value: string) => Promise<void>;
+  changed: (state: ProfileEditState) => void;
+  lock?: (scope: "edit" | "sync", run: () => Promise<void>) => Promise<void>;
+}) {
+  let state: ProfileEditState = { loaded: false, draft: null, error: null };
+  const publish = (next: ProfileEditState) => {
+    state = next;
+    storage.changed(state);
+  };
+  const loaded = storage
+    .read()
+    .then((value) =>
+      publish({
+        loaded: true,
+        draft: value ? decodeProfileEditDraft(JSON.parse(value)) : null,
+        error: null,
+      }),
+    )
+    .catch((error: unknown) => {
+      publish({ ...state, error: `Could not load pending organization edits: ${String(error)}` });
+    });
+  const lock = storage.lock ?? ((_scope, run) => run());
+  const refresh = async () => {
+    const value = await storage.read();
+    const draft = value ? decodeProfileEditDraft(JSON.parse(value)) : null;
+    if (!Equal.equals(state.draft, draft)) publish({ loaded: true, draft, error: null });
+  };
+  let writes = loaded;
+  const change = (update: () => Promise<void>) => {
+    const result = writes.then(() =>
+      lock("edit", async () => {
+        if (storage.lock) await refresh();
+        await update();
+      }),
+    );
+    writes = result.catch(() => {});
+    return result;
+  };
+  const store = async (draft: typeof ProfileEditDraft.Type) => {
+    await storage.write(JSON.stringify(draft));
+    publish({ loaded: true, draft, error: null });
+  };
+  let draining: Promise<void> | null = null;
+  return {
+    ready: loaded,
+    snapshot: () => state,
+    refresh: () => change(refresh),
+    edit: (
+      sourceId: EnvironmentId,
+      profiles: ReadonlyArray<Profile>,
+      update: (profiles: ReadonlyArray<Profile>) => ReadonlyArray<Profile>,
+    ) =>
+      change(async () => {
+        if (!state.loaded) throw new Error(state.error ?? "Loading saved organization edits.");
+        if (state.draft && state.draft.sourceId !== sourceId)
+          throw new Error("Sync pending organization edits before changing the shared source.");
+        const current = state.draft?.profiles ?? profiles;
+        const next = decodeProfiles(update(current));
+        if (Equal.equals(current, next)) return;
+        await store({ sourceId, base: state.draft?.base ?? profiles, profiles: next });
+      }),
+    discard: async () => {
+      if (draining) throw new Error("Wait for the current sync to finish before discarding edits.");
+      await lock("sync", () => change(() => store(null)));
+    },
+    flush(io: {
+      canSync: (sourceId: EnvironmentId) => boolean;
+      read: (
+        sourceId: EnvironmentId,
+      ) => Promise<Pick<ServerSettings, "profiles" | "profileSyncSourceId">>;
+      save: (
+        sourceId: EnvironmentId,
+        profiles: ReadonlyArray<Profile>,
+        base: ReadonlyArray<Profile>,
+      ) => Promise<void>;
+    }): Promise<void> {
+      if (draining) return draining;
+      draining = lock("sync", async () => {
+        await change(async () => {});
+        while (state.draft && io.canSync(state.draft.sourceId)) {
+          const sent = state.draft;
+          const remote = await io.read(sent.sourceId);
+          if (!io.canSync(sent.sourceId)) return;
+          if (remote.profileSyncSourceId && remote.profileSyncSourceId !== sent.sourceId)
+            throw new Error(
+              "The shared profile source changed. Pending edits remain on this device.",
+            );
+          const merged = mergeProfileEdits(remote.profiles, sent.base, sent.profiles);
+          await io.save(sent.sourceId, merged, remote.profiles);
+          await change(async () => {
+            const current = state.draft;
+            if (!current || current.sourceId !== sent.sourceId) return;
+            if (Equal.equals(current, sent)) await store(null);
+            else
+              await store({
+                sourceId: current.sourceId,
+                base: merged,
+                profiles: mergeProfileEdits(merged, sent.profiles, current.profiles),
+              });
+          });
+        }
+      })
+        .catch((error: unknown) => {
+          publish({
+            ...state,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Organization sync failed. Retry when connected.",
+          });
+        })
+        .finally(() => {
+          draining = null;
+        });
+      return draining;
+    },
+  };
 }

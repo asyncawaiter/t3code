@@ -1,3 +1,4 @@
+import { useProfileSync } from "./state/profiles";
 import { PullRequestsScreen } from "./features/dashboard/PullRequestsScreen";
 import { DashboardScreen } from "./features/dashboard/DashboardScreen";
 import {
@@ -380,6 +381,7 @@ function RootStackLayout(props: {
   readonly state: NavigationState;
 }) {
   const navigation = useNavigation();
+  useProfileSync();
   const { pendingShare } = useIncomingShare();
   const sharePresentationRef = useRef(EMPTY_INCOMING_SHARE_PRESENTATION_STATE);
   useAgentNotificationNavigation();

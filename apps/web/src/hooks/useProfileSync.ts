@@ -1,8 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import { type Profile } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { useCallback } from "react";
-import { saveSharedProfiles } from "@t3tools/client-runtime/state/profiles";
+import { useCallback, useEffect } from "react";
+import { profileEdits, profileEditsAtom } from "../state/profileEdits";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { profileSourceAtom, serverEnvironment } from "../state/server";
 import { useEnvironments } from "../state/environments";
@@ -15,29 +15,58 @@ export function useProfilesLoaded() {
 
 export function useProfileWriteBlockReason(): string | null {
   const source = useAtomValue(profileSourceAtom);
-  const { environments } = useEnvironments();
-  if (source.conflict)
-    return "Devices have conflicting profile sources. Choose one in Settings > General > Profiles.";
-  const environment = environments.find((env) => env.environmentId === source.sourceId);
-  const label = environment?.label ?? "the shared profile source";
-  if (environment?.connection.phase !== "connected")
-    return `Connect ${label} to save Space changes or open a chat in this Space.`;
-  if (!source.config) return `Loading profiles from ${label}.`;
-  if (source.config.environment.capabilities.profileSynchronization !== true)
-    return `Update ${label} to a version that supports shared profiles.`;
+  const edits = useAtomValue(profileEditsAtom);
+  if (!edits.loaded) return edits.error ?? "Loading saved organization edits.";
+  if (!source.sourceId) return "Choose a profile source in Settings > General > Profiles.";
+  if (!source.config && !source.profiles.length) return "Loading your saved profiles.";
   return null;
 }
 
+export function useProfileSyncConnection() {
+  const source = useAtomValue(profileSourceAtom);
+  const { environments } = useEnvironments();
+  return (
+    !source.conflict &&
+    source.config?.environment.capabilities.profileSynchronization === true &&
+    environments.some(
+      (env) => env.environmentId === source.sourceId && env.connection.phase === "connected",
+    )
+  );
+}
+
 export function useSaveProfiles() {
+  return useCallback(
+    async (update: (profiles: ReadonlyArray<Profile>) => ReadonlyArray<Profile>) => {
+      const source = appAtomRegistry.get(profileSourceAtom);
+      if (!source.sourceId) throw new Error("Choose a profile source before editing organization.");
+      await profileEdits.edit(source.sourceId, source.profiles, update);
+    },
+    [],
+  );
+}
+
+export function useSyncProfileEdits() {
+  const source = useAtomValue(profileSourceAtom);
+  const edits = useAtomValue(profileEditsAtom);
+  const connected = useProfileSyncConnection();
+
   const persist = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const read = useAtomQueryRunner(serverEnvironment.settings, {
     reportFailure: false,
     refresh: true,
   });
-  return useCallback(
-    (update: (profiles: ReadonlyArray<Profile>) => ReadonlyArray<Profile>) =>
-      saveSharedProfiles(update, {
-        getSource: () => appAtomRegistry.get(profileSourceAtom),
+  const flush = useCallback(
+    () =>
+      profileEdits.flush({
+        canSync: (id) => {
+          const current = appAtomRegistry.get(profileSourceAtom);
+          return (
+            connected &&
+            !current.conflict &&
+            current.sourceId === id &&
+            current.config?.environment.capabilities.profileSynchronization === true
+          );
+        },
         read: async (id) => {
           const result = await read({ environmentId: id, input: {} });
           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
@@ -51,6 +80,10 @@ export function useSaveProfiles() {
           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         },
       }),
-    [persist, read],
+    [connected, persist, read],
   );
+  useEffect(() => {
+    if (connected && source.config && edits.draft) void flush();
+  }, [connected, edits.draft, source.config, flush]);
+  return { ...edits, retry: flush };
 }

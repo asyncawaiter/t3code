@@ -5,10 +5,11 @@ import type {
   UsageProviderKind,
   UsageProviderLimits,
 } from "@t3tools/contracts";
-import { compactUsageWindowLabel, formatDuration } from "@t3tools/shared/usageLimits";
+import { formatDuration } from "@t3tools/shared/usageLimits";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useState } from "react";
+import { CalendarDaysIcon, Clock3Icon, CpuIcon } from "lucide-react";
 
 import { serverEnvironment } from "../../state/server";
 import { PROVIDER_PRESENTATION, ProviderMark } from "../usage/usageProviders";
@@ -18,6 +19,13 @@ import { composerFloatingLayerProps } from "./composerEventScope";
 
 function usedPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
+}
+
+function windowIcon(window: UsageProviderLimits["windows"][number]) {
+  if (window.id.startsWith("seven_day_")) return CpuIcon;
+  return (window.windowMinutes ?? 0) >= 1440 || window.id === "seven_day"
+    ? CalendarDaysIcon
+    : Clock3Icon;
 }
 
 function triggerLabel(provider: UsageProviderKind, limits: UsageProviderLimits | null): string {
@@ -60,11 +68,15 @@ function LimitsPopover({
         <div className="flex flex-col gap-3">
           {limits.windows.map((window) => {
             const percent = usedPercent(window.usedPercent);
+            const Icon = windowIcon(window);
             const resetAt = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
             return (
               <div key={window.id} className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between gap-3 text-xs">
-                  <span className="truncate text-secondary-label">{window.label}</span>
+                  <span className="flex min-w-0 items-center gap-2 text-secondary-label">
+                    <Icon aria-hidden className="size-3 shrink-0" />
+                    <span className="truncate">{window.label}</span>
+                  </span>
                   <span className="font-medium tabular-nums text-foreground">
                     {Math.round(window.usedPercent)}%
                   </span>
@@ -146,35 +158,22 @@ export function UsageLimitsMeter({
           <Button
             size="sm"
             variant="ghost-muted"
-            className="h-auto min-h-7 min-w-12 max-w-full flex-wrap gap-2 rounded-full bg-muted/50 px-2 py-1 text-[11px] tabular-nums hover:text-foreground data-pressed:text-foreground [&_svg]:mx-0"
+            className="h-7 shrink-0 gap-2.5 rounded-md px-1.5 text-[10px] tabular-nums hover:text-foreground data-pressed:text-foreground [&_svg]:mx-0"
             aria-label={triggerLabel(provider, limits)}
           >
             <ProviderMark provider={provider} className="size-3.5" />
             {limits?.windows.length ? (
               limits.windows.map((window) => {
                 const percent = Math.round(usedPercent(window.usedPercent));
-                const label = compactUsageWindowLabel(window);
+                const Icon = windowIcon(window);
                 return (
-                  <span key={window.id} className="inline-flex flex-col gap-0.5">
-                    <span className="inline-flex gap-1 leading-none">
-                      <span className="text-secondary-label">{label}</span>
-                      <span className={percent > 90 ? "text-error" : ""}>{`${percent}%`}</span>
-                    </span>
-                    <span
-                      aria-hidden
-                      className="h-0.5 w-full overflow-hidden rounded-full bg-muted"
-                    >
-                      <span
-                        className="block h-full rounded-full"
-                        style={{
-                          width: `${percent}%`,
-                          backgroundColor:
-                            percent > 90
-                              ? "var(--color-error)"
-                              : PROVIDER_PRESENTATION[provider].color,
-                        }}
-                      />
-                    </span>
+                  <span
+                    key={window.id}
+                    className="inline-flex items-center gap-1 leading-none"
+                    aria-label={`${window.label}: ${percent}% used`}
+                  >
+                    <Icon aria-hidden className="size-3 text-secondary-label" />
+                    <span className={percent > 90 ? "text-error" : ""}>{`${percent}%`}</span>
                   </span>
                 );
               })

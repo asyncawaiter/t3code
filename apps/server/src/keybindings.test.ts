@@ -172,6 +172,24 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }),
   );
 
+  it.effect("moves legacy chat digits to their new binding and preserves custom shortcuts", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+1", command: "thread.jump.1" },
+        { key: "mod+alt+x", command: "thread.jump.2" },
+      ]);
+      const service = yield* Keybindings.Keybindings;
+      yield* service.syncDefaultKeybindingsOnStartup;
+      const saved = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.equal(saved.find((rule) => rule.command === "thread.jump.1")?.key, "meta+ctrl+1");
+      assert.equal(saved.find((rule) => rule.command === "thread.jump.2")?.key, "mod+alt+x");
+      assert.equal(saved.find((rule) => rule.command === "space.jump.1")?.key, "mod+1");
+      yield* service.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), saved);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
   it.effect("bootstraps default keybindings when config file is missing", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

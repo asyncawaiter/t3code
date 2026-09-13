@@ -3,15 +3,25 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { SpaceLaunch } from "./SpaceLaunch";
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
-import { useDroppable } from "@dnd-kit/core";
+import { useDndContext, useDroppable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusIcon, CheckIcon, XIcon, PencilIcon, MoreHorizontalIcon } from "lucide-react";
+import {
+  PlusIcon,
+  CheckIcon,
+  XIcon,
+  PencilIcon,
+  MoreHorizontalIcon,
+  InboxIcon,
+  Layers3Icon,
+} from "lucide-react";
 import { type Profile, type ProfileSpace, ALL_PROFILE_ID } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { PreviewCard, PreviewCardTrigger, PreviewCardPopup } from "../ui/preview-card";
+import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { randomUUID, cn } from "../../lib/utils";
 import { spaceDragId } from "./Spaces.logic";
 
@@ -25,18 +35,35 @@ function SpaceNameEditor({
   initialName: string;
   label: string;
   disabled: boolean;
-  onSave: (name: string) => void;
+  onSave: (name: string) => void | Promise<void>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initialName);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   return (
     <form
-      className="flex h-9 min-w-0 flex-1 items-center gap-1 rounded-md border border-sidebar-border bg-sidebar-control-surface/50 px-2"
+      className="flex min-h-9 min-w-0 flex-1 flex-wrap items-center gap-1 rounded-md border border-sidebar-border bg-sidebar-control-surface/50 px-2"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!disabled && name.trim()) onSave(name.trim());
+        if (disabled || saving || !name.trim()) return;
+        setSaving(true);
+        setError(null);
+        void Promise.resolve()
+          .then(() => onSave(name.trim()))
+          .catch((cause: unknown) => {
+            setError(
+              cause instanceof Error ? cause.message : "Space could not be saved. Try again.",
+            );
+          })
+          .finally(() => setSaving(false));
       }}
     >
+      {error && (
+        <span role="alert" className="w-full text-xs text-destructive">
+          {error}
+        </span>
+      )}
       <Input
         autoFocus
         size="compact"
@@ -44,7 +71,7 @@ function SpaceNameEditor({
         placeholder="Name this space"
         maxLength={48}
         value={name}
-        disabled={disabled}
+        disabled={disabled || saving}
         className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
         onChange={(event) => setName(event.target.value)}
         onKeyDown={(event) => {
@@ -59,7 +86,7 @@ function SpaceNameEditor({
         size="icon-xs"
         variant="ghost"
         aria-label="Save space name"
-        disabled={disabled || !name.trim()}
+        disabled={disabled || saving || !name.trim()}
       >
         <CheckIcon className="size-3.5" />
       </Button>
@@ -68,6 +95,7 @@ function SpaceNameEditor({
         size="icon-xs"
         variant="ghost"
         aria-label="Cancel space name"
+        disabled={saving}
         onClick={onCancel}
       >
         <XIcon className="size-3.5" />
@@ -85,7 +113,7 @@ export function SpaceToolbar({
   onFilterChange,
 }: {
   profile: Profile;
-  onChange: (profile: Profile) => void;
+  onChange: (profile: Profile) => void | Promise<void>;
   disabled: boolean;
   onCreated?: (id: string) => void;
   selectedSpaceId: string | null;
@@ -144,10 +172,10 @@ export function SpaceToolbar({
           label="New space name"
           disabled={disabled}
           onCancel={() => setCreating(false)}
-          onSave={(name) => {
+          onSave={async (name) => {
             if ((profile.spaces?.length ?? 0) >= 64) return;
             const id = randomUUID();
-            onChange({
+            await onChange({
               ...profile,
               spaces: [...(profile.spaces ?? []), { id, name, threads: [] }],
             });
@@ -167,6 +195,7 @@ export function DefaultSpaceTile({
   selected,
   onSelect,
   onNewChat,
+  shortcut,
 }: {
   profileId: string;
   dropDisabled: boolean;
@@ -174,6 +203,7 @@ export function DefaultSpaceTile({
   selected: boolean;
   onSelect: () => void;
   onNewChat: () => void;
+  shortcut?: string | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: spaceDragId(profileId, null),
@@ -184,7 +214,7 @@ export function DefaultSpaceTile({
     <li
       ref={setNodeRef}
       className={cn(
-        "relative h-18 min-w-0 list-none rounded-xl",
+        "relative h-19 min-w-0 list-none rounded-xl",
         isOver && "ring-2 ring-sidebar-foreground/50",
       )}
       data-thread-selection-safe
@@ -195,16 +225,23 @@ export function DefaultSpaceTile({
         aria-pressed={selected}
         onClick={onSelect}
         className={cn(
-          "flex h-full w-full flex-col items-start rounded-xl px-2.5 py-2 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
+          "flex h-full w-full flex-col items-start rounded-xl px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
           selected
-            ? "bg-zinc-700 text-zinc-50 dark:bg-zinc-300 dark:text-zinc-900"
+            ? "bg-[color-mix(in_srgb,var(--sidebar-row-active)_85%,transparent)] text-sidebar-foreground ring-1 ring-inset ring-sidebar-border"
             : "bg-sidebar-foreground/5 text-sidebar-foreground hover:bg-sidebar-foreground/10",
         )}
       >
-        <span className="w-full truncate text-xs font-medium leading-4">Default</span>
-        <span className="w-full truncate text-[10px] leading-3.5 opacity-75">Unassigned chats</span>
-        <span className="mt-auto w-full truncate pr-7 text-[10px] opacity-75">
-          {count} {count === 1 ? "chat" : "chats"}
+        <span className="mb-0.5 flex w-full items-center gap-1.5">
+          <InboxIcon aria-hidden className="size-4" />
+        </span>
+        <span className="line-clamp-2 w-full break-words text-xs font-medium leading-3.5">
+          Default
+        </span>
+        <span className="mt-auto flex w-full min-w-0 items-center gap-1 pr-5 text-[10px] opacity-75">
+          <span className="truncate">
+            {count} {count === 1 ? "chat" : "chats"}
+          </span>
+          {shortcut && <span className="ml-auto shrink-0 text-[9px] opacity-75">{shortcut}</span>}
         </span>
       </button>
       <Button
@@ -215,7 +252,7 @@ export function DefaultSpaceTile({
         className={cn(
           "absolute bottom-1 right-1 [--control-icon-color:currentColor]",
           selected &&
-            "text-zinc-50 hover:bg-white/10 hover:text-zinc-50 dark:text-zinc-900 dark:hover:bg-black/10 dark:hover:text-zinc-900",
+            "text-sidebar-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
         )}
       >
         <PlusIcon className="size-3.5" />
@@ -231,6 +268,8 @@ export function SpaceTile({
   count,
   selected,
   attention,
+  projects,
+  shortcut,
   onSelect,
   onChange,
   onLaunch,
@@ -239,11 +278,18 @@ export function SpaceTile({
   offerSetup?: boolean;
   profile: Profile;
   space: ProfileSpace;
+  projects: ReadonlyArray<{
+    key: string;
+    project: ProjectFaviconProject | null;
+    name: string;
+    device: string;
+  }>;
+  shortcut?: string | null;
   count: number;
   selected: boolean;
   attention: boolean;
   onSelect: () => void;
-  onChange: (profile: Profile) => void;
+  onChange: (profile: Profile) => void | Promise<void>;
   onLaunch: (
     project: ScopedProjectRef,
     defaults: NonNullable<ProfileSpace["newChatDefaults"]>,
@@ -274,6 +320,8 @@ export function SpaceTile({
   const [launchOpen, setLaunchOpen] = useState(offerSetup);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const { active: dragging } = useDndContext();
   const spaces = profile.spaces ?? [];
   const index = spaces.findIndex((item) => item.id === space.id);
   const move = (destination: number) => {
@@ -295,9 +343,9 @@ export function SpaceTile({
     >
       <div
         className={cn(
-          "group/space relative h-18 overflow-hidden rounded-xl transition-colors",
+          "group/space relative h-19 overflow-hidden rounded-xl transition-colors",
           selected
-            ? "bg-zinc-700 text-zinc-50 dark:bg-zinc-300 dark:text-zinc-900"
+            ? "bg-[color-mix(in_srgb,var(--sidebar-row-active)_85%,transparent)] text-sidebar-foreground ring-1 ring-inset ring-sidebar-border"
             : "bg-sidebar-foreground/5 text-sidebar-foreground hover:bg-sidebar-foreground/10",
           isOver && !isDragging && "ring-2 ring-inset ring-sidebar-foreground/50",
           isDragging && "opacity-30",
@@ -313,8 +361,8 @@ export function SpaceTile({
             label="Rename space"
             disabled={disabled}
             onCancel={() => setRenaming(false)}
-            onSave={(name) => {
-              onChange({
+            onSave={async (name) => {
+              await onChange({
                 ...profile,
                 spaces: spaces.map((item) => (item.id === space.id ? { ...item, name } : item)),
               });
@@ -323,54 +371,145 @@ export function SpaceTile({
           />
         ) : (
           <>
-            <button
-              ref={setActivatorNodeRef}
-              {...listeners}
-              type="button"
-              className="flex h-full w-full touch-none select-none flex-col items-start gap-0.5 px-2.5 py-2 pr-9 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
-              aria-label={`Open space ${space.name}`}
-              aria-pressed={selected}
-              onClick={onSelect}
-              aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"
-              aria-description="Drag to reorder, or hold Alt and use arrow keys."
-              onKeyDown={(event) => {
-                if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-                const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -2, ArrowDown: 2 }[
-                  event.key
-                ];
-                if (offset === undefined) return;
-                event.preventDefault();
-                event.stopPropagation();
-                move(index + offset);
-              }}
+            <PreviewCard
+              open={previewOpen && !dragging && !launchOpen && !menuOpen && !renaming}
+              onOpenChange={setPreviewOpen}
             >
-              <span className="flex w-full min-w-0 shrink-0 items-center gap-1.5 text-inherit">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<span className="truncate text-xs font-medium leading-4" />}
-                  >
-                    {space.name}
-                  </TooltipTrigger>
-                  <TooltipPopup>{space.name}</TooltipPopup>
-                </Tooltip>
-              </span>
-              <span className="mt-auto flex w-full min-w-0 items-center gap-1 text-[10px] text-inherit opacity-75">
-                {attention ? (
-                  <span
-                    aria-label="Needs attention"
-                    className="size-1.5 rounded-full bg-amber-500"
+              <PreviewCardTrigger
+                delay={400}
+                closeDelay={120}
+                onPointerDown={() => setPreviewOpen(false)}
+                render={
+                  <button
+                    ref={setActivatorNodeRef}
+                    {...listeners}
+                    type="button"
+                    className="flex h-full w-full touch-none select-none flex-col items-start gap-0.5 px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+                    aria-label={`Open space ${space.name}`}
+                    aria-pressed={selected}
+                    onClick={() => {
+                      setPreviewOpen(false);
+                      onSelect();
+                    }}
+                    aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"
+                    aria-description="Drag to reorder, or hold Alt and use arrow keys."
+                    onKeyDown={(event) => {
+                      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+                      const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 }[
+                        event.key
+                      ];
+                      if (offset === undefined) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      move(index + offset);
+                    }}
                   />
-                ) : null}
-                <span className="truncate">
-                  {count > 0 || draftCount === 0
-                    ? `${count} ${count === 1 ? "thread" : "threads"}`
-                    : ""}
-                  {count > 0 && draftCount > 0 ? " · " : ""}
-                  {draftCount > 0 ? `${draftCount} ${draftCount === 1 ? "draft" : "drafts"}` : ""}
+                }
+              >
+                <span
+                  className="mb-0.5 flex h-4 w-full items-center gap-0.5 pr-5"
+                  aria-hidden="true"
+                >
+                  {projects.length === 0 && <Layers3Icon className="size-3.5" />}
+                  {projects
+                    .slice(0, 3)
+                    .map(({ key, project }) =>
+                      project ? (
+                        <ProjectFavicon key={key} project={project} className="size-3.5 shrink-0" />
+                      ) : (
+                        <Layers3Icon key={key} className="size-3.5 shrink-0 opacity-50" />
+                      ),
+                    )}
+                  {projects.length > 3 && (
+                    <span className="text-[9px] text-sidebar-muted-foreground">
+                      +{projects.length - 3}
+                    </span>
+                  )}
                 </span>
-                {attention ? <span className="sr-only">Needs you</span> : null}
-              </span>
-            </button>
+                <span className="flex w-full min-w-0 shrink-0 items-center gap-1.5 text-inherit">
+                  <span className="line-clamp-2 w-full break-words text-xs font-medium leading-3.5">
+                    {space.name}
+                  </span>
+                </span>
+                <span className="mt-auto flex w-full min-w-0 items-center gap-1 pr-5 text-[10px] text-inherit opacity-75">
+                  {attention ? (
+                    <span
+                      aria-label="Needs attention"
+                      className="size-1.5 rounded-full bg-amber-500"
+                    />
+                  ) : null}
+                  <span className="truncate">
+                    {count > 0 || draftCount === 0
+                      ? `${count} ${count === 1 ? "thread" : "threads"}`
+                      : ""}
+                    {count > 0 && draftCount > 0 ? " · " : ""}
+                    {draftCount > 0 ? `${draftCount} ${draftCount === 1 ? "draft" : "drafts"}` : ""}
+                  </span>
+                  {attention ? <span className="sr-only">Needs you</span> : null}
+                  {shortcut && (
+                    <span className="ml-auto shrink-0 text-[9px] opacity-75">{shortcut}</span>
+                  )}
+                </span>
+              </PreviewCardTrigger>
+              <PreviewCardPopup
+                side="right"
+                align="start"
+                className="w-72 max-w-[calc(100vw-2rem)] rounded-lg p-2.5 shadow-md"
+                aria-label={`${space.name} details`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="break-words text-xs font-semibold leading-4">{space.name}</div>
+                    <div className="mt-0.5 text-[10px] leading-3.5 text-muted-foreground">
+                      {projects.length} {projects.length === 1 ? "project" : "projects"} · {count}{" "}
+                      {count === 1 ? "chat" : "chats"}
+                      {draftCount > 0 &&
+                        ` · ${draftCount} ${draftCount === 1 ? "draft" : "drafts"}`}
+                    </div>
+                  </div>
+                  {shortcut && (
+                    <kbd className="shrink-0 rounded bg-muted/60 px-1 py-0.5 font-sans text-[9px] leading-3 text-muted-foreground">
+                      {shortcut}
+                    </kbd>
+                  )}
+                </div>
+                {attention && (
+                  <p className="mt-1.5 text-[10px] leading-3.5 text-amber-600 dark:text-amber-400">
+                    Chats need your attention
+                  </p>
+                )}
+                {projects.length > 0 ? (
+                  <ul className="mt-2 max-h-56 space-y-2 overflow-y-auto border-t border-border/60 pt-2">
+                    {projects.map(({ key, project, name, device }) => (
+                      <li key={key} className="flex items-start gap-2">
+                        {project ? (
+                          <ProjectFavicon project={project} className="mt-0.5 size-4 shrink-0" />
+                        ) : (
+                          <Layers3Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="break-words text-[11px] font-medium leading-4">{name}</div>
+                          <div className="break-words text-[10px] leading-3.5 text-muted-foreground">
+                            {device}
+                            {key === space.newChatDefaults?.projectKey && " · New chats"}
+                          </div>
+                          <div className="mt-0.5 break-all text-[10px] leading-3.5 text-muted-foreground/80">
+                            {project?.workspaceRoot ??
+                              (key === space.newChatDefaults?.projectKey
+                                ? space.newChatDefaults.workspaceRoot
+                                : "Project details unavailable on this device")}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
+                    Add a chat or choose a project with + to get started.
+                  </p>
+                )}
+              </PreviewCardPopup>
+            </PreviewCard>
             <SpaceLaunch
               profile={profile}
               space={space}
@@ -391,7 +530,7 @@ export function SpaceTile({
                     className={cn(
                       "absolute right-1 top-1 opacity-75 hover:opacity-100 group-hover/space:opacity-100 focus-visible:opacity-100 [--control-icon-color:currentColor]",
                       selected
-                        ? "text-zinc-50 hover:bg-white/10 hover:text-zinc-50 dark:text-zinc-900 dark:hover:bg-black/10 dark:hover:text-zinc-900"
+                        ? "text-sidebar-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
                         : "text-sidebar-muted-foreground",
                     )}
                   />

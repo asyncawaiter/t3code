@@ -85,9 +85,9 @@ it("keeps the account meter and detailed reset popup current as the selected acc
     .findAllByType("span")
     .flatMap((node) => node.children.filter((child) => typeof child === "string"))
     .join(" ");
-  expect(triggerText).toContain("Overall");
+  expect(triggerText).not.toContain("Overall");
   expect(triggerText).toContain("18%");
-  expect(triggerText).toContain("Fable");
+  expect(triggerText).not.toContain("Fable");
   expect(triggerText).toContain("43%");
   expect(text()).toContain("62%");
   expect(text()).toContain("5 hour");

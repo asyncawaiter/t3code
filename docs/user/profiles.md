@@ -78,18 +78,34 @@ whose collection you want to use. Other devices' previous collections are retain
 deleted. Changing the source selects that device's stored collection; it does not move the current
 collection to that device.
 
-All participating clients and the source need a build supporting shared profiles. Keep the source
-connected to edit organization. If it disconnects, the last displayed collection is cached and
-read-only until it reconnects. Chats still use their normal host connections; profile sharing does
-not copy files, transfer execution, grant permissions, or connect an unpaired device automatically.
-Use **All** and the normal new-chat picker to work without changing organization when the source
-is unavailable.
+Once a profile is available on your device, you can create and edit its Spaces even when the
+shared source is offline or loading. Edits save on your device before appearing and survive an
+app restart. **Pending sync** means they have not reached the shared source yet. The app retries
+when that source reconnects with a build supporting shared profiles. Starting a chat still needs
+its execution device; creating an empty Space does not.
 
-Edits are saved on the source and delivered through the live connection. Independent changes can
-be combined, including two clients adding chats to the same space. Competing changes to the same
-field or placement are rejected with a retry message instead of silently overwriting either edit.
+Independent edits merge with the latest shared collection, including Spaces added on another
+device. Competing changes stay saved locally and show **Organization needs attention**. Open
+**Review** to retry or explicitly discard pending edits and use the shared version. Pending edits
+stay attached to their original source; sync or discard them before choosing a different source.
+On iPhone, tap the sync status for these actions. Local storage failures leave the Space editor open with an error.
+
+Profile sharing does not copy files, transfer execution, grant permissions, or connect an unpaired
+device automatically. The selected profile and Space remain independent on each device.
 
 ## Spaces
+
+Spaces use a fixed three-column grid. The sidebar can expand, but its minimum desktop width
+keeps all three columns usable. Tiles show the saved icons of their participating projects,
+the Space name, a quieter chat count, and the configured numbered shortcut. Up to three
+project icons appear on a tile, with an overflow count for additional projects. Hover or
+keyboard-focus a Space to see all project names, paths, devices, chat and draft counts,
+and the default project for new chats. Names can span two lines.
+Selected profiles and Spaces follow the current theme's chat highlight.
+
+Device headings and their chats share a subtle border within each section. Headings use the
+configured device name, with the server name on hover. Settled stays separated from the
+preceding chats by an inactive gap, so clicking just below a chat does not toggle the shelf.
 
 Spaces organize threads within a profile. Click **New space** beside the Spaces heading,
 enter a name, and press Enter. Each tile shows its chat count. **Default** is always the

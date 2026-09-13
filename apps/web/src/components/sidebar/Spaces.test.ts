@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import { Profile, moveThreadsToSpace, spaceForThread } from "@t3tools/contracts";
 import { moveProjectToProfile } from "../settings/ProjectSettingsPanel.logic";
+import { spaceProjectKeys } from "./Spaces.logic";
 
 const profile: Profile = {
   id: "work",
@@ -17,6 +18,33 @@ const first = { threadKey: "device-a:thread", projectKey: "device-a:repo" };
 const second = { threadKey: "device-b:thread", projectKey: "device-b:repo" };
 
 describe("Spaces", () => {
+  it("shows each participating project once, keeps devices distinct, and includes the launch project", () => {
+    expect(
+      spaceProjectKeys({
+        id: "build",
+        name: "Build",
+        threads: [first, { ...first, threadKey: "device-a:other" }, second],
+        newChatDefaults: {
+          projectKey: "device-c:repo",
+          deviceLabel: "Device C",
+          workspaceRoot: "/repo",
+        },
+      }),
+    ).toEqual(["device-a:repo", "device-b:repo", "device-c:repo"]);
+    expect(
+      spaceProjectKeys({
+        id: "build",
+        name: "Build",
+        threads: [first],
+        newChatDefaults: {
+          projectKey: first.projectKey,
+          deviceLabel: "Device A",
+          workspaceRoot: "/repo",
+        },
+      }),
+    ).toEqual([first.projectKey]);
+    expect(spaceProjectKeys({ id: "empty", name: "Empty", threads: [] })).toEqual([]);
+  });
   it("keeps same-named threads on different devices independent", () => {
     const moved = moveThreadsToSpace(
       moveThreadsToSpace(profile, [first], "build"),

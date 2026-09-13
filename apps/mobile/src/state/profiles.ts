@@ -10,11 +10,11 @@ import {
   OUTSIDE_SPACES,
   profileThreadFilter,
   resolveProfileSource,
-  saveSharedProfiles,
 } from "@t3tools/client-runtime/state/profiles";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { profileEdits, profileEditsAtom } from "./profile-edits";
 import { appAtomRegistry } from "./atom-registry";
 import { environmentServerConfigsAtom, serverEnvironment } from "./server";
 import { useWorkspaceState } from "./workspace";
@@ -31,8 +31,16 @@ export const profileSourceAtom = Atom.make((get) => {
       .map(([id]) => id)
       .sort()[0] ?? null;
   const resolved = resolveProfileSource(configs, fallback);
-  const config = resolved.sourceId ? (configs.get(resolved.sourceId) ?? null) : null;
-  return { ...resolved, config, profiles: config?.settings.profiles ?? [] };
+  const { draft } = get(profileEditsAtom);
+  const sourceId = draft?.sourceId ?? resolved.sourceId ?? fallback;
+  const config = sourceId ? (configs.get(sourceId) ?? null) : null;
+  return {
+    sourceId,
+    conflict:
+      resolved.conflict || !!(draft && resolved.sourceId && draft.sourceId !== resolved.sourceId),
+    config,
+    profiles: draft?.profiles ?? config?.settings.profiles ?? [],
+  };
 });
 export const profileSelectionAtom = Atom.make<{ profileId: string | null; spaceId: string | null }>(
   { profileId: null, spaceId: null },
@@ -87,7 +95,12 @@ export function useProfiles() {
     profile.spaces?.some((space) => space.id === selection.spaceId)
       ? selection.spaceId
       : OUTSIDE_SPACES;
+  const edits = useAtomValue(profileEditsAtom);
   const writable =
+    edits.loaded &&
+    source.sourceId !== null &&
+    (source.config !== null || source.profiles.length > 0);
+  const connected =
     !source.conflict &&
     source.config?.environment.capabilities.profileSynchronization === true &&
     environments.some(
@@ -97,33 +110,17 @@ export function useProfiles() {
     () => profileThreadFilter(source.profiles, profile.id, spaceId),
     [source.profiles, profile.id, spaceId],
   );
-  return { ...source, profile, spaceId, writable, matchesThread };
+  return { ...source, profile, spaceId, writable, connected, matchesThread };
 }
 
 export function useSaveProfiles() {
-  const persist = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
-  const read = useAtomQueryRunner(serverEnvironment.settings, {
-    reportFailure: false,
-    refresh: true,
-  });
   return useCallback(
-    (update: (profiles: ReadonlyArray<Profile>) => ReadonlyArray<Profile>) =>
-      saveSharedProfiles(update, {
-        getSource: () => appAtomRegistry.get(profileSourceAtom),
-        read: async (id) => {
-          const result = await read({ environmentId: id, input: {} });
-          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-          return result.value;
-        },
-        save: async (id, profiles, baseProfiles) => {
-          const result = await persist({
-            environmentId: id,
-            input: { patch: { profiles, profileSyncSourceId: id }, baseProfiles },
-          });
-          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        },
-      }),
-    [persist, read],
+    async (update: (profiles: ReadonlyArray<Profile>) => ReadonlyArray<Profile>) => {
+      const source = appAtomRegistry.get(profileSourceAtom);
+      if (!source.sourceId) throw new Error("Choose a profile source before editing organization.");
+      await profileEdits.edit(source.sourceId, source.profiles, update);
+    },
+    [],
   );
 }
 
@@ -131,6 +128,9 @@ export function useChooseProfileSource() {
   const persist = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const { environments } = useWorkspaceState();
   return async (sourceId: EnvironmentId) => {
+    const draft = profileEdits.snapshot().draft;
+    if (draft && draft.sourceId !== sourceId)
+      throw new Error("Sync pending organization edits before changing the shared source.");
     const configs = appAtomRegistry.get(environmentServerConfigsAtom);
     if (
       !configs.get(sourceId)?.environment.capabilities.profileSynchronization ||
@@ -187,6 +187,11 @@ export function useProfileThreads() {
 /** Publish the source identity, keeping every host's legacy collection intact. */
 export function useProfileSync() {
   const source = useProfiles();
+  const edits = useAtomValue(profileEditsAtom);
+  const read = useAtomQueryRunner(serverEnvironment.settings, {
+    reportFailure: false,
+    refresh: true,
+  });
   const configs = useAtomValue(environmentServerConfigsAtom);
   const { environments } = useWorkspaceState();
   const persist = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
@@ -195,7 +200,7 @@ export function useProfileSync() {
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     if (
-      !source.writable ||
+      !source.connected ||
       !source.sourceId ||
       (!source.config?.settings.profileSyncSourceId && source.profiles.length === 0)
     )
@@ -219,11 +224,40 @@ export function useProfileSync() {
       });
     }
   }, [source, configs, environments, persist, retry]);
+  const flush = useCallback(
+    () =>
+      profileEdits.flush({
+        canSync: (id) => {
+          const current = appAtomRegistry.get(profileSourceAtom);
+          return source.connected && !current.conflict && current.sourceId === id;
+        },
+        read: async (id) => {
+          const result = await read({ environmentId: id, input: {} });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          return result.value;
+        },
+        save: async (id, profiles, baseProfiles) => {
+          const result = await persist({
+            environmentId: id,
+            input: { patch: { profiles, profileSyncSourceId: id }, baseProfiles },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        },
+      }),
+    [persist, read, source.connected],
+  );
+  useEffect(() => {
+    if (source.connected && source.config && edits.draft) void flush();
+  }, [edits.draft, flush, source.config, source.connected]);
   return {
+    pending: edits.draft !== null,
+    error: edits.error,
+    discard: () => profileEdits.discard(),
     failed,
     retry: () => {
       setFailed(false);
       setRetry((value) => value + 1);
+      void flush();
     },
   };
 }

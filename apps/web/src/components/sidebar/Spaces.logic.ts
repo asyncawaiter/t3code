@@ -1,4 +1,13 @@
-import { type Profile, ALL_PROFILE_ID } from "@t3tools/contracts";
+import { type Profile, type ProfileSpace, ALL_PROFILE_ID } from "@t3tools/contracts";
+
+export function spaceProjectKeys(space: ProfileSpace) {
+  return [
+    ...new Set([
+      ...space.threads.map((thread) => thread.projectKey),
+      ...(space.newChatDefaults?.projectKey ? [space.newChatDefaults.projectKey] : []),
+    ]),
+  ];
+}
 
 // Control characters cannot occur in real space IDs.
 export const OUTSIDE_SPACES = "\0outside-spaces";
