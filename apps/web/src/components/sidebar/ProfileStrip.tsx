@@ -22,7 +22,6 @@ const PROFILE_DOT_CLASS_NAMES: Record<Profile["color"], string> = {
 };
 
 export interface ProfileStripProps {
-  dropDisabled: boolean;
   profiles: ReadonlyArray<Profile>;
   activeProfileId: string | null;
   onSelect: (id: string) => void;
@@ -41,14 +40,13 @@ export function ProfileStrip({
   profiles,
   activeProfileId,
   onSelect,
-  dropDisabled,
 }: ProfileStripProps) {
   const selectedId =
     profiles.find((profile) => profile.id === activeProfileId)?.id ?? profiles[0]?.id;
-  const { setNodeRef, isOver } = useDroppable({
+  const { setNodeRef } = useDroppable({
     id: JSON.stringify(["profile-root", selectedId]),
-    // Keep blocked targets measurable so a drop cannot fall through to Pins.
-    data: { kind: "space", profileId: selectedId, spaceId: null, acceptsThreads: !dropDisabled },
+    // Block this area so dragging over profile controls cannot fall through to Pins.
+    data: { kind: "space", profileId: selectedId, spaceId: null, acceptsThreads: false },
   });
   const selectedButton = useRef<HTMLButtonElement>(null);
   const strip = useRef<HTMLDivElement>(null);
@@ -67,10 +65,7 @@ export function ProfileStrip({
   return (
     <div
       ref={setNodeRef}
-      className={cn(
-        "flex items-center gap-1 rounded-lg px-1 pb-1 pt-0.5",
-        isOver && "ring-2 ring-inset ring-sidebar-foreground/50",
-      )}
+      className="flex items-center gap-1 rounded-lg px-1 pb-1 pt-0.5"
       aria-label="Profiles"
       data-slot="profile-strip"
     >

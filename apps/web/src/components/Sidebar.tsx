@@ -1488,7 +1488,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         style: {
           transform: CSS.Translate.toString(sortable.transform),
           transition: sortable.transition,
-          opacity: sortable.isDragging ? 0.3 : undefined,
+          // The overlay represents the lifted chat; keep only its layout space here.
+          opacity: sortable.isDragging ? 0 : undefined,
           // A zero-height boundary also makes dnd-kit scale the source to
           // zero. Only projected peers use scaleY as a visibility sentinel.
           visibility:
@@ -5154,7 +5155,6 @@ export default function Sidebar() {
               <ProfileStrip
                 profiles={resolvedProfiles}
                 activeProfileId={activeProfileId}
-                dropDisabled={!primarySettingsLoaded || activeProfile.id === ALL_PROFILE_ID}
                 onSelect={(id) => setActiveProfileId(id === ALL_PROFILE_ID ? null : id)}
               />
               {isSearchingThreads ? projectFilterChip : null}
