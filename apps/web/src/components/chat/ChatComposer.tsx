@@ -4961,17 +4961,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             restingControlsHost,
           )
         : null}
-      {selectedProviderEntry?.snapshot &&
-      (selectedProviderEntry.driverKind === "codex" ||
-        selectedProviderEntry.driverKind === "claudeAgent") ? (
-        <div data-chat-composer-collapsed-controls="true" className="flex justify-end px-1 pb-1">
-          <UsageLimitsMeter
-            environmentId={environmentId}
-            instanceId={selectedProviderEntry.instanceId}
-            provider={selectedProviderEntry.driverKind === "codex" ? "codex" : "claude"}
-          />
-        </div>
-      ) : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
           <ComposerBannerStack
@@ -5156,6 +5145,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
               "rounded-[20px] transition-[background-color] duration-200",
+              isComposerResting && "flex items-center",
               isDragOverComposer ? "bg-accent/45 ring-1 ring-primary/70" : null,
               projectSelectionRequired ? "opacity-75" : null,
               composerProviderState.composerSurfaceClassName,
@@ -5219,7 +5209,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 "pt-3.5 sm:pt-4",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
-                isComposerResting && "py-2 sm:py-2",
+                isComposerResting && "min-w-0 flex-1 py-2 pr-0 sm:py-2 sm:pr-0",
               )}
             >
               {isStashMenuOpen && !composerMenuOpen && !isComposerApprovalState && (
@@ -5638,16 +5628,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 )}
 
               <div
-                className={cn(
-                  "relative",
-                  isComposerResting && "flex min-w-0 items-center gap-1",
-                  isComposerResting &&
-                    (settings.contextWindowMeterEnabled && activeContextWindow
-                      ? "pr-28"
-                      : showComposerAttachAction
-                        ? "pr-20"
-                        : "pr-12"),
-                )}
+                className={cn("relative", isComposerResting && "flex min-w-0 items-center gap-1")}
               >
                 <ComposerPromptEditor
                   editorRef={composerEditorRef}
@@ -5757,7 +5738,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                   showMobilePendingAnswerActions && "hidden sm:flex",
                   isComposerResting &&
-                    "absolute bottom-px right-px z-10 h-12 w-auto gap-0 py-0 sm:gap-0 sm:py-0",
+                    "z-10 h-12 w-auto shrink-0 gap-0 py-0 pl-1 sm:gap-0 sm:py-0 sm:pl-1",
                 )}
               >
                 <div
@@ -5779,7 +5760,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+                  className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5"
                 >
                   {showComposerAttachAction ? (
                     <>
@@ -5813,6 +5794,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         <TooltipPopup>Attach files</TooltipPopup>
                       </Tooltip>
                     </>
+                  ) : null}
+                  {selectedProviderEntry?.snapshot &&
+                  (selectedProviderEntry.driverKind === "codex" ||
+                    selectedProviderEntry.driverKind === "claudeAgent") ? (
+                    <UsageLimitsMeter
+                      environmentId={environmentId}
+                      instanceId={selectedProviderEntry.instanceId}
+                      provider={selectedProviderEntry.driverKind === "codex" ? "codex" : "claude"}
+                    />
                   ) : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
