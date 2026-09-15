@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, type Profile } from "@t3tools/contracts";
 import {
+  inheritForkPlacement,
   resolveProfileSource,
   profileThreadFilter,
   profileSpaceCounts,
@@ -197,4 +198,63 @@ it("counts and pages the selected Space before taking a shelf window", () => {
   expect(visible).toHaveLength(1);
   expect(visible.slice(0, 10).map((entry) => entry.id)).toEqual(["assigned"]);
   expect(shelf.filter(profileThreadFilter([organized], "work", OUTSIDE_SPACES))).toEqual(siblings);
+});
+
+describe("fork placement", () => {
+  const parent: Profile = {
+    ...profile,
+    projectKeys: ["godel:project"],
+    spaces: [
+      {
+        id: "pod",
+        name: "POD",
+        threads: [{ threadKey: "godel:source", projectKey: "godel:project" }],
+      },
+      { id: "other", name: "Other", threads: [] },
+    ],
+  };
+  const input = {
+    environmentId: "godel",
+    projectId: "project",
+    sourceThreadId: "source",
+    threadId: "fork",
+  };
+  it("keeps the fork in its source profile and Space without changing the source", () => {
+    const unrelated = { ...profile, id: "personal", projectKeys: ["poly:project"] };
+    const result = inheritForkPlacement([parent, unrelated], input);
+    const child = { environmentId: "godel", id: "fork", projectId: "project" };
+    expect(profileThreadFilter(result, "work", "pod")(child)).toBe(true);
+    expect(profileThreadFilter(result, "work", OUTSIDE_SPACES)(child)).toBe(false);
+    expect(result[0]?.spaces?.[0]?.threads).toEqual([
+      ...parent.spaces![0]!.threads,
+      { threadKey: "godel:fork", projectKey: "godel:project" },
+    ]);
+    expect(result[1]).toBe(unrelated);
+    expect(parent.spaces?.[0]?.threads).toHaveLength(1);
+    expect(inheritForkPlacement(result, input)[0]?.spaces?.[0]?.threads).toHaveLength(2);
+  });
+  it("keeps Default forks in Default and does not match another device's identical IDs", () => {
+    const profiles = [parent];
+    expect(inheritForkPlacement(profiles, { ...input, sourceThreadId: "default-chat" })).toBe(
+      profiles,
+    );
+    expect(inheritForkPlacement(profiles, { ...input, environmentId: "poly" })).toBe(profiles);
+  });
+  it("uses the source's latest Space if it moves while the fork is being created", () => {
+    const moved: Profile = {
+      ...parent,
+      spaces: [
+        { id: "pod", name: "POD", threads: [] },
+        { id: "other", name: "Other", threads: parent.spaces![0]!.threads },
+      ],
+    };
+    const result = inheritForkPlacement([moved], input);
+    expect(
+      profileThreadFilter(
+        result,
+        "work",
+        "other",
+      )({ environmentId: "godel", id: "fork", projectId: "project" }),
+    ).toBe(true);
+  });
 });

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vite-plus/test";
+import { act, createElement } from "react";
+import { create } from "react-test-renderer";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  useLiveRefresh,
   LIVE_REFRESH_IDLE_AFTER_MS,
   LIVE_REFRESH_INTERVAL_MS,
   LIVE_REFRESH_MIN_INTERVAL_MS,
@@ -97,4 +100,54 @@ describe("shouldRefreshOnInterval", () => {
     const away = LIVE_REFRESH_IDLE_AFTER_MS + 60_000;
     expect(tick(away + LIVE_REFRESH_MIN_INTERVAL_MS, away)).toBe(true);
   });
+});
+
+it("refreshes visible usage every 15 seconds, pauses hidden, resumes once, and cleans up", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const documentEvents = Object.assign(new EventTarget(), { visibilityState: "visible" });
+  const windowEvents = new EventTarget();
+  vi.stubGlobal("document", documentEvents);
+  vi.stubGlobal("window", windowEvents);
+  const refresh = vi.fn();
+  function Meter() {
+    useLiveRefresh(refresh, {
+      key: "usage-refresh-test",
+      intervalMs: 15_000,
+      idleAfterMs: Infinity,
+    });
+    return null;
+  }
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    await act(async () => {
+      renderer = create(createElement(Meter));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(refresh).toHaveBeenCalledTimes(2);
+    documentEvents.visibilityState = "hidden";
+    documentEvents.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(60_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    documentEvents.visibilityState = "visible";
+    documentEvents.dispatchEvent(new Event("visibilitychange"));
+    windowEvents.dispatchEvent(new Event("focus"));
+    expect(refresh).toHaveBeenCalledTimes(3);
+    vi.advanceTimersByTime(7 * 60_000);
+    expect(refresh).toHaveBeenCalledTimes(31);
+    await act(async () => renderer!.unmount());
+    renderer = undefined;
+    vi.advanceTimersByTime(60_000);
+    expect(refresh).toHaveBeenCalledTimes(31);
+  } finally {
+    if (renderer) await act(async () => renderer!.unmount());
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
 });

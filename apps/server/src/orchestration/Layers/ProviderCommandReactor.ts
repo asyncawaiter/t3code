@@ -335,11 +335,12 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 function toForkContextEntries(
   rows: ReadonlyArray<ThreadForkContextEntry>,
 ): ReadonlyArray<ForkContextEntry> {
-  return rows.map((row) =>
-    row.partial === true
-      ? { kind: row.kind, text: row.text, partial: true }
-      : { kind: row.kind, text: row.text },
-  );
+  return rows.map((row) => ({
+    kind: row.kind,
+    text: row.text,
+    ...(row.partial === true ? { partial: true as const } : {}),
+    ...(row.submittedAt ? { submittedAt: row.submittedAt } : {}),
+  }));
 }
 
 /**
@@ -886,7 +887,11 @@ const make = Effect.gen(function* () {
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly messageText: string;
-    readonly messageTime: { submittedAt: string; previousUserMessageAt?: string };
+    readonly messageTime: {
+      submittedAt: string;
+      previousUserMessageAt?: string;
+      timeZone?: string;
+    };
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
@@ -1520,6 +1525,7 @@ const make = Effect.gen(function* () {
         const citationExpandedUserText = expandAssistantCitationsForProvider(message.text);
         const built = buildForkContextInput({
           entries: toForkContextEntries(forkRow.entries),
+          ...(event.payload.timeZone ? { timeZone: event.payload.timeZone } : {}),
           userText: citationExpandedUserText,
           // Falls back to the child's own title when the source thread was
           // deleted (no shell row) between the fork and this send.
@@ -1540,6 +1546,7 @@ const make = Effect.gen(function* () {
       messageText: sendTurnMessageText,
       messageTime: {
         submittedAt: message.createdAt,
+        ...(event.payload.timeZone ? { timeZone: event.payload.timeZone } : {}),
         ...(previousUserMessageAt ? { previousUserMessageAt } : {}),
       },
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),

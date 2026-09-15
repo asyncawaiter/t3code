@@ -2,6 +2,9 @@ import {
   ALL_PROFILE_ID,
   indexProfilePins,
   indexProfileSpaces,
+  profileForProject,
+  spaceForThread,
+  moveThreadsToSpace,
   Profile,
   mergeProfileEdits,
   EnvironmentId,
@@ -298,4 +301,25 @@ export function createProfileEditQueue(storage: {
       return draining;
     },
   };
+}
+
+/** Forks share their source project, so profile ownership is already inherited. */
+export function inheritForkPlacement(
+  profiles: ReadonlyArray<Profile>,
+  input: { environmentId: string; projectId: string; sourceThreadId: string; threadId: string },
+): ReadonlyArray<Profile> {
+  const projectKey = `${input.environmentId}:${input.projectId}`;
+  const parent = profileForProject(profiles, projectKey);
+  const space =
+    parent && spaceForThread(parent, `${input.environmentId}:${input.sourceThreadId}`, projectKey);
+  if (!space) return profiles;
+  return profiles.map((profile) =>
+    profile.id === parent.id
+      ? moveThreadsToSpace(
+          profile,
+          [{ threadKey: `${input.environmentId}:${input.threadId}`, projectKey }],
+          space.id,
+        )
+      : profile,
+  );
 }

@@ -1,3 +1,5 @@
+import { inheritForkPlacement } from "@t3tools/client-runtime/state/profiles";
+import { useSaveProfiles } from "../hooks/useProfileSync";
 import { EditMessageDialog } from "./chat/EditMessageDialog";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
@@ -1417,6 +1419,7 @@ export default function ChatView(props: ChatViewProps) {
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
+  const saveForkPlacement = useSaveProfiles();
   const forkThread = useAtomCommand(orchestrationEnvironment.forkThread, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -7799,6 +7802,30 @@ export default function ChatView(props: ChatViewProps) {
         failure = shellResult._tag === "Failure" ? shellResult : null;
       }
 
+      if (failure === null && routingProfile) {
+        try {
+          await saveForkPlacement((profiles) =>
+            inheritForkPlacement(profiles, {
+              environmentId: activeThread.environmentId,
+              projectId: activeThread.projectId,
+              sourceThreadId: activeThread.id,
+              threadId: nextThreadId,
+            }),
+          );
+        } catch (error) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Chat forked, but its Space could not be saved",
+              description:
+                error instanceof Error
+                  ? error.message
+                  : "Move the fork to its original Space and retry saving organization.",
+            }),
+          );
+        }
+      }
+
       if (failure === null) {
         const navigateResult = await settlePromise(() =>
           navigate({
@@ -7843,7 +7870,16 @@ export default function ChatView(props: ChatViewProps) {
       }
       forkInFlightRef.current = false;
     },
-    [activeThread, deleteThread, environmentId, forkThread, isServerThread, navigate],
+    [
+      activeThread,
+      deleteThread,
+      environmentId,
+      forkThread,
+      isServerThread,
+      navigate,
+      routingProfile,
+      saveForkPlacement,
+    ],
   );
 
   const getModelDisabledReason = useCallback(

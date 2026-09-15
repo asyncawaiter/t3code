@@ -69,9 +69,11 @@ export function shouldRefreshOnInterval(input: {
   readonly now: number;
   readonly lastRefreshedAt: number;
   readonly lastInteractedAt: number;
+  readonly idleAfterMs?: number;
 }): boolean {
   return (
-    input.now - input.lastInteractedAt < LIVE_REFRESH_IDLE_AFTER_MS && shouldLiveRefresh(input)
+    input.now - input.lastInteractedAt < (input.idleAfterMs ?? LIVE_REFRESH_IDLE_AFTER_MS) &&
+    shouldLiveRefresh(input)
   );
 }
 
@@ -117,9 +119,19 @@ function watchInteraction(): () => void {
 
 export function useLiveRefresh(
   refresh: (() => void) | null,
-  options: { readonly enabled?: boolean; readonly key?: string } = {},
+  options: {
+    readonly enabled?: boolean;
+    readonly key?: string;
+    readonly intervalMs?: number;
+    readonly idleAfterMs?: number;
+  } = {},
 ): void {
-  const { enabled = true, key } = options;
+  const {
+    enabled = true,
+    key,
+    intervalMs = LIVE_REFRESH_INTERVAL_MS,
+    idleAfterMs = LIVE_REFRESH_IDLE_AFTER_MS,
+  } = options;
   // Held in a ref so a caller can pass a fresh closure every render without re-arming the
   // listeners, which would otherwise refresh on every render that changed anything at all.
   const latest = useRef(refresh);
@@ -150,7 +162,15 @@ export function useLiveRefresh(
     const onInterval = () => {
       const now = Date.now();
       const lastRefreshedAt = lastRefreshedAtByView.get(viewId) ?? now;
-      if (shouldRefreshOnInterval({ visible: visible(), now, lastRefreshedAt, lastInteractedAt })) {
+      if (
+        shouldRefreshOnInterval({
+          visible: visible(),
+          now,
+          lastRefreshedAt,
+          lastInteractedAt,
+          idleAfterMs,
+        })
+      ) {
         read(now);
       }
     };
@@ -161,7 +181,7 @@ export function useLiveRefresh(
     // way back. Nothing else moves the window between showing and hidden, so nothing else re-arms.
     const syncTimer = () => {
       clearInterval(timer);
-      timer = visible() ? setInterval(onInterval, LIVE_REFRESH_INTERVAL_MS) : undefined;
+      timer = visible() ? setInterval(onInterval, intervalMs) : undefined;
     };
     const onVisibilityChange = () => {
       onArrival();
@@ -179,5 +199,5 @@ export function useLiveRefresh(
       document.removeEventListener("visibilitychange", onVisibilityChange);
       stopWatchingInteraction();
     };
-  }, [enabled, viewId]);
+  }, [enabled, viewId, intervalMs, idleAfterMs]);
 }

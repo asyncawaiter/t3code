@@ -207,10 +207,27 @@ worktree** is selected, each background thread creates its own worktree.
 ## Message time context
 
 T3 automatically tells the agent when each user message was submitted and when it
-was delivered, using explicit UTC timestamps. It includes the previous user message's
+was delivered, using the sending device's detected timezone and explicit UTC offsets.
+The timezone is detected for each submission, including remote chats, so the host
+device's timezone does not override yours. Older clients without a timezone use UTC.
+It includes the previous user message's
 submission time and the elapsed interval, so returning days later has time context.
 This metadata is separate from your editable message and is shared by desktop, web,
 and mobile when connected to an updated server. Queued messages retain their recorded
 submission time; edit and resend creates a new submission. New forks carry the original
 user message timestamps in their inherited context. Existing provider histories are
 not rewritten, and provider compaction may omit older timestamps.
+
+## Compaction summaries
+
+Select **View summary** on a **Context compacted** marker to inspect that compaction's
+saved output. The panel includes the provider, host device, local timestamp, and token
+counts when available. You can search and copy the exact summary. Recent messages may
+also remain in the agent's context; this view shows only the saved summary.
+
+Claude and Codex summaries are read from the chat's host, including when you connect
+remotely. Once recovered, the summary is saved there for later viewing. If the provider
+keeps only encrypted context, does not expose a summary, or the transcript was removed
+before the first view, T3 shows that the summary is unavailable. Other providers currently
+show this unavailable state. Existing compactions can be recovered when their original
+session records are still available and can be matched unambiguously.

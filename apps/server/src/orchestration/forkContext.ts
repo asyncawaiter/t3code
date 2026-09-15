@@ -1,3 +1,5 @@
+import { messageTimeFormatter } from "../provider/messageTime.ts";
+
 import type {
   MessageId,
   OrchestrationMessage,
@@ -17,6 +19,7 @@ export type ForkContextEntry = {
   readonly kind: "user" | "assistant" | "tool" | "plan";
   readonly text: string;
   readonly partial?: true;
+  readonly submittedAt?: string;
 };
 
 const TOOL_ACTIVITY_KIND_RANK: Record<string, number> = {
@@ -119,9 +122,7 @@ export function curateForkEntries(params: {
     }
 
     let text = assistantCitationsToPlainText(message.text);
-    if (message.role === "user") {
-      text = `[User message submitted: ${message.createdAt}]\n${text}`;
-    }
+
     let partial: true | undefined;
     if (isStreamingBoundary) {
       partial = true;
@@ -140,7 +141,11 @@ export function curateForkEntries(params: {
       entry:
         partial === true
           ? { kind: message.role === "user" ? "user" : "assistant", text, partial }
-          : { kind: message.role === "user" ? "user" : "assistant", text },
+          : {
+              kind: message.role === "user" ? "user" : "assistant",
+              text,
+              ...(message.role === "user" ? { submittedAt: message.createdAt } : {}),
+            },
     });
   }
 
@@ -227,11 +232,11 @@ function omissionMarker(omittedCount: number): string {
 }
 
 /** Serializes a single entry to the labelled line(s) used inside the wrapper. */
-export function serializeForkEntry(entry: ForkContextEntry): string {
+export function serializeForkEntry(entry: ForkContextEntry, timeZone?: string): string {
   const text = neutralizeWrapperTag(entry.text);
   switch (entry.kind) {
     case "user":
-      return `[User] ${text}`;
+      return `[User] ${entry.submittedAt ? `[User message submitted: ${messageTimeFormatter(timeZone).format(entry.submittedAt)}]\n` : ""}${text}`;
     case "assistant":
       return `[Assistant] ${text}`;
     case "tool":
@@ -267,6 +272,7 @@ export function buildForkContextInput(params: {
   readonly sourceTitle: string;
   readonly sourceCwd: string;
   readonly limit?: number;
+  readonly timeZone?: string;
 }): BuildForkContextInputResult {
   const {
     entries,
@@ -311,7 +317,7 @@ export function buildForkContextInput(params: {
   }
 
   const boundaryEntry = entries[entries.length - 1]!;
-  const boundaryLine = serializeForkEntry(boundaryEntry);
+  const boundaryLine = serializeForkEntry(boundaryEntry, params.timeZone);
 
   if (boundaryLine.length > budget) {
     if (budget <= TRUNCATED_BOUNDARY_MARKER.length) {
@@ -337,7 +343,7 @@ export function buildForkContextInput(params: {
   let used = boundaryLine.length;
   let startIndex = entries.length - 1;
   for (let i = entries.length - 2; i >= 0; i--) {
-    const line = serializeForkEntry(entries[i]!);
+    const line = serializeForkEntry(entries[i]!, params.timeZone);
     const additional = line.length + 1; // +1 for the joining newline
     if (used + additional > budget) {
       break;

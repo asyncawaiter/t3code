@@ -27,3 +27,27 @@ describe("message time context", () => {
     ).toContain("elapsed time is unknown");
   });
 });
+
+it("uses the client timezone across DST instead of the host timezone", () => {
+  const text = formatMessageTime(
+    {
+      submittedAt: "2026-03-08T07:30:00Z",
+      previousUserMessageAt: "2026-03-08T06:30:00Z",
+      timeZone: "America/Toronto",
+    },
+    "2026-03-08T08:00:00Z",
+  );
+  expect(text).toContain("timezone America/Toronto");
+  expect(text).toContain("User message submitted: 2026-03-08T03:30:00-04:00");
+  expect(text).toContain("Previous user message submitted: 2026-03-08T01:30:00-05:00");
+  expect(text).toContain("Delivered to agent: 2026-03-08T04:00:00-04:00");
+  expect(text).toContain("0 days, 1 hours, 0 minutes, 0 seconds");
+});
+it("falls back to UTC for an invalid timezone from an older client", () => {
+  expect(
+    formatMessageTime(
+      { submittedAt: "2026-09-14T00:00:00Z", timeZone: "invalid" },
+      "2026-09-14T00:00:00Z",
+    ),
+  ).toContain("timezone UTC");
+});

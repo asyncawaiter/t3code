@@ -1,3 +1,4 @@
+import { getCompactionOutput } from "./provider/compactionOutput.ts";
 import { dispatchAndWaitForMessageEdit } from "./orchestration/awaitMessageEdit.ts";
 import {
   sameUsageLimitCommandCoverage,
@@ -1426,6 +1427,42 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.getCompactionOutput]: (input) =>
+          Effect.gen(function* () {
+            const snapshot = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId, {
+              activityKinds: ["context-compaction"],
+            });
+            const activity = Option.isSome(snapshot)
+              ? snapshot.value.activities.find(
+                  (activity) =>
+                    activity.id === input.activityId && activity.kind === "context-compaction",
+                )
+              : undefined;
+            if (!activity)
+              return yield* Effect.fail(
+                new OrchestrationGetSnapshotError({ message: "Compaction event not found." }),
+              );
+            const binding = yield* providerSessionDirectory.getBinding(input.threadId);
+            const settings = yield* serverSettings.getSettings;
+            return yield* Effect.tryPromise(() =>
+              getCompactionOutput({
+                threadId: input.threadId,
+                activity,
+                settings,
+                stateDir: config.stateDir,
+                ...(Option.isSome(binding) ? { binding: binding.value } : {}),
+                environment: process.env,
+              }),
+            );
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationGetSnapshotError({
+                  message: "Could not load compaction output.",
+                  cause,
+                }),
+            ),
+          ),
         [ORCHESTRATION_WS_METHODS.forkThread]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.forkThread,
@@ -1806,6 +1843,11 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
             Effect.gen(function* () {
+              if (input.usageOnly) {
+                if (input.instanceId) yield* usageLimits.refreshAccount(input.instanceId);
+                else yield* usageLimits.refresh;
+                return { providers: yield* providerRegistry.getProviders };
+              }
               // An untargeted refresh is "re-read everything's status", which
               // includes quota from configured usage-limit sources. Awaited,
               // not forked: the RPC scope closes on return and would

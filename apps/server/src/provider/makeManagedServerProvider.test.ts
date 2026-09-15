@@ -581,6 +581,20 @@ describe("makeManagedServerProvider", () => {
           ],
         });
         assert.deepStrictEqual(yield* provider.getSnapshot, update);
+
+        const staleRead = { checkedAt: "2026-04-10T00:04:00.000Z", windows: [] };
+        yield* provider.applyUsageLimits({ ...staleRead, snapshot: staleRead });
+        assert.deepStrictEqual(yield* provider.getSnapshot, update);
+
+        const accountRead = {
+          checkedAt: "2026-04-10T00:06:00.000Z",
+          windows: [],
+          resetCredits: { availableCount: 3 },
+        };
+        yield* provider.applyUsageLimits({ ...accountRead, snapshot: accountRead });
+        const afterRead = yield* provider.getSnapshot;
+        assert.deepStrictEqual(afterRead.usageLimits, accountRead);
+        assert.deepStrictEqual(afterRead.models, update?.models);
       }),
     ).pipe(Effect.provide(AlwaysRunTestLayer)),
   );

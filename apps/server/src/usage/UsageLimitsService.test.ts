@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import { ProviderAdapterRequestError } from "../provider/Errors.ts";
 import { make } from "./UsageLimitsService.ts";
@@ -201,3 +202,80 @@ describe("UsageLimitsService", () => {
     }).pipe(Effect.scoped),
   );
 });
+
+it.effect("refreshes the selected account, publishes shared usage, and coalesces clients", () =>
+  Effect.gen(function* () {
+    let upstreamPercent = 10;
+    let displayedPercent = -1;
+    let reads = 0;
+    let identity = "personal";
+    let fail = false;
+    const service = yield* make({
+      streamEvents: Stream.empty,
+      instanceChanges: Stream.empty,
+      listInstances: Effect.succeed([codexInstance]),
+      getInstanceLabel: () => Effect.succeed(null),
+      getInstanceIdentity: () => Effect.sync(() => identity),
+      publishLimits: (limits) =>
+        Effect.sync(() => {
+          displayedPercent = limits.windows[0]?.usedPercent ?? -1;
+        }),
+      getAdapter: () =>
+        Effect.succeed({
+          provider: ProviderDriverKind.make("codex"),
+          readAccountLimits: Effect.suspend(() => {
+            reads++;
+            return fail
+              ? Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider: "codex",
+                    method: "read",
+                    detail: "offline",
+                  }),
+                )
+              : Effect.succeed({
+                  complete: true,
+                  windows: [
+                    {
+                      id: "primary",
+                      label: "5 hour",
+                      usedPercent: upstreamPercent,
+                      resetsAt: null,
+                      windowMinutes: 300,
+                    },
+                  ],
+                });
+          }),
+        }),
+    });
+    yield* Effect.all(
+      Array.from({ length: 8 }, () => service.refreshAccount(codexInstance)),
+      { concurrency: "unbounded" },
+    );
+    assert.strictEqual(reads, 1);
+    yield* service.refreshAccount(ProviderInstanceId.make("missing"));
+    assert.strictEqual(reads, 1);
+    assert.strictEqual(displayedPercent, 10);
+    upstreamPercent = 25;
+    yield* TestClock.adjust("15 seconds");
+    yield* service.refreshAccount(codexInstance);
+    assert.strictEqual(displayedPercent, 25);
+    assert.strictEqual(reads, 2);
+    identity = "work";
+    upstreamPercent = 3;
+    yield* service.refreshAccount(codexInstance);
+    assert.strictEqual(displayedPercent, 3);
+    fail = true;
+    yield* TestClock.adjust("15 seconds");
+    yield* service.refreshAccount(codexInstance);
+    assert.strictEqual(displayedPercent, 3);
+    const failedReads = reads;
+    yield* TestClock.adjust("15 seconds");
+    yield* service.refreshAccount(codexInstance);
+    assert.strictEqual(reads, failedReads);
+    fail = false;
+    yield* TestClock.adjust("45 seconds");
+    yield* service.refreshAccount(codexInstance);
+    assert.strictEqual(reads, failedReads + 1);
+  }).pipe(Effect.scoped),
+);

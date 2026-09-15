@@ -1,14 +1,14 @@
-import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
   ProviderInstanceId,
   UsageProviderKind,
   UsageProviderLimits,
+  ServerProvider,
 } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/usageLimits";
-import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLiveRefresh } from "../../hooks/useLiveRefresh";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { CalendarDaysIcon, Clock3Icon, CpuIcon } from "lucide-react";
 
 import { serverEnvironment } from "../../state/server";
@@ -131,23 +131,66 @@ export function UsageLimitsMeter({
   environmentId,
   instanceId,
   provider,
+  snapshot,
+  plan,
+  isRunning = false,
 }: {
   readonly environmentId: EnvironmentId;
   readonly instanceId: ProviderInstanceId;
   readonly provider: UsageProviderKind;
+  readonly snapshot: ServerProvider["usageLimits"];
+  readonly plan?: string | undefined;
+  readonly isRunning?: boolean;
 }) {
-  const result = useAtomValue(serverEnvironment.usageLimits({ environmentId, input: {} }));
+  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
+    reportFailure: false,
+  });
+  const refresh = () => {
+    void refreshProviders({ environmentId, input: { instanceId, usageOnly: true } });
+  };
+  useLiveRefresh(refresh, {
+    key: `usage:${environmentId}:${instanceId}`,
+    intervalMs: 15_000,
+    idleAfterMs: Infinity,
+  });
+  useEffect(() => {
+    if (!isRunning && document.visibilityState === "visible") {
+      void refreshProviders({ environmentId, input: { instanceId, usageOnly: true } });
+    }
+  }, [environmentId, instanceId, isRunning, refreshProviders]);
   const [now, setNow] = useState(Date.now);
-  const snapshot = Option.getOrNull(AsyncResult.value(result));
-  const limits =
-    snapshot?.providers.find(
-      (entry) => entry.instanceId === instanceId && entry.provider === provider,
-    ) ?? null;
+  const usage = snapshot;
+  const limits: UsageProviderLimits | null = usage
+    ? {
+        instanceId,
+        provider,
+        instanceLabel: null,
+        plan: plan ?? null,
+        windows: usage.windows.map((window) => ({
+          id: window.id,
+          label: window.label,
+          usedPercent: window.usedPercent,
+          windowMinutes: window.windowDurationMins ?? null,
+          resetsAt: window.resetsAt ?? null,
+        })),
+        resetCredits: usage.resetCredits
+          ? {
+              availableCount: usage.resetCredits.availableCount,
+              nextExpiresAt: usage.resetCredits.nextExpiresAt ?? null,
+            }
+          : null,
+        observedAt: usage.checkedAt,
+        readError: usage.unavailable?.reason === "probeFailed" ? "Could not refresh limits." : null,
+      }
+    : null;
 
   return (
     <Popover
       onOpenChange={(open) => {
-        if (open) setNow(Date.now());
+        if (open) {
+          setNow(Date.now());
+          refresh();
+        }
       }}
     >
       <PopoverTrigger
@@ -194,8 +237,8 @@ export function UsageLimitsMeter({
         <LimitsPopover
           provider={provider}
           limits={limits}
-          failed={result._tag === "Failure"}
-          pending={result.waiting}
+          failed={false}
+          pending={!usage}
           now={now}
         />
       </PopoverPopup>

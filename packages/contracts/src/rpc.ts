@@ -428,6 +428,8 @@ const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, 
     cwd: Schema.optional(TrimmedNonEmptyString),
     /** Explicit user request. Background status refreshes must not open agent sessions. */
     refreshModels: Schema.optional(Schema.Boolean),
+    /** Read account limits without model discovery or a provider health probe. */
+    usageOnly: Schema.optional(Schema.Boolean),
   }),
   success: ServerProviderUpdatedPayload,
   error: Schema.Union([EnvironmentAuthorizationError, ProviderSetupError]),
@@ -1101,6 +1103,15 @@ const WsOrchestrationGetTurnDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getTurnD
   error: Schema.Union([OrchestrationGetTurnDiffError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationGetCompactionOutputRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getCompactionOutput,
+  {
+    payload: OrchestrationRpcSchemas.getCompactionOutput.input,
+    success: OrchestrationRpcSchemas.getCompactionOutput.output,
+    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsOrchestrationGetFullThreadDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getFullThreadDiff, {
   payload: OrchestrationGetFullThreadDiffInput,
   success: OrchestrationRpcSchemas.getFullThreadDiff.output,
@@ -1335,6 +1346,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetWorkflowScriptRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
+  WsOrchestrationGetCompactionOutputRpc,
   WsOrchestrationSearchThreadsRpc,
   WsOrchestrationForkThreadRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,

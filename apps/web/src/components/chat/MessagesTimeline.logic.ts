@@ -356,6 +356,7 @@ export type MessagesTimelineRow =
   | {
       kind: "context-compaction";
       id: string;
+      activityId: string;
       createdAt: string;
       label: string;
     }
@@ -1079,6 +1080,7 @@ export function deriveMessagesTimelineRows(input: {
       nextRows.push({
         kind: "context-compaction",
         id: timelineEntry.id,
+        activityId: timelineEntry.entry.id,
         createdAt: timelineEntry.createdAt,
         label: timelineEntry.entry.label,
       });

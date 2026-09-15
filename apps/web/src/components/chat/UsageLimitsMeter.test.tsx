@@ -1,14 +1,19 @@
-import { EnvironmentId, ProviderInstanceId, type UsageLimitsSnapshot } from "@t3tools/contracts";
-import { AsyncResult } from "effect/unstable/reactivity";
+import {
+  EnvironmentId,
+  ProviderInstanceId,
+  type UsageLimitsSnapshot,
+  type ServerProviderUsageLimits,
+} from "@t3tools/contracts";
 import { act, type ReactNode } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, expect, it, vi } from "vite-plus/test";
 
 import { UsageLimitsMeter } from "./UsageLimitsMeter";
 
-const atomValue = vi.hoisted(() => ({ current: undefined as unknown }));
-vi.mock("@effect/atom-react", () => ({ useAtomValue: () => atomValue.current }));
-vi.mock("../../state/server", () => ({ serverEnvironment: { usageLimits: () => null } }));
+vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => refreshProviders }));
+const refreshProviders = vi.fn();
+vi.mock("../../hooks/useLiveRefresh", () => ({ useLiveRefresh: () => undefined }));
+vi.mock("../../state/server", () => ({ serverEnvironment: { refreshProviders: {} } }));
 vi.mock("../ui/popover", () => ({
   Popover: ({ children }: { children: ReactNode }) => children,
   PopoverPopup: ({ children }: { children: ReactNode }) => children,
@@ -26,6 +31,7 @@ afterEach(async () => {
 
 it("keeps the account meter and detailed reset popup current as the selected account updates", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("document", { visibilityState: "visible" });
   const selected = {
     provider: "claude",
     instanceId,
@@ -58,19 +64,32 @@ it("keeps the account meter and detailed reset popup current as the selected acc
     observedAt: "2026-09-10T18:00:00.000Z",
     readError: null,
   } satisfies UsageLimitsSnapshot["providers"][number];
-  atomValue.current = AsyncResult.success({
-    providers: [
-      selected,
-      {
-        ...selected,
-        instanceId: ProviderInstanceId.make("claude_other"),
-        plan: "Other account",
-        windows: [{ ...selected.windows[0]!, usedPercent: 99 }],
-      },
-    ],
-  } satisfies UsageLimitsSnapshot);
+  const toSnapshot = (
+    limits: UsageLimitsSnapshot["providers"][number],
+  ): ServerProviderUsageLimits => ({
+    checkedAt: limits.observedAt,
+    windows: limits.windows.map((window) => ({
+      id: window.id,
+      label: window.label,
+      kind: "other",
+      usedPercent: window.usedPercent,
+      ...(window.resetsAt ? { resetsAt: window.resetsAt } : {}),
+      ...(window.windowMinutes !== null ? { windowDurationMins: window.windowMinutes } : {}),
+    })),
+    ...(limits.resetCredits
+      ? { resetCredits: { availableCount: limits.resetCredits.availableCount } }
+      : {}),
+    ...(limits.readError ? { unavailable: { reason: "probeFailed" } } : {}),
+  });
+  let snapshot = toSnapshot(selected);
   const renderMeter = () => (
-    <UsageLimitsMeter environmentId={environmentId} instanceId={instanceId} provider="claude" />
+    <UsageLimitsMeter
+      environmentId={environmentId}
+      instanceId={instanceId}
+      provider="claude"
+      snapshot={snapshot}
+      plan="Max"
+    />
   );
   await act(async () => {
     renderer = create(renderMeter());
@@ -97,23 +116,17 @@ it("keeps the account meter and detailed reset popup current as the selected acc
   expect(text()).not.toContain("Other account");
   expect(text()).not.toContain("99%");
 
-  atomValue.current = AsyncResult.success({
-    providers: [
-      {
-        ...selected,
-        windows: [{ ...selected.windows[0]!, usedPercent: 7 }],
-        resetCredits: { availableCount: 1, nextExpiresAt: null },
-      },
-    ],
-  } satisfies UsageLimitsSnapshot);
+  snapshot = toSnapshot({
+    ...selected,
+    windows: [{ ...selected.windows[0]!, usedPercent: 7 }],
+    resetCredits: { availableCount: 1, nextExpiresAt: null },
+  });
   await act(async () => renderer!.update(renderMeter()));
   expect(text()).toContain("7%");
   expect(text()).not.toContain("62%");
   expect(text()).not.toContain("Weekly");
 
-  atomValue.current = AsyncResult.success({
-    providers: [{ ...selected, windows: [], readError: "Refresh failed" }],
-  } satisfies UsageLimitsSnapshot);
+  snapshot = toSnapshot({ ...selected, windows: [], readError: "Refresh failed" });
   await act(async () => renderer!.update(renderMeter()));
   expect(text()).toContain("Could not refresh limits.");
   expect(text()).toContain("Limits unavailable.");

@@ -61,7 +61,14 @@ The composer also shows compact quota bars and percentages for the selected acco
 overall and Fable windows remain visible without hovering when the account reports them. On web
 and desktop, open the indicator for reset countdowns and banked credits.
 
-If a window looks stale, refresh Limits to re-check every provider and hub.
+On web and desktop, the composer uses the same account snapshot as Usage. Provider events
+update it immediately. While the app is visible, it also checks the selected account every
+15 seconds, after a turn ends, when you return to the app, and when you open the
+indicator. Briefly repeated requests are combined. Hidden windows stop polling; failed reads
+keep the last good numbers and retry after a minute. Updates still depend on when the provider
+reports its latest usage.
+
+Refresh Limits to re-check every provider and hub.
 
 Pick `/usage-limits` from the composer's command menu, or send it as a message, to check the
 current model's limits without leaving the conversation. The result opens above the composer and

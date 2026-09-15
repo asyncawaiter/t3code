@@ -756,6 +756,8 @@ export function runtimeEventToActivities(
           summary,
           payload: {
             state: event.payload.state,
+            provider: event.provider,
+            ...(event.providerInstanceId ? { providerInstanceId: event.providerInstanceId } : {}),
             ...(beforeTokens !== undefined ? { beforeTokens } : {}),
             ...(afterTokens !== undefined ? { afterTokens } : {}),
             ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),

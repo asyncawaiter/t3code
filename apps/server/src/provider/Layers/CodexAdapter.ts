@@ -1720,7 +1720,7 @@ function mapToRuntimeEvents(
         ...runtimeEventBase(event, canonicalThreadId),
         eventId: EventId.make(`${event.id}:thread-compacted`),
         type: "thread.state.changed",
-        payload: { state: "compacted" },
+        payload: { state: "compacted", detail: { session_id: payload.threadId } },
       },
     ];
   }

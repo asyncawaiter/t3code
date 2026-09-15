@@ -27,6 +27,7 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getWorkflowScript: "orchestration.getWorkflowScript",
+  getCompactionOutput: "orchestration.getCompactionOutput",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
@@ -1128,6 +1129,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  timeZone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
   createdAt: IsoDateTime,
 });
 
@@ -1147,6 +1149,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  timeZone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
   createdAt: IsoDateTime,
 });
 
@@ -1621,6 +1624,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  timeZone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
   createdAt: IsoDateTime,
 });
 
@@ -2073,6 +2077,18 @@ export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
+  },
+  getCompactionOutput: {
+    input: Schema.Struct({ threadId: ThreadId, activityId: EventId }),
+    output: Schema.Struct({
+      summary: Schema.NullOr(Schema.String),
+      reason: Schema.optional(Schema.String),
+      provider: Schema.optional(Schema.String),
+      device: Schema.String,
+      createdAt: IsoDateTime,
+      beforeTokens: Schema.optional(NonNegativeInt),
+      afterTokens: Schema.optional(NonNegativeInt),
+    }),
   },
   getWorkflowScript: {
     input: OrchestrationGetWorkflowScriptInput,

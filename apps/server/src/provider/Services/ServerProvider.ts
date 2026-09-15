@@ -1,4 +1,8 @@
-import type { ProviderUsageLimitsUpdate, ServerProvider } from "@t3tools/contracts";
+import type {
+  ProviderUsageLimitsUpdate,
+  ServerProvider,
+  ServerProviderUsageLimits,
+} from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
@@ -18,9 +22,13 @@ export interface ServerProviderShape {
   /**
    * Fold a runtime rate-limit update into the published snapshot without
    * waiting for the next status probe. Sparse: windows merge by id and an
-   * update with no usable window leaves the snapshot untouched.
+   * update with no usable window leaves the snapshot untouched. An account
+   * read can supply its complete snapshot, including removed windows and credits.
    */
   readonly applyUsageLimits: (
-    update: ProviderUsageLimitsUpdate & { readonly checkedAt: string },
+    update: ProviderUsageLimitsUpdate & {
+      readonly checkedAt: string;
+      readonly snapshot?: ServerProviderUsageLimits;
+    },
   ) => Effect.Effect<void>;
 }

@@ -22,6 +22,7 @@ import type { ProjectionRepositoryError } from "../Errors.ts";
 export const ThreadForkContextEntry = Schema.Struct({
   kind: Schema.Literals(["user", "assistant", "tool", "plan"]),
   text: Schema.String,
+  submittedAt: Schema.optional(Schema.String),
   partial: Schema.optional(Schema.Boolean),
 });
 export type ThreadForkContextEntry = typeof ThreadForkContextEntry.Type;

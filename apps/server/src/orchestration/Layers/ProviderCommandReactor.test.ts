@@ -2564,6 +2564,7 @@ describe("ProviderCommandReactor", () => {
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
+        timeZone: "America/Toronto",
         createdAt: "2026-01-02T00:00:00.000Z",
       }),
     );
@@ -2572,7 +2573,11 @@ describe("ProviderCommandReactor", () => {
 
     expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
       threadId: ThreadId.make("thread-1"),
-      messageTime: { submittedAt: "2026-01-02T00:00:00.000Z", previousUserMessageAt: now },
+      messageTime: {
+        submittedAt: "2026-01-02T00:00:00.000Z",
+        previousUserMessageAt: now,
+        timeZone: "America/Toronto",
+      },
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5-codex",

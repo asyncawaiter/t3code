@@ -5806,6 +5806,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   (selectedProviderEntry.driverKind === "codex" ||
                     selectedProviderEntry.driverKind === "claudeAgent") ? (
                     <UsageLimitsMeter
+                      snapshot={selectedProviderEntry.snapshot.usageLimits}
+                      plan={selectedProviderEntry.snapshot.auth.label}
+                      isRunning={phase === "running"}
                       environmentId={environmentId}
                       instanceId={selectedProviderEntry.instanceId}
                       provider={selectedProviderEntry.driverKind === "codex" ? "codex" : "claude"}

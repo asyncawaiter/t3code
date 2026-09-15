@@ -20,6 +20,7 @@ import {
   type UsageLimitsUpdate,
   type UsageProviderKind,
   type UsageProviderLimits,
+  type ServerProviderUsageLimits,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -30,6 +31,8 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as Semaphore from "effect/Semaphore";
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 
 import type { ProviderAdapterError } from "../provider/Errors.ts";
 import { ProviderAdapterRegistry } from "../provider/Services/ProviderAdapterRegistry.ts";
@@ -50,6 +53,7 @@ export class UsageLimitsService extends Context.Service<
     >;
     /** Ask every adapter that can answer for its current limits. Never fails. */
     readonly refresh: Effect.Effect<void>;
+    readonly refreshAccount: (instanceId: ProviderInstanceId) => Effect.Effect<void>;
     readonly consumeReset: (
       input: UsageLimitsConsumeResetInput,
     ) => Effect.Effect<UsageLimitsConsumeResetResult, UsageLimitsError>;
@@ -78,6 +82,7 @@ export interface UsageLimitsSources {
   readonly getInstanceIdentity: (instanceId: ProviderInstanceId) => Effect.Effect<string | null>;
   /** Fires whenever instances are added, removed, or rebuilt. */
   readonly instanceChanges: Stream.Stream<void>;
+  readonly publishLimits?: (limits: UsageProviderLimits) => Effect.Effect<void>;
 }
 
 /** Only subscription providers report limits; everything else is ignored. */
@@ -191,7 +196,12 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
       });
       return next;
     });
-    yield* PubSub.publish(changes, yield* snapshot);
+    const updated = yield* snapshot;
+    const limits = updated.providers.find((entry) => entry.instanceId === instanceId);
+    // Runtime events already reach the provider snapshot through its ingestion layer.
+    if (limits && Number.isFinite(since) && sources.publishLimits)
+      yield* sources.publishLimits(limits);
+    yield* PubSub.publish(changes, updated);
   });
 
   /**
@@ -229,7 +239,10 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
       });
       return next;
     });
-    yield* PubSub.publish(changes, yield* snapshot);
+    const updated = yield* snapshot;
+    const limits = updated.providers.find((entry) => entry.instanceId === instanceId);
+    if (limits && sources.publishLimits) yield* sources.publishLimits(limits);
+    yield* PubSub.publish(changes, updated);
   });
 
   /** The provider an instance currently resolves to, or null when it is gone or has no limits. */
@@ -276,16 +289,59 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
       yield* recordReadError(instanceId, provider, identity, read.failure.message);
       return;
     }
-    if (read.success === null) return;
+    if (read.success === null) {
+      yield* recordReadError(
+        instanceId,
+        provider,
+        identity,
+        "Account limits could not be read. Check the provider login.",
+      );
+      return;
+    }
     // Filed under the identity the read was made for: if the instance is
     // re-pointed after this point, the next refresh drops the entry.
     yield* apply(instanceId, provider, read.success, startedAt, identity);
+  });
+
+  // Coalesce foreground reads from multiple clients without slowing runtime events.
+  const accountReads = new Map<
+    ProviderInstanceId,
+    {
+      lock: Semaphore.Semaphore;
+      nextAt: number;
+      identity: string | null;
+    }
+  >();
+  const refreshAccount = Effect.fn("UsageLimitsService.refreshAccount")(function* (
+    instanceId: ProviderInstanceId,
+  ) {
+    if (!(yield* sources.listInstances).includes(instanceId)) return;
+    let read = accountReads.get(instanceId);
+    if (!read) {
+      read = { lock: Semaphore.makeUnsafe(1), nextAt: 0, identity: null };
+      accountReads.set(instanceId, read);
+    }
+    const entry = read;
+    yield* entry.lock.withPermits(1)(
+      Effect.gen(function* () {
+        const identity = yield* sources.getInstanceIdentity(instanceId);
+        const now = yield* Clock.currentTimeMillis;
+        if (entry.identity === identity && now < entry.nextAt) return;
+        yield* refreshInstance(instanceId).pipe(Effect.ignoreCause({ log: true }));
+        const failed = (yield* Ref.get(state)).get(instanceId)?.limits.readError;
+        entry.identity = identity;
+        entry.nextAt = (yield* Clock.currentTimeMillis) + (failed ? 60_000 : 5_000);
+      }),
+    );
   });
 
   const refresh: UsageLimitsService["Service"]["refresh"] = Effect.gen(function* () {
     const instances = yield* sources.listInstances;
     // Instances removed from settings take their limits with them.
     const live = new Set(instances);
+    for (const instanceId of accountReads.keys()) {
+      if (!live.has(instanceId)) accountReads.delete(instanceId);
+    }
     const pruned = yield* Ref.modify(state, (map) => {
       const next = new Map([...map].filter(([instanceId]) => live.has(instanceId)));
       return [next.size !== map.size, next] as const;
@@ -374,7 +430,12 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
     return { outcome };
   });
 
-  return { subscribe, refresh, consumeReset } satisfies UsageLimitsService["Service"];
+  return {
+    subscribe,
+    refresh,
+    refreshAccount,
+    consumeReset,
+  } satisfies UsageLimitsService["Service"];
 });
 
 export const layer = Layer.effect(
@@ -382,8 +443,52 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const providerService = yield* ProviderService;
     const registry = yield* ProviderAdapterRegistry;
+    const instances = yield* ProviderInstanceRegistry;
     const instanceChanges = yield* registry.subscribeChanges;
     return yield* make({
+      publishLimits: (limits) =>
+        Effect.gen(function* () {
+          const instance = yield* instances.getInstance(limits.instanceId);
+          if (!instance) return;
+          if (limits.readError) {
+            const previous = (yield* instance.snapshot.getSnapshot).usageLimits;
+            const failed: ServerProviderUsageLimits = {
+              ...(previous ?? { checkedAt: limits.observedAt, windows: [] }),
+              unavailable: { reason: "probeFailed", message: limits.readError },
+            };
+            yield* instance.snapshot.applyUsageLimits({ ...failed, snapshot: failed });
+            return;
+          }
+          const snapshot: ServerProviderUsageLimits = {
+            checkedAt: limits.observedAt,
+            windows: limits.windows.map((window) => ({
+              id: window.id,
+              label: window.label,
+              usedPercent: window.usedPercent,
+              kind:
+                window.windowMinutes === 300
+                  ? "session"
+                  : window.windowMinutes === 10080
+                    ? "weekly"
+                    : "other",
+              ...(window.windowMinutes === null
+                ? {}
+                : { windowDurationMins: window.windowMinutes }),
+              ...(window.resetsAt === null ? {} : { resetsAt: window.resetsAt }),
+            })),
+            ...(limits.resetCredits
+              ? {
+                  resetCredits: {
+                    availableCount: limits.resetCredits.availableCount,
+                    ...(limits.resetCredits.nextExpiresAt
+                      ? { nextExpiresAt: limits.resetCredits.nextExpiresAt }
+                      : {}),
+                  },
+                }
+              : {}),
+          };
+          yield* instance.snapshot.applyUsageLimits({ ...snapshot, snapshot });
+        }),
       streamEvents: providerService.streamEvents,
       instanceChanges: Stream.fromSubscription(instanceChanges),
       listInstances: registry.listInstances(),

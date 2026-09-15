@@ -14,7 +14,10 @@ On any assistant response, open the fork icon next to **Copy** and choose **Fork
 While a response is still streaming, the same action is available on its working row. Forking
 there uses the response as it stands at that moment, even if it has not finished.
 
-Forking opens a new chat and switches you to it right away.
+Forking opens a new chat and switches you to it right away. The new chat stays in the source
+chat's profile and Space, including when you access its host from another device. Forks of chats
+in Default stay in Default. If the shared profile host is offline, the Space assignment is saved
+locally and synced when it reconnects.
 
 ## What the new chat shows
 
@@ -25,8 +28,8 @@ is shown here: no earlier messages, no tool activity, no plans.
 The **Continued from chat** row always links to the source chat. If the source chat was later
 deleted, following the link shows the usual not-found view.
 
-On mobile, forking a chat is not available yet, but if a chat was forked elsewhere, the
-**Continued from chat** link still appears and works.
+On mobile, use the fork action below an assistant response. The **Continued from chat** link
+also appears on forks created elsewhere.
 
 ## What the agent receives
 

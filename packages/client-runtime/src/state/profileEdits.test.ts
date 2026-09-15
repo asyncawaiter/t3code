@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, type Profile } from "@t3tools/contracts";
-import { createProfileEditQueue } from "./profileSync";
+import { createProfileEditQueue, inheritForkPlacement } from "./profileSync";
 
 const sourceId = EnvironmentId.make("godel");
 const base: ReadonlyArray<Profile> = [{ id: "work", name: "Work", color: "gray", projectKeys: [] }];
@@ -162,4 +162,43 @@ it("preserves concurrent edits from two windows sharing local storage", async ()
   expect(test.remote()[0]?.spaces?.map((space) => space.id)).toEqual(["first", "second"]);
   expect(first.snapshot().draft).toBeNull();
   expect(second.snapshot().draft).toBeNull();
+});
+
+it("persists a fork's source Space while the profile host is offline and syncs after restart", async () => {
+  const test = setup();
+  const profiles: ReadonlyArray<Profile> = [
+    {
+      ...base[0]!,
+      projectKeys: ["poly:repo"],
+      spaces: [
+        {
+          id: "pod",
+          name: "POD",
+          threads: [{ threadKey: "poly:source", projectKey: "poly:repo" }],
+        },
+      ],
+    },
+  ];
+  test.replaceRemote(profiles);
+  const queue = createProfileEditQueue(test.storage);
+  await queue.edit(sourceId, profiles, (latest) =>
+    inheritForkPlacement(latest, {
+      environmentId: "poly",
+      projectId: "repo",
+      sourceThreadId: "source",
+      threadId: "fork",
+    }),
+  );
+  await queue.flush({ ...test.io, canSync: () => false });
+  const restarted = createProfileEditQueue(test.storage);
+  await restarted.ready;
+  expect(
+    restarted.snapshot().draft?.profiles[0]?.spaces?.[0]?.threads.map((thread) => thread.threadKey),
+  ).toEqual(["poly:source", "poly:fork"]);
+  await restarted.flush(test.io);
+  expect(test.remote()[0]?.spaces?.[0]?.threads.map((thread) => thread.threadKey)).toEqual([
+    "poly:source",
+    "poly:fork",
+  ]);
+  expect(restarted.snapshot().draft).toBeNull();
 });

@@ -1115,6 +1115,7 @@ describe("deriveMessagesTimelineRows", () => {
       {
         kind: "context-compaction",
         id: "compaction-entry",
+        activityId: "compaction",
         createdAt: "2026-01-01T00:00:00Z",
         label: "Compacted context 899K → 19K tokens",
       },

@@ -1,3 +1,4 @@
+import { inheritForkPlacement } from "@t3tools/client-runtime/state/profiles";
 import {
   createContext,
   useCallback,
@@ -17,8 +18,6 @@ import {
   ThreadId,
   resolveLatestMessageRewind,
   profileForProject,
-  spaceForThread,
-  moveThreadsToSpace,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type EnvironmentId,
   type OrchestrationThread,
@@ -156,31 +155,20 @@ export function ThreadMessageActionsProvider(props: {
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         const projectKey = `${props.environmentId}:${thread.projectId}`;
         const parent = profileForProject(profiles, projectKey);
-        const space =
-          parent && spaceForThread(parent, `${props.environmentId}:${thread.id}`, projectKey);
-        if (space) {
+        if (parent) {
           try {
-            await save((profiles) => {
-              const current = profileForProject(profiles, projectKey);
-              if (
-                current?.id !== parent.id ||
-                !current.spaces?.some((item) => item.id === space.id)
-              )
-                throw new Error("The source chat's space changed.");
-              return profiles.map((item) =>
-                item.id === parent.id
-                  ? moveThreadsToSpace(
-                      item,
-                      [{ threadKey: `${props.environmentId}:${childId}`, projectKey }],
-                      space.id,
-                    )
-                  : item,
-              );
-            });
+            await save((profiles) =>
+              inheritForkPlacement(profiles, {
+                environmentId: props.environmentId,
+                projectId: thread.projectId,
+                sourceThreadId: thread.id,
+                threadId: childId,
+              }),
+            );
           } catch {
             Alert.alert(
-              "Chat forked",
-              "The shared profile source is unavailable or the space changed. Your fork is available outside spaces; move it when the source reconnects.",
+              "Chat forked, but its Space could not be saved",
+              "Move the fork to its original Space and retry saving organization.",
             );
           }
         }

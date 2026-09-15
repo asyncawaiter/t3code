@@ -1,5 +1,6 @@
 import {
   CommandId,
+  MessageId,
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
@@ -23,6 +24,7 @@ import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
+  startThreadTurn,
   createProject,
   reorderActiveThread,
   settleThread,
@@ -194,3 +196,31 @@ describe("environment commands", () => {
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 });
+
+it.effect("attaches the sending device timezone and preserves an explicitly recorded zone", () =>
+  Effect.gen(function* () {
+    const dispatched: ClientOrchestrationCommand[] = [];
+    const supervisor = yield* makeSupervisor(dispatched);
+    const input = {
+      threadId: ThreadId.make("thread"),
+      message: {
+        messageId: MessageId.make("message"),
+        role: "user" as const,
+        text: "hi",
+        attachments: [],
+      },
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+    };
+    yield* startThreadTurn(input).pipe(
+      Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+    );
+    yield* startThreadTurn({ ...input, timeZone: "Asia/Kolkata" }).pipe(
+      Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+    );
+    expect(dispatched[0]).toMatchObject({
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    expect(dispatched[1]).toMatchObject({ timeZone: "Asia/Kolkata" });
+  }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+);

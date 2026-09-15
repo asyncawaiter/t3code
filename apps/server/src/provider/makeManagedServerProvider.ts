@@ -186,11 +186,21 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   const applyUsageLimits: ServerProviderShape["applyUsageLimits"] = (update) =>
     Effect.gen(function* () {
       const snapshotToPublish = yield* Ref.modify(snapshotStateRef, (state) => {
-        const usageLimits = applyUsageLimitsUpdate({
-          previous: state.snapshot.usageLimits,
-          update,
-          checkedAt: update.checkedAt,
-        });
+        // An event can arrive between the account read and publishing its snapshot.
+        if (
+          update.snapshot &&
+          state.snapshot.usageLimits &&
+          Date.parse(state.snapshot.usageLimits.checkedAt) > Date.parse(update.snapshot.checkedAt)
+        ) {
+          return [null, state] as const;
+        }
+        const usageLimits =
+          update.snapshot ??
+          applyUsageLimitsUpdate({
+            previous: state.snapshot.usageLimits,
+            update,
+            checkedAt: update.checkedAt,
+          });
         // `applyUsageLimitsUpdate` hands back the same object when nothing
         // moved, which is the common case for Codex's per-tick notification.
         if (usageLimits === state.snapshot.usageLimits) {

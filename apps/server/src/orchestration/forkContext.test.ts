@@ -99,7 +99,7 @@ describe("curateForkEntries", () => {
       boundaryMessageId: "m2" as MessageId,
     });
     expect(entries).toEqual([
-      { kind: "user", text: "[User message submitted: 2026-01-01T00:00:00.000Z]\nhi" },
+      { kind: "user", text: "hi", submittedAt: "2026-01-01T00:00:00.000Z" },
       { kind: "assistant", text: "hello" },
     ]);
   });
@@ -123,10 +123,7 @@ describe("curateForkEntries", () => {
       proposedPlans: [],
       boundaryMessageId: "m2" as MessageId,
     });
-    expect(entries.map((e) => e.text)).toEqual([
-      "[User message submitted: 2026-01-01T00:00:00.000Z]\nfirst",
-      "reply",
-    ]);
+    expect(entries.map((e) => e.text)).toEqual(["first", "reply"]);
   });
 
   it("skips system messages", () => {
@@ -141,7 +138,7 @@ describe("curateForkEntries", () => {
       boundaryMessageId: "m2" as MessageId,
     });
     expect(entries).toEqual([
-      { kind: "user", text: "[User message submitted: 2026-01-01T00:00:00.000Z]\nhi" },
+      { kind: "user", text: "hi", submittedAt: "2026-01-01T00:00:00.000Z" },
     ]);
   });
 
@@ -163,7 +160,7 @@ describe("curateForkEntries", () => {
       boundaryMessageId: "m2" as MessageId,
     });
     expect(entries).toEqual([
-      { kind: "user", text: "[User message submitted: 2026-01-01T00:00:00.000Z]\nhi" },
+      { kind: "user", text: "hi", submittedAt: "2026-01-01T00:00:00.000Z" },
     ]);
   });
 
@@ -214,7 +211,8 @@ describe("curateForkEntries", () => {
     expect(entries).toEqual([
       {
         kind: "user",
-        text: "[User message submitted: 2026-01-01T00:00:00.000Z]\nlook at this\n[Attached image: photo.png]\n[Attached file: notes.txt]",
+        submittedAt: "2026-01-01T00:00:00.000Z",
+        text: "look at this\n[Attached image: photo.png]\n[Attached file: notes.txt]",
       },
     ]);
   });
@@ -763,4 +761,15 @@ describe("buildForkContextInput", () => {
     expect(result.omittedCount).toBe(entries.length);
     expect(result.truncatedBoundary).toBe(false);
   });
+});
+
+it("renders inherited user timestamps in the sending device timezone", () => {
+  const output = buildForkContextInput({
+    entries: [{ kind: "user", text: "hi", submittedAt: "2026-09-14T15:00:00Z" }],
+    userText: "continue",
+    sourceTitle: "source",
+    sourceCwd: "/tmp",
+    timeZone: "Asia/Kolkata",
+  });
+  expect(output.text).toContain("[User message submitted: 2026-09-14T20:30:00+05:30]");
 });

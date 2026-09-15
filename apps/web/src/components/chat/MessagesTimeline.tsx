@@ -1,3 +1,4 @@
+import { CompactionOutputViewer } from "./CompactionOutputViewer";
 import { PencilIcon } from "lucide-react";
 import {
   type AssistantCitation,
@@ -1378,19 +1379,37 @@ function ContextCompactionTimelineRow({
 }: {
   row: Extract<TimelineRow, { kind: "context-compaction" }>;
 }) {
+  const ctx = use(TimelineRowCtx);
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      role="separator"
-      aria-label={row.label}
-      className="mx-auto flex w-full max-w-3xl items-center gap-3 py-1 text-muted-foreground text-xs"
-    >
-      <span className="h-px flex-1 bg-border/70" />
-      <span className="flex shrink-0 items-center gap-1.5">
-        <Minimize2Icon aria-hidden="true" className="size-3" />
-        {row.label}
-      </span>
-      <span className="h-px flex-1 bg-border/70" />
-    </div>
+    <>
+      <div
+        role="group"
+        aria-label={row.label}
+        className="mx-auto flex w-full max-w-3xl items-center gap-3 py-1 text-muted-foreground text-xs"
+      >
+        <span className="h-px flex-1 bg-border/70" />
+        <button
+          type="button"
+          disabled={!ctx.threadRef}
+          onClick={() => setOpen(true)}
+          className="flex shrink-0 items-center gap-1.5 rounded px-1 py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          aria-label={`${row.label}: view summary`}
+        >
+          <Minimize2Icon aria-hidden="true" className="size-3" />
+          {row.label}
+          <span className="ml-1 text-[10px]">View summary</span>
+        </button>
+        <span className="h-px flex-1 bg-border/70" />
+      </div>
+      {open && ctx.threadRef && (
+        <CompactionOutputViewer
+          threadRef={ctx.threadRef}
+          activityId={row.activityId}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   );
 }
 

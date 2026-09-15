@@ -12,6 +12,10 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       label: "environment-data:orchestration:fork-thread",
       tag: ORCHESTRATION_WS_METHODS.forkThread,
     }),
+    compactionOutput: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:compaction-output",
+      tag: ORCHESTRATION_WS_METHODS.getCompactionOutput,
+    }),
     turnDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:turn-diff",
       tag: ORCHESTRATION_WS_METHODS.getTurnDiff,

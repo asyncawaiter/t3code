@@ -74,6 +74,7 @@ export const ProviderSendTurnInput = Schema.Struct({
   messageTime: Schema.optional(
     Schema.Struct({
       submittedAt: IsoDateTime,
+      timeZone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
       previousUserMessageAt: Schema.optional(IsoDateTime),
     }),
   ),

@@ -281,6 +281,7 @@ export const startThreadTurn: (input: StartThreadTurnInput) => CommandEffect = E
   const metadata = yield* timestampedCommandMetadata(input);
   return yield* dispatch({
     ...input,
+    timeZone: input.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     type: "thread.turn.start",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
