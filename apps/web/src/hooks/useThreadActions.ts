@@ -515,8 +515,6 @@ export function useThreadActions() {
       const wokeAt = resolved
         ? threadWokeAt(resolved.thread, { now: new Date().toISOString() })
         : null;
-      // Settle is a high-frequency lifecycle action and stays silent — no
-      // toast.
       const result = await settleThreadMutation({
         environmentId: target.environmentId,
         input: { threadId: target.threadId },
@@ -524,9 +522,40 @@ export function useThreadActions() {
       if (result._tag === "Success" && wokeAt !== null) {
         markThreadVisited(scopedThreadKey(target), wokeAt);
       }
+      if (result._tag === "Success") {
+        const settledAt = resolveThreadTarget(target)?.thread.settledAt;
+        let restoring = false;
+        toastManager.add(
+          stackedThreadToast({
+            type: "success",
+            title: `Settled ${resolved?.thread.title ?? "chat"}`,
+            timeout: 6000,
+            actionProps: {
+              children: "Undo",
+              onClick: () => {
+                if (restoring) return;
+                const current = resolveThreadTarget(target)?.thread;
+                if (
+                  !current ||
+                  current.settledOverride !== "settled" ||
+                  (settledAt && current.settledAt !== settledAt)
+                )
+                  return;
+                restoring = true;
+                void unsettleThreadMutation({
+                  environmentId: target.environmentId,
+                  input: { threadId: target.threadId, reason: "user" },
+                }).then((undone) => {
+                  if (undone._tag !== "Success") restoring = false;
+                });
+              },
+            },
+          }),
+        );
+      }
       return result;
     },
-    [markThreadVisited, resolveThreadTarget, settleThreadMutation],
+    [markThreadVisited, resolveThreadTarget, settleThreadMutation, unsettleThreadMutation],
   );
 
   const unsettleThread = useCallback(

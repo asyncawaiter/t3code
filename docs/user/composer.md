@@ -36,6 +36,12 @@ models, or saved options cannot be selected; a changed login requires signing ba
 in to the saved account. Existing model-only favorites remain available without
 adding options. Save a complete setup to give one a specific device and login.
 
+Disabled favorites explain whether the host is offline, the provider needs installation or
+sign-in, a different account is active, or the model or saved options are unavailable.
+Use **Review host connection** or **Review provider setup** where offered. An existing chat
+that cannot switch logins explains that a new chat is required. Choosing a favorite never
+silently changes its execution host or substitutes a different account.
+
 In **New chat**, choose a **Favorite setup** to fill in its device and login, then
 choose the project folder. The new chat starts with the saved model and options.
 Favorites are saved in the current client.

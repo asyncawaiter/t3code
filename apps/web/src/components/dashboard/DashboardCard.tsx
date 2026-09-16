@@ -1,10 +1,12 @@
+import { useWorkflowState } from "../../workflowState";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useLinkedThreadPullRequest } from "../ThreadStatusIndicators";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import type { EnvironmentMachineKind } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { GitBranchIcon } from "lucide-react";
+import { GitBranchIcon, MonitorIcon } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 
 import { DASHBOARD_REASON_LABELS, isEscalated } from "@t3tools/client-runtime/state/dashboard";
@@ -27,7 +29,7 @@ const REASON_COLOR_CLASS: Record<DashboardBoardEntry["reason"], string> = {
   connecting: "text-sky-600 dark:text-sky-300/80 bg-sky-500/10",
   monitoring: "text-sky-600 dark:text-sky-300/80 bg-sky-500/10",
   completed: "text-emerald-600 dark:text-emerald-300/90 bg-emerald-500/10",
-  failed: "text-destructive-foreground bg-destructive/10",
+  failed: "text-destructive bg-destructive/10",
   interrupted: "text-muted-foreground bg-muted-foreground/10",
 };
 
@@ -49,6 +51,7 @@ function dashboardTimeLabel(entry: DashboardBoardEntry, nowMs: number): string {
 
 export const DashboardCard = memo(function DashboardCard({
   entry,
+  onOpen,
   unread,
   now,
   project,
@@ -59,6 +62,7 @@ export const DashboardCard = memo(function DashboardCard({
   deviceLabel,
   connected,
 }: {
+  onOpen: () => void;
   readonly unread: boolean;
   readonly entry: DashboardBoardEntry;
   readonly now: string;
@@ -71,6 +75,9 @@ export const DashboardCard = memo(function DashboardCard({
   readonly connected: boolean;
 }) {
   const navigate = useNavigate();
+  const reviewed = useWorkflowState((s) => s.reviewed);
+  const kept = useWorkflowState((s) => s.kept);
+  const review = useWorkflowState((s) => s.review);
   const { shell } = entry;
   const environmentId = shell.environmentId;
   const threadId = shell.id;
@@ -82,8 +89,9 @@ export const DashboardCard = memo(function DashboardCard({
   const escalated = isEscalated(entry, now);
 
   const openThread = useCallback(() => {
+    onOpen();
     void navigate({ to: "/$environmentId/$threadId", params: { environmentId, threadId } });
-  }, [environmentId, navigate, threadId]);
+  }, [environmentId, navigate, threadId, onOpen]);
 
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
   const [stopping, setStopping] = useState(false);
@@ -109,10 +117,10 @@ export const DashboardCard = memo(function DashboardCard({
 
   let actions: React.ReactNode;
   if (shell.archivedAt !== null) {
-    actions = <span className="text-[11px] text-muted-foreground">Archived</span>;
+    actions = <span className="text-xs text-muted-foreground">Archived</span>;
   } else if (!connected) {
     actions = (
-      <span className="text-[11px] text-muted-foreground">Offline, showing last known state</span>
+      <span className="text-xs text-muted-foreground">Offline, showing last known state</span>
     );
   } else if (entry.reason === "pending-approval") {
     actions = (
@@ -122,13 +130,13 @@ export const DashboardCard = memo(function DashboardCard({
     );
   } else if (entry.reason === "awaiting-input") {
     actions = (
-      <Button size="micro" variant="ghost-muted" onClick={openClick}>
+      <Button size="xs" variant="outline" onClick={openClick}>
         Answer
       </Button>
     );
   } else if (entry.reason === "plan-ready") {
     actions = (
-      <Button size="micro" variant="ghost-muted" onClick={openClick}>
+      <Button size="xs" variant="outline" onClick={openClick}>
         Review plan
       </Button>
     );
@@ -136,6 +144,21 @@ export const DashboardCard = memo(function DashboardCard({
     actions = (
       <Button size="micro" variant="ghost-muted" disabled={stopping} onClick={stopClick}>
         Stop
+      </Button>
+    );
+  } else if (entry.lane === "done") {
+    const key = scopedThreadKey(scopeThreadRef(environmentId, threadId));
+    const isReviewed = reviewed[key] === entry.since;
+    actions = (
+      <Button
+        size="micro"
+        variant="ghost-muted"
+        onClick={(event) => {
+          event.stopPropagation();
+          review(key, entry.since, isReviewed);
+        }}
+      >
+        {isReviewed ? "Keep for review" : "Mark reviewed"}
       </Button>
     );
   } else {
@@ -154,37 +177,20 @@ export const DashboardCard = memo(function DashboardCard({
         }
       }}
       className={cn(
-        "group flex min-w-0 cursor-pointer flex-col gap-2 rounded-lg border border-border bg-card p-2.5 text-xs outline-none hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring",
+        "group flex min-w-0 cursor-pointer flex-col gap-2.5 rounded-lg border border-border/70 bg-card p-3 text-xs outline-none hover:border-foreground/25 hover:bg-[color-mix(in_srgb,var(--sidebar-row-active)_18%,var(--card))] focus-visible:ring-2 focus-visible:ring-ring",
         escalated && "ring-1 ring-amber-500/60 dark:ring-amber-400/50",
       )}
     >
-      <div className="flex w-full min-w-0 flex-col gap-1.5">
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/80">
-          {unread ? (
-            <span aria-label="Unread" className="size-1.5 shrink-0 rounded-full bg-blue-500" />
-          ) : null}
-          <ProjectFavicon project={project} className="size-3 shrink-0" />
-          <Tooltip>
-            <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
-              {project.title}
-              {spaceName ? ` · ${spaceName}` : ""}
-            </TooltipTrigger>
-            <TooltipPopup>{project.workspaceRoot}</TooltipPopup>
-          </Tooltip>
-          {showMachineIcon && machineKind ? (
-            <EnvironmentMachineIcon kind={machineKind} className="size-3 shrink-0" />
-          ) : null}
-          <Tooltip>
-            <TooltipTrigger render={<span className="max-w-24 truncate text-[10px]" />}>
-              {deviceLabel}
-            </TooltipTrigger>
-            <TooltipPopup>{deviceLabel}</TooltipPopup>
-          </Tooltip>
-        </div>
-        <div className="line-clamp-2 min-w-0 text-[13px] font-medium leading-5 text-foreground">
+      <div className="flex min-w-0 items-start gap-2">
+        {unread ? (
+          <span aria-label="Unread" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
+        ) : null}
+        <div className="line-clamp-2 min-w-0 text-sm font-medium leading-5 text-foreground">
           {shell.title}
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+      </div>
+      <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <span
             className={cn(
               "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 font-medium",
@@ -194,6 +200,10 @@ export const DashboardCard = memo(function DashboardCard({
             {DASHBOARD_REASON_LABELS[entry.reason]}
           </span>
           <span className="shrink-0">{dashboardTimeLabel(entry, nowMs)}</span>
+          {entry.lane === "done" &&
+          kept[scopedThreadKey(scopeThreadRef(environmentId, threadId))] === entry.since ? (
+            <span>Kept for review</span>
+          ) : null}
           {shell.linkedPullRequest ? (
             <Button
               size="micro"
@@ -220,33 +230,108 @@ export const DashboardCard = memo(function DashboardCard({
               {connected && linkedStatus ? linkedStatus.pr.state : "Status unavailable"}
             </Button>
           ) : null}
-          {shell.branch ? (
-            <span className="flex min-w-0 shrink items-center gap-1">
-              <GitBranchIcon className="size-3 shrink-0" />
-              <span className="min-w-0 truncate">{shell.branch}</span>
-            </span>
+          {actions ? (
+            <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-2">
+              {actions}
+            </div>
           ) : null}
           {entry.lane === "running" && shell.planProgress?.step ? (
             <span className="min-w-0 truncate">{shell.planProgress.step}</span>
           ) : null}
         </div>
       </div>
-      <div className="flex w-full shrink-0 items-center justify-between gap-1.5 border-t border-border/60 pt-1.5">
-        {actions}
-        <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
-          {providerEntry ? (
-            <>
+      <dl className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs">
+        <dt className="text-[11px] text-muted-foreground">Space</dt>
+        <dd className="min-w-0">
+          <Tooltip>
+            <TooltipTrigger
+              render={<span tabIndex={0} className="block truncate text-foreground/85" />}
+            >
+              {spaceName ?? "Unsorted"}
+            </TooltipTrigger>
+            <TooltipPopup>Space: {spaceName ?? "Unsorted"}</TooltipPopup>
+          </Tooltip>
+        </dd>
+        <dt className="text-[11px] text-muted-foreground">Project</dt>
+        <dd className="flex min-w-0 items-center gap-1.5 text-foreground/85">
+          <ProjectFavicon project={project} className="size-3.5 shrink-0" />
+          <Tooltip>
+            <TooltipTrigger render={<span tabIndex={0} className="min-w-0 flex-1 truncate" />}>
+              {project.title}
+            </TooltipTrigger>
+            <TooltipPopup>{project.title}</TooltipPopup>
+          </Tooltip>
+          {shell.branch ? (
+            <span className="flex min-w-0 max-w-[45%] items-center gap-1 text-[11px] text-muted-foreground">
+              <GitBranchIcon className="size-3 shrink-0" />
+              <span className="truncate">{shell.branch}</span>
+            </span>
+          ) : null}
+        </dd>
+        <dt className="text-[11px] text-muted-foreground">Path</dt>
+        <dd className="min-w-0">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span tabIndex={0} className="block truncate text-[11px] text-muted-foreground" />
+              }
+            >
+              {shell.worktreePath ?? project.workspaceRoot}
+            </TooltipTrigger>
+            <TooltipPopup className="break-all">
+              {shell.worktreePath ?? project.workspaceRoot}
+            </TooltipPopup>
+          </Tooltip>
+        </dd>
+      </dl>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border/50 pt-2 text-xs text-muted-foreground">
+        <Tooltip>
+          <TooltipTrigger
+            render={<span tabIndex={0} className="flex min-w-0 flex-1 items-center gap-1.5" />}
+          >
+            {showMachineIcon && machineKind ? (
+              <EnvironmentMachineIcon kind={machineKind} className="size-3.5 shrink-0" />
+            ) : (
+              <MonitorIcon className="size-3.5 shrink-0" />
+            )}
+            <span className="truncate">{deviceLabel}</span>
+            {!connected ? (
+              <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground" />
+            ) : null}
+          </TooltipTrigger>
+          <TooltipPopup>
+            {deviceLabel}
+            {!connected ? " · Offline, showing last known state" : ""}
+          </TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                tabIndex={0}
+                className="ml-auto flex min-w-0 flex-1 justify-end items-center gap-1.5"
+              />
+            }
+          >
+            {providerEntry ? (
               <ProviderInstanceIcon
                 driverKind={providerEntry.driverKind}
                 displayName={providerEntry.displayName}
-                iconClassName="size-3"
+                iconClassName="size-3.5 shrink-0"
               />
-              {providerEntry.displayName}
-            </>
-          ) : (
-            shell.modelSelection.model
-          )}
-        </span>
+            ) : null}
+            <span className="truncate">
+              {providerEntry?.displayName ?? shell.modelSelection.model}
+            </span>
+          </TooltipTrigger>
+          <TooltipPopup>
+            <div>
+              {providerEntry?.displayName ?? shell.modelSelection.instanceId} ·{" "}
+              {shell.modelSelection.model}
+            </div>
+            <div>{providerEntry?.snapshot.auth.email ?? "Account details unavailable"}</div>
+          </TooltipPopup>
+        </Tooltip>
       </div>
     </div>
   );

@@ -80,8 +80,10 @@ describe("model setup favorites", () => {
     ).toBe("astra · Normal");
   });
   it("keeps unavailable and changed accounts from silently running the setup elsewhere", () => {
-    expect(modelFavoriteUnavailable(favorite, undefined, false)).toBe("Device offline");
-    expect(modelFavoriteUnavailable(favorite, undefined)).toBe("Login unavailable");
+    expect(modelFavoriteUnavailable(favorite, undefined, false)).toBe("Host offline");
+    expect(modelFavoriteUnavailable(favorite, undefined)).toBe(
+      "Provider not configured on this host",
+    );
     const provider = decodeProvider({
       instanceId: "codex",
       driver: "codex",
@@ -94,9 +96,21 @@ describe("model setup favorites", () => {
       auth: { status: "authenticated", email: "second@example.com" },
       models: [{ slug: "astra", name: "Astra", isCustom: false, capabilities: caps }],
     });
-    expect(modelFavoriteUnavailable(favorite, provider)).toContain("login has changed");
+    expect(modelFavoriteUnavailable(favorite, provider)).toBe("Different account signed in");
     const signedIn = { ...provider, auth: { ...provider.auth, email: favorite.accountEmail } };
     expect(modelFavoriteUnavailable(favorite, signedIn)).toBeNull();
+    expect(modelFavoriteUnavailable(favorite, { ...signedIn, installed: false })).toBe(
+      "Provider is not installed",
+    );
+    expect(modelFavoriteUnavailable(favorite, { ...signedIn, enabled: false })).toBe(
+      "Provider is disabled",
+    );
+    expect(
+      modelFavoriteUnavailable(favorite, { ...signedIn, auth: { status: "unauthenticated" } }),
+    ).toBe("Sign-in required");
+    expect(
+      modelFavoriteUnavailable(favorite, { ...signedIn, auth: { status: "authenticated" } }),
+    ).toBe("Cannot verify the saved account");
     expect(
       modelFavoriteUnavailable(
         { ...favorite, options: [{ id: "reasoningEffort", value: "unsupported" }] },

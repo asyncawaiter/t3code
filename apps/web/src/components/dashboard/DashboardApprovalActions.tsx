@@ -36,7 +36,7 @@ export function DashboardApprovalActions({
   const [expanded, setExpanded] = useState(false);
   if (!expanded) {
     return (
-      <Button size="micro" variant="ghost-muted" onClick={() => setExpanded(true)}>
+      <Button size="xs" variant="outline" onClick={() => setExpanded(true)}>
         Respond
       </Button>
     );

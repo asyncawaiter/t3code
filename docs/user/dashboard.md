@@ -23,7 +23,7 @@ Threads are sorted into four lanes:
 - **Running**: threads where the agent is working or connecting. Shows the current plan step when
   one is known.
 - **Monitoring**: watch loops, such as babysitting a pull request.
-- **Ready to review**: successful turns that finished in the last 24 hours and have not been opened since completing. A finished turn does not necessarily mean the whole task is finished.
+- **Ready to review**: successful turns that finished in the last 24 hours and have not been marked reviewed. Results you explicitly keep remain here beyond 24 hours. A finished turn does not necessarily mean the whole task is finished.
 
 The default **Active** view hides archived, snoozed, and explicitly settled tasks. Snoozed or
 settled tasks with pending questions or approvals can still request attention. Use **Task visibility**
@@ -37,11 +37,11 @@ Drafts and idle tasks without a result do not appear on the active board.
 ## Board and filters
 
 In Active, states appear in columns from left to right. Each heading counts the cards visible below it.
-Columns scroll independently; on narrow windows, scroll horizontally to see the rest of the board.
+On narrow windows, sections stack vertically so every state stays accessible.
 
 Choose a profile in the toolbar to filter the board and project choices. This stays in sync with
 the sidebar's active profile. Choose **All** to see every profile. Search task titles, projects, paths, or branches, and filter
-by device, provider, or project. Device choices follow the active profile. Choosing a device narrows
+by device, provider, or project using the visible **Execution** controls. **Scope** contains Profile and Space. **Git** contains Branch and Pull request. **View** contains Status, Group by, and Results. Use **Reset filters** to clear the task filters. Device choices follow the active profile. Choosing a device narrows
 provider and project choices; choosing a provider further narrows projects. Changing an upstream
 filter clears downstream selections. All options restore the wider scope.
 
@@ -49,8 +49,22 @@ Project options show the directory, device, and providers used by threads. A pro
 can show multiple providers. Provider filtering groups instances of the same provider, such as Claude
 or Codex, across the selected devices. Group by **Project** to put each project's tasks in its own column.
 
-In the Active view, **Unreviewed** hides successful results you have already opened. **Recent 24h** brings those results
-back. Requests for attention and active work remain visible in either view.
+In the Active view, **Unreviewed results** hides successful results you marked reviewed. Opening a
+chat only clears its unread indicator. **Recent 24h** brings reviewed results back. Requests for
+attention and active work remain visible in either view. A new completion becomes unreviewed again.
+
+Use **Keep for review** inside a completed chat to retain that result beyond 24 hours, then
+**Mark reviewed** when you have checked it. Kept results still respect settlement, snoozing, and
+archiving. Review choices are remembered on the current browser or desktop client.
+
+Opening a dashboard card starts a review queue from the visible attention requests and results.
+**Next item** skips items that no longer need review; **Back to dashboard** restores the original
+profile, filters, grouping, and scroll position. No action is taken on a request just by opening it.
+
+Use **Saved views** to name the current profile, Space, filters, grouping, and result window.
+Select a saved name to restore it, or save with the same name to replace it. Delete has Undo.
+Views are stored on this client. If a saved profile, Space, device, provider, or project no longer
+exists in that scope, applying the view explains the missing selection and leaves your current view intact.
 
 Cards identify their device and provider. Disconnected devices remain selectable, and their cards
 show that the status is last known. Actions resume when the device reconnects.
@@ -65,8 +79,9 @@ Each card offers actions for what it needs:
 - **Approve** and **Deny** act on a pending approval directly from the card.
 - **Answer** and **Review plan** open the thread so you can respond.
 - **Stop** interrupts a running turn.
+- **Mark reviewed** removes a completed result from the unreviewed queue.
 
-Click the card, or focus it and press Enter, to open the thread. Hover over its project name to see the directory.
+Click the card, or focus it and press Enter, to open the thread. Hover over its path to see the full directory.
 
 Times on the dashboard refresh every 30 seconds; waiting times are approximate.
 
@@ -76,7 +91,7 @@ The dashboard is not available on mobile yet.
 
 ## Git and pull requests
 
-Open **Git** to search branch names or show tasks with or without a linked PR. These filters use
+Use the visible **Git** controls to search branch names or show tasks with or without a linked PR. These filters use
 thread branch and explicit PR links; no link does not prove the branch has no PR on GitHub.
 
 A linked PR badge opens its detail in the existing Pull Requests page. Status is shown when
@@ -88,6 +103,4 @@ Dashboard filters are remembered when navigating away and returning. An unread d
 updated since your last visit. Finishing a turn means a result is available; explicitly settling a
 task puts it away. PR merge state does not settle a task automatically.
 
-Dashboard controls are grouped by purpose: Profile, Space, and Project define the
-scope; Device, Provider, and Git refine it. Visibility, grouping, and review controls
-sit directly above the board. Search and Pull requests are in the page header.
+All dashboard controls stay visible above the board. Group by and Results remain visible but disabled when viewing Snoozed, Settled, or Archived tasks. Controls wrap into labeled groups on narrower windows.

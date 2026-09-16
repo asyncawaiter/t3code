@@ -35,9 +35,11 @@ export interface PersistedUiState {
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   pullRequestMergeMethod?: string;
   activeProfileId?: string | null;
+  spaceFiltersByProfile?: Record<string, string | null>;
 }
 
 export interface UiProjectState {
+  spaceFiltersByProfile?: Record<string, string | null>;
   spaceSelection?: { profileId: string; filter: string | null } | undefined;
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
@@ -180,6 +182,16 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
     activeProfileId: sanitizeOptionalKey(parsed.activeProfileId),
+    spaceFiltersByProfile: Object.fromEntries(
+      Object.entries(parsed.spaceFiltersByProfile ?? {}).filter(
+        ([key, value]) => key && (value === null || typeof value === "string"),
+      ),
+    ),
+    spaceSelection: (() => {
+      const profileId = parsed.activeProfileId ?? "all";
+      const filter = parsed.spaceFiltersByProfile?.[profileId];
+      return filter === null || typeof filter === "string" ? { profileId, filter } : undefined;
+    })(),
   };
 }
 
@@ -257,6 +269,7 @@ export function persistState(state: UiState): void {
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
         activeProfileId: state.activeProfileId,
+        spaceFiltersByProfile: state.spaceFiltersByProfile ?? {},
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -361,7 +374,10 @@ export function setActiveProfileId(state: UiState, id: string | null): UiState {
   return {
     ...state,
     activeProfileId: id,
-    spaceSelection: undefined,
+    spaceSelection:
+      state.spaceFiltersByProfile?.[id ?? "all"] !== undefined
+        ? { profileId: id ?? "all", filter: state.spaceFiltersByProfile[id ?? "all"]! }
+        : undefined,
     sidebarProjectScopeKey: null,
   };
 }
@@ -371,7 +387,12 @@ export function selectSidebarSpace(
   profileId: string,
   filter: string | null,
 ): UiState {
-  return { ...state, spaceSelection: { profileId, filter }, sidebarProjectScopeKey: null };
+  return {
+    ...state,
+    spaceSelection: { profileId, filter },
+    spaceFiltersByProfile: { ...state.spaceFiltersByProfile, [profileId]: filter },
+    sidebarProjectScopeKey: null,
+  };
 }
 
 function setPullRequestMergeMethod(state: UiState, method: PullRequestMergeMethod): UiState {

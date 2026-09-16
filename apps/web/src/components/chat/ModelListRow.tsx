@@ -94,6 +94,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
             </span>
           </div>
         )}
+        {props.disabledReason && props.isFavorite ? (
+          <p className="mt-1 truncate text-[11px] text-muted-foreground">{props.disabledReason}</p>
+        ) : null}
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">

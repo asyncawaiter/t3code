@@ -535,7 +535,7 @@ export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
           >
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Open Default space"
+              accessibilityLabel="Open Unsorted chats"
               accessibilityState={{ selected: state.spaceId === OUTSIDE_SPACES }}
               onPress={() => selectSpace(OUTSIDE_SPACES)}
               className="min-h-11 flex-1 justify-center"
@@ -546,7 +546,7 @@ export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
                   state.spaceId === OUTSIDE_SPACES ? "text-screen" : "text-foreground",
                 )}
               >
-                Default
+                Unsorted
               </Text>
               <Text
                 className={cn(
@@ -568,7 +568,7 @@ export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
               </Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="New chat in Default"
+                accessibilityLabel="New chat in Unsorted"
                 className="size-11 items-center justify-center"
                 onPress={() => {
                   selectSpace(OUTSIDE_SPACES);

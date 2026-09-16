@@ -16,7 +16,7 @@ there uses the response as it stands at that moment, even if it has not finished
 
 Forking opens a new chat and switches you to it right away. The new chat stays in the source
 chat's profile and Space, including when you access its host from another device. Forks of chats
-in Default stay in Default. If the shared profile host is offline, the Space assignment is saved
+in Unsorted stay in Unsorted. If the shared profile host is offline, the Space assignment is saved
 locally and synced when it reconnects.
 
 ## What the new chat shows

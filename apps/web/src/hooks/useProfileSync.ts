@@ -1,5 +1,7 @@
+import { organizationChangeLabel } from "../profileUndo";
+import { toastManager } from "../components/ui/toast";
 import { useAtomValue } from "@effect/atom-react";
-import { type Profile } from "@t3tools/contracts";
+import { mergeProfileEdits, type Profile } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useCallback, useEffect } from "react";
 import { profileEdits, profileEditsAtom } from "../state/profileEdits";
@@ -39,7 +41,46 @@ export function useSaveProfiles() {
     async (update: (profiles: ReadonlyArray<Profile>) => ReadonlyArray<Profile>) => {
       const source = appAtomRegistry.get(profileSourceAtom);
       if (!source.sourceId) throw new Error("Choose a profile source before editing organization.");
-      await profileEdits.edit(source.sourceId, source.profiles, update);
+      let before: ReadonlyArray<Profile> = source.profiles;
+      let after: ReadonlyArray<Profile> = before;
+      await profileEdits.edit(source.sourceId, source.profiles, (current) => {
+        before = current;
+        after = update(current);
+        return after;
+      });
+      const title = organizationChangeLabel(before, after);
+      if (title) {
+        let restoring = false;
+        toastManager.add({
+          type: "success",
+          title,
+          timeout: 6000,
+          actionProps: {
+            children: "Undo",
+            onClick: () => {
+              if (restoring) return;
+              restoring = true;
+              void (async () => {
+                const current = appAtomRegistry.get(profileSourceAtom);
+                if (current.sourceId !== source.sourceId)
+                  throw new Error(
+                    "Switch back to the original profile source to undo this change.",
+                  );
+                await profileEdits.edit(source.sourceId!, current.profiles, (profiles) =>
+                  mergeProfileEdits(profiles, after, before),
+                );
+              })().catch((error: unknown) => {
+                restoring = false;
+                toastManager.add({
+                  type: "error",
+                  title: "Could not undo placement",
+                  description: error instanceof Error ? error.message : "Try again.",
+                });
+              });
+            },
+          },
+        });
+      }
     },
     [],
   );

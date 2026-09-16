@@ -144,6 +144,11 @@ const DEFAULT_BINDINGS = compile([
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
   { shortcut: modShortcut("[", { shiftKey: true }), command: "thread.previous" },
+  {
+    shortcut: modShortcut("q", { altKey: true }),
+    command: "thread.quickReturn",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   { shortcut: modShortcut("]", { shiftKey: true }), command: "thread.next" },
   {
     shortcut: modShortcut("c", { shiftKey: true }),

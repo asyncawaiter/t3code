@@ -1,4 +1,7 @@
 "use client";
+import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { useWorkflowState } from "../workflowState";
+import { useWorkflowNavigation } from "../hooks/useWorkflowNavigation";
 import { openChatCreation } from "../chatCreationStore";
 import { moveThreadsToSpace, profileForProject } from "@t3tools/contracts";
 
@@ -613,6 +616,7 @@ function OpenCommandPaletteDialog(props: {
   readonly clearOpenIntent: () => void;
 }) {
   const navigate = useNavigate();
+  const openWorkflowThread = useWorkflowNavigation();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
   const [query, setQuery] = useState("");
@@ -1690,6 +1694,20 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
+  actionItems.push({
+    kind: "action",
+    value: "action:quick-return",
+    searchTerms: ["previous", "recent", "return", "chat"],
+    title: "Return to previous chat",
+    icon: <ArrowLeftIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      for (const key of useWorkflowState.getState().recentThreads) {
+        const ref = parseScopedThreadKey(key);
+        if (ref && pathname !== `/${ref.environmentId}/${ref.threadId}` && openWorkflowThread(key))
+          break;
+      }
+    },
+  });
   actionItems.push({
     kind: "action",
     value: "action:dashboard",

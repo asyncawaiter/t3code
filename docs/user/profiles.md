@@ -6,7 +6,7 @@ that matter right now.
 
 Use **Show current chat** beside the new-chat button to return the sidebar to the open chat.
 It selects that chat's profile and space, clears search and project filters, and scrolls to
-the highlighted chat. Chats without a space select **Default**; projects without a
+the highlighted chat. Chats without a space select **Unsorted**; projects without a
 profile select **All**.
 
 **All** always exists and shows every project regardless of profile. It cannot be renamed, recolored,
@@ -61,7 +61,10 @@ still open. An empty profile offers **Add project**. New projects join the activ
 opening an existing project from outside it asks whether to move that checkout into the profile.
 
 Profiles organize your view. They do not restrict filesystem access or prevent opening a thread
-through a direct link. The currently open thread stays open when you switch profiles.
+through a direct link. On web and desktop, switching profiles from a chat or draft restores the
+last chat and Space you used in that profile, along with its sidebar scroll position. If that
+chat is no longer available, the current chat stays open. Switching profiles on the dashboard
+changes its scope without opening a chat. This navigation history stays on the current client.
 
 ## Syncing
 
@@ -108,12 +111,25 @@ configured device name, with the server name on hover. Settled stays separated f
 preceding chats by an inactive gap, so clicking just below a chat does not toggle the shelf.
 
 Spaces organize threads within a profile. Click **New space** beside the Spaces heading,
-enter a name, and press Enter. Each tile shows its chat count. **Default** is always the
+enter a name, and press Enter. Each tile shows its chat count. **Unsorted** is always the
 first tile and contains chats without a Space assignment. It also appears in **All**, where
-it collects unassigned chats across profiles. Default cannot be renamed or deleted.
-Select a named tile to show its chats. Click it again to return to Default. Switching to
-a profile selects Default. Creating a Space does not select it or hide unassigned chats.
+it collects unassigned chats across profiles. Unsorted cannot be renamed or deleted.
+Select a named tile to show its chats. Click it again to return to Unsorted. Switching to
+a profile restores its last selected Space on web and desktop, or Unsorted on the first visit.
+Creating a Space does not select it or hide unassigned chats.
 Use **All chats** beside the Spaces heading to include both assigned and unassigned chats.
+The selected button uses the same theme highlight as the tiles. In the web and desktop
+sidebar, All chats shows a **Recent / Device / Space** control below the space tiles.
+Recent is the initial view: active chats appear newest first without group containers.
+Device and Space collect chats into separate outlined groups. Device groups label each
+chat with its space; Space groups label each chat with its device. Recent shows both.
+Your grouping choice is remembered on this browser or desktop client and only applies
+to All chats. Selecting a single space keeps its device containers.
+
+Pinned, Snoozed, and Settled retain their separate sections. All chats uses automatic
+ordering for active chats; drag a chat onto a space tile or a section to move it. Manual
+active ordering remains available inside a single space. Grouping never moves a chat,
+changes its space, or transfers it to a different device.
 An empty selected view also offers **Show all threads**.
 On web and desktop, the filter button beside Search lists projects in the selected view.
 Choosing a project shows a **Project: name** chip above the chats. Clear the chip to restore
@@ -128,13 +144,13 @@ Assigning a project to a profile does not assign its chats to a same-named space
 Profile pins appear in the **Pinned** section directly below the Space tiles. A dot on a tile indicates work that needs attention.
 
 Use the tag button on a chat row or its **Move to space** context-menu action to choose
-a space. These work in All as well as a specific profile. Choose **Default** to
+a space. These work in All as well as a specific profile. Choose **Unsorted** to
 remove a space assignment. If the project has no profile, the dialog lets you choose one
 first and explains that moving a project changes the profile of all its chats.
 On web and desktop, drag a chat row or its tag icon to a named Space tile to assign it.
 A floating card follows the pointer and identifies the chat or Space being moved.
 If the dragged chat is selected, all selected chats move together. They must belong
-to the target Space's profile. Drop on Default or the selected profile strip to remove
+to the target Space's profile. Drop on Unsorted or the selected profile strip to remove
 the Space assignment. Within the chat list, drag rows to reorder them or move them
 between Pinned, Active, and Settled.
 The **Pin** submenu offers one scope at a time: **Global** appears across profiles and
@@ -148,7 +164,13 @@ reorder them. Deleting a space returns its threads and pins directly to the prof
 **Undo** restores the space. Moving a project to another profile clears its old space
 assignments without deleting threads or removing pins.
 
-Spaces sync with profile settings. The sidebar space selection is temporary; switching profiles returns to chats outside spaces.
+On web and desktop, moving chats between Spaces, removing their assignment, and moving projects
+between profiles show a destination confirmation with **Undo**. Undo preserves unrelated later
+edits; if the same placement has changed again, it explains the conflict. Settling a chat also
+shows **Undo**, which reopens it while that settlement is still current.
+
+Spaces sync with profile settings. On web and desktop, the selected Space is remembered separately
+for each profile on the current client, including All chats.
 Archived and snoozed threads retain their assignments and existing visibility rules.
 The dashboard supports a Space filter, space labels, and **By space** grouping. Its counts,
 active lanes, and historical views use the selected space together with the other filters.
@@ -195,7 +217,7 @@ it is available again or you choose another destination.
 The sidebar pencil and the New thread shortcut open the same compact chooser, even
 with one project. It starts with your current device and folder. Press Enter to open,
 or change the location, profile or space first. A selected space is preselected;
-**Default** keeps the chat directly under its profile. Shift-click keeps the
+**Unsorted** keeps the chat directly under its profile. Shift-click keeps the
 shortcut for creating in the current project.
 
 The device selector includes devices without saved projects. Browse folders with a

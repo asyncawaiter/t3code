@@ -1,3 +1,6 @@
+import { useWorkflowState } from "../workflowState";
+import { useWorkflowNavigation } from "../hooks/useWorkflowNavigation";
+import { groupSidebarChats, recentSidebarChats } from "./sidebar/chatGrouping";
 import { resolveChatFocus } from "@t3tools/client-runtime/state/chat-bookmark";
 import { useThreadPinMenu } from "../hooks/useThreadPinMenu";
 import { openChatCreation } from "../chatCreationStore";
@@ -81,6 +84,8 @@ import {
   CircleDashedIcon,
   ClockIcon,
   FolderIcon,
+  Layers3Icon,
+  LaptopIcon,
   FunnelIcon,
   GitBranchIcon,
   LocateFixedIcon,
@@ -169,7 +174,11 @@ import { moveProjectToProfile } from "./settings/ProjectSettingsPanel.logic";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import {
+  useEnvironments,
+  usePrimaryEnvironmentId,
+  type EnvironmentPresentation,
+} from "../state/environments";
 import {
   readThreadShell,
   useAllEnvironmentProjectSnapshotsReady,
@@ -1103,10 +1112,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   currentEnvironmentId: string | null;
   environmentLabel: string | null;
   hideEnvironment?: boolean;
-  deviceGroup?: { first: boolean; last: boolean; heading: boolean } | undefined;
+  deviceGroup?:
+    | { first: boolean; last: boolean; heading: boolean; spaceLabel?: string; count?: number }
+    | undefined;
+  spaceLabel?: string | undefined;
   deviceGroupsDragging?: boolean;
   environmentTitle?: string | undefined;
   environmentMachine: EnvironmentMachineKind;
+  connectionPhase?: EnvironmentPresentation["connection"]["phase"] | undefined;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
@@ -1664,6 +1677,48 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     )
   ) : null;
 
+  const locationLabels =
+    props.spaceLabel || !props.hideEnvironment ? (
+      <span
+        className={cn(
+          "inline-flex min-w-0 items-center gap-1.5 text-[10px] text-secondary-label",
+          variant === "slim" ? "max-w-[40%] flex-1" : "max-w-[65%] flex-[2]",
+        )}
+      >
+        {props.spaceLabel && (
+          <Tooltip>
+            <TooltipTrigger
+              render={<span />}
+              className="inline-flex min-w-0 flex-1 items-center gap-1"
+            >
+              <Layers3Icon aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">{props.spaceLabel}</span>
+            </TooltipTrigger>
+            <TooltipPopup>Space: {props.spaceLabel}</TooltipPopup>
+          </Tooltip>
+        )}
+        {!props.hideEnvironment && (
+          <Tooltip>
+            <TooltipTrigger
+              render={<span />}
+              className="inline-flex min-w-0 flex-1 items-center gap-1"
+            >
+              <EnvironmentMachineIcon
+                aria-hidden
+                kind={props.environmentMachine}
+                className="size-3 shrink-0"
+              />
+              <span className="truncate">
+                {props.environmentLabel ?? (isRemote ? "Remote" : "This machine")}
+              </span>
+            </TooltipTrigger>
+            <TooltipPopup>
+              Device: {props.environmentTitle ?? props.environmentLabel ?? "Device"}
+            </TooltipPopup>
+          </Tooltip>
+        )}
+      </span>
+    ) : null;
   const deviceGroupClass =
     props.deviceGroup &&
     cn(
@@ -1672,19 +1727,49 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       props.deviceGroup.last && "mb-2 rounded-b-xl border-b pb-1",
       props.deviceGroupsDragging && "border-transparent",
     );
+  const connectionStatus =
+    props.connectionPhase === "connected"
+      ? "Online"
+      : props.connectionPhase === "connecting"
+        ? "Connecting"
+        : "Offline";
   const deviceHeading = props.deviceGroup?.heading ? (
     <div className="flex h-7 items-center gap-1.5 px-1.5 text-[10px] text-sidebar-muted-foreground">
-      <EnvironmentMachineIcon
-        kind={props.environmentMachine}
-        className="size-3 shrink-0"
-        aria-hidden
-      />
+      {props.deviceGroup.spaceLabel ? (
+        <Layers3Icon aria-hidden className="size-3 shrink-0" />
+      ) : (
+        <EnvironmentMachineIcon
+          kind={props.environmentMachine}
+          className="size-3 shrink-0"
+          aria-hidden
+        />
+      )}
       <Tooltip>
         <TooltipTrigger render={<span role="heading" aria-level={3} />} className="truncate">
-          {props.environmentLabel ?? "Device"}
+          {props.deviceGroup.spaceLabel ?? props.environmentLabel ?? "Device"}
         </TooltipTrigger>
-        <TooltipPopup>{props.environmentTitle ?? props.environmentLabel ?? "Device"}</TooltipPopup>
+        <TooltipPopup>
+          {props.deviceGroup.spaceLabel ??
+            props.environmentTitle ??
+            props.environmentLabel ??
+            "Device"}
+        </TooltipPopup>
       </Tooltip>
+      <span className="ml-auto tabular-nums">{props.deviceGroup.count}</span>
+      {!props.deviceGroup.spaceLabel && (
+        <Tooltip>
+          <TooltipTrigger
+            render={<span role="img" aria-label={connectionStatus} />}
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              props.connectionPhase === "connected"
+                ? "bg-emerald-500"
+                : "bg-sidebar-muted-foreground/40",
+            )}
+          />
+          <TooltipPopup>{connectionStatus}</TooltipPopup>
+        </Tooltip>
+      )}
     </div>
   ) : null;
 
@@ -1734,6 +1819,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </span>
             {draftIndicator}
             {title}
+            {locationLabels}
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -2035,18 +2121,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : null}
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5 text-secondary-label text-[11px] leading-4">
-              {!props.hideEnvironment ? (
-                <span className="inline-flex max-w-[40%] min-w-0 items-center gap-1">
-                  <EnvironmentMachineIcon
-                    aria-hidden
-                    kind={props.environmentMachine}
-                    className="size-3 shrink-0"
-                  />
-                  <span className="truncate">
-                    {props.environmentLabel ?? (isRemote ? "Remote" : "This machine")}
-                  </span>
-                </span>
-              ) : null}
+              {locationLabels}
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
@@ -2349,6 +2424,46 @@ export default function Sidebar() {
     },
     [activeProfile.id],
   );
+  const [allChatsGrouping, setAllChatsGrouping] = useLocalStorage(
+    "t3.sidebar.allChatsGrouping",
+    "recent",
+    Schema.Literals(["recent", "device", "space"]),
+  );
+  const grouping = spaceFilter === null ? allChatsGrouping : "device";
+  const allChats = spaceFilter === null;
+  const spaceByThreadKey = useMemo(
+    () =>
+      new Map(
+        threads.map((thread) => {
+          const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+          const assignment = spaceIndex.get(key);
+          const valid =
+            assignment?.projectKey === `${thread.environmentId}:${thread.projectId}`
+              ? assignment
+              : undefined;
+          return [
+            key,
+            {
+              key: valid ? JSON.stringify([valid.profile.id, valid.space.id]) : OUTSIDE_SPACES,
+              label: valid
+                ? activeProfile.id !== valid.profile.id
+                  ? `${valid.profile.name} / ${valid.space.name}`
+                  : valid.space.name
+                : "Unsorted",
+            },
+          ];
+        }),
+      ),
+    [threads, spaceIndex, activeProfile.id],
+  );
+  const chatGroupKey = useCallback(
+    (thread: EnvironmentThreadShell) =>
+      grouping === "space"
+        ? (spaceByThreadKey.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
+            ?.key ?? OUTSIDE_SPACES)
+        : thread.environmentId,
+    [grouping, spaceByThreadKey],
+  );
   const selectedSpace = activeProfile.spaces?.find((space) => space.id === spaceFilter) ?? null;
   const [spaceAssignmentKeys, setSpaceAssignmentKeys] = useState<string[] | null>(null);
   const openThreadSpaces = useCallback(
@@ -2448,7 +2563,7 @@ export default function Sidebar() {
     () => openCommandPalette({ open: "add-project" }),
     [],
   );
-  const { environments } = useEnvironments();
+  const { environments, presentationById } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -2811,11 +2926,11 @@ export default function Sidebar() {
     readonly assignedKeys: ReadonlyMap<string, string>;
   } | null>(null);
   const {
-    pinnedThreads,
+    pinnedThreads: ungroupedPinnedThreads,
     draggableThreadKeys,
     activeReorderableThreadKeys,
     activeThreads: ungroupedActiveThreads,
-    snoozedThreads,
+    snoozedThreads: ungroupedSnoozedThreads,
     settledThreads,
     snoozeNow,
     spaceAttention,
@@ -2965,9 +3080,24 @@ export default function Sidebar() {
       ),
     [ungroupedActiveThreads, environmentLabelById],
   );
-  const activeThreads = useMemo(
-    () => activeDeviceGroups.flatMap(([, rows]) => rows),
-    [activeDeviceGroups],
+  const activeThreads = useMemo(() => {
+    if (!allChats) return activeDeviceGroups.flatMap(([, rows]) => rows);
+    const rows = recentSidebarChats(ungroupedActiveThreads);
+    return grouping === "recent" ? rows : groupSidebarChats(rows, chatGroupKey);
+  }, [allChats, activeDeviceGroups, ungroupedActiveThreads, grouping, chatGroupKey]);
+  const pinnedThreads = useMemo(
+    () =>
+      allChats && grouping !== "recent"
+        ? groupSidebarChats(ungroupedPinnedThreads, chatGroupKey)
+        : ungroupedPinnedThreads,
+    [allChats, grouping, ungroupedPinnedThreads, chatGroupKey],
+  );
+  const snoozedThreads = useMemo(
+    () =>
+      allChats && grouping !== "recent"
+        ? groupSidebarChats(ungroupedSnoozedThreads, chatGroupKey)
+        : ungroupedSnoozedThreads,
+    [allChats, grouping, ungroupedSnoozedThreads, chatGroupKey],
   );
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
@@ -3058,14 +3188,25 @@ export default function Sidebar() {
     [setSettledShelfExpanded],
   );
   const renderedSettledThreads = useMemo(() => {
-    if (settledShelfExpanded) return visibleSettledThreads;
+    if (settledShelfExpanded) {
+      return allChats && grouping !== "recent"
+        ? groupSidebarChats(visibleSettledThreads, chatGroupKey)
+        : visibleSettledThreads;
+    }
     if (routeThreadKey === null) return EMPTY_THREADS;
     const routeThread = visibleSettledThreads.find(
       (thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
     );
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
+  }, [
+    routeThreadKey,
+    settledShelfExpanded,
+    visibleSettledThreads,
+    allChats,
+    grouping,
+    chatGroupKey,
+  ]);
 
   // The snoozed shelf is collapsed by default: out of the way, never gone.
   // Collapsed threads don't render (and so don't participate in jump
@@ -3183,6 +3324,64 @@ export default function Sidebar() {
     },
     [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
   );
+
+  const workflowThreadByKey = useMemo(
+    () =>
+      new Map(
+        threads.map((thread) => [
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          thread,
+        ]),
+      ),
+    [threads],
+  );
+  const openWorkflowThread = useWorkflowNavigation();
+  const previousProfileRef = useRef(activeProfile.id);
+  const previousRouteRef = useRef<string | null>(null);
+  useEffect(() => {
+    const switched = previousProfileRef.current !== activeProfile.id;
+    previousProfileRef.current = activeProfile.id;
+    if (switched) {
+      const remembered = useWorkflowState.getState().profileThreads[activeProfile.id];
+      const target = remembered ? workflowThreadByKey.get(remembered) : undefined;
+      if (
+        (routeThreadRef || routeTarget?.kind === "draft") &&
+        target &&
+        isProjectInProfile(activeProfile, `${target.environmentId}:${target.projectId}`)
+      ) {
+        navigateToThread(scopeThreadRef(target.environmentId, target.id));
+      }
+      previousRouteRef.current = routeThreadKey;
+      return;
+    }
+    if (
+      routeThreadKey &&
+      (previousRouteRef.current !== routeThreadKey ||
+        !useWorkflowState.getState().recentThreads.includes(routeThreadKey))
+    ) {
+      const thread = workflowThreadByKey.get(routeThreadKey);
+      if (thread) {
+        const profileId = isProjectInProfile(
+          activeProfile,
+          `${thread.environmentId}:${thread.projectId}`,
+        )
+          ? activeProfile.id
+          : (rawProfiles.find((profile) =>
+              profile.projectKeys.includes(`${thread.environmentId}:${thread.projectId}`),
+            )?.id ?? ALL_PROFILE_ID);
+        useWorkflowState.getState().visit(routeThreadKey, profileId);
+      }
+    }
+    previousRouteRef.current = routeThreadKey;
+  }, [
+    activeProfile,
+    rawProfiles,
+    routeThreadKey,
+    routeThreadRef,
+    routeTarget,
+    workflowThreadByKey,
+    navigateToThread,
+  ]);
 
   const navigateToDraft = useCallback(
     (draftId: DraftId) => {
@@ -3620,7 +3819,15 @@ export default function Sidebar() {
         )
         .map((thread) => {
           const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-          return { kind: "thread", key, section, environmentId: thread.environmentId };
+          return {
+            kind: "thread",
+            key,
+            section,
+            environmentId: thread.environmentId,
+            ...(allChats && (section === "active" || grouping !== "recent")
+              ? { reorderable: false }
+              : {}),
+          };
         });
     if (
       pinnedThreads.length +
@@ -3639,9 +3846,9 @@ export default function Sidebar() {
       { kind: "marker", marker: "pinned-header" },
     ];
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
-    const controlsIndex = pinnedRows.findIndex(
-      (item) => item.kind === "thread" && pinIndex.get(item.key)?.spaceId,
-    );
+    const controlsIndex = allChats
+      ? -1
+      : pinnedRows.findIndex((item) => item.kind === "thread" && pinIndex.get(item.key)?.spaceId);
     const split = controlsIndex < 0 ? pinnedRows.length : controlsIndex;
     items.push(
       ...pinnedRows.slice(0, split),
@@ -3650,10 +3857,12 @@ export default function Sidebar() {
     );
     items.push({ kind: "marker", marker: "pinned-divider" });
     items.push({ kind: "marker", marker: "active-placeholder" });
-    for (const [environmentId, rows] of activeDeviceGroups) {
-      items.push({ kind: "device", environmentId });
-      items.push(...rowsOf(rows, "active"));
-    }
+    if (allChats) items.push(...rowsOf(activeThreads, "active"));
+    else
+      for (const [environmentId, rows] of activeDeviceGroups) {
+        items.push({ kind: "device", environmentId });
+        items.push(...rowsOf(rows, "active"));
+      }
     if (snoozedThreads.length > 0) {
       items.push({ kind: "marker", marker: "snoozed-header" });
       items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
@@ -3664,6 +3873,8 @@ export default function Sidebar() {
     items.push(...settledRows);
     return items;
   }, [
+    allChats,
+    grouping,
     activeThreads,
     activeDeviceGroups,
     pinnedThreads,
@@ -3675,24 +3886,51 @@ export default function Sidebar() {
     threadByKey,
   ]);
   const deviceGroupByThread = useMemo(() => {
-    const groups = new Map<string, { first: boolean; last: boolean; heading: boolean }>();
-    sidebarListItems.forEach((item, index) => {
-      if (item.kind !== "thread") return;
-      const previous = sidebarListItems[index - 1];
-      const next = sidebarListItems[index + 1];
-      const sameGroup = (other: SidebarListItem | undefined) =>
-        other?.kind === "thread" &&
-        other.environmentId === item.environmentId &&
-        other.section === item.section;
-      const first = !sameGroup(previous);
-      groups.set(item.key, {
-        first,
-        last: !sameGroup(next),
-        heading: first && previous?.kind !== "device",
-      });
-    });
+    const groups = new Map<
+      string,
+      { first: boolean; last: boolean; heading: boolean; spaceLabel?: string; count?: number }
+    >();
+    if (allChats && grouping === "recent") return groups;
+    const keyFor = (item: Extract<SidebarListItem, { kind: "thread" }>) =>
+      grouping === "space"
+        ? (spaceByThreadKey.get(item.key)?.key ?? OUTSIDE_SPACES)
+        : item.environmentId;
+    let start = 0;
+    while (start < sidebarListItems.length) {
+      const item = sidebarListItems[start];
+      if (item?.kind !== "thread") {
+        start++;
+        continue;
+      }
+      let end = start + 1;
+      while (end < sidebarListItems.length) {
+        const next = sidebarListItems[end];
+        if (
+          next?.kind !== "thread" ||
+          next.section !== item.section ||
+          keyFor(next) !== keyFor(item)
+        )
+          break;
+        end++;
+      }
+      for (let index = start; index < end; index++) {
+        const row = sidebarListItems[index];
+        if (row?.kind !== "thread") continue;
+        groups.set(row.key, {
+          first: index === start,
+          last: index === end - 1,
+          heading: index === start && sidebarListItems[start - 1]?.kind !== "device",
+          count: end - start,
+          ...(grouping === "space"
+            ? { spaceLabel: spaceByThreadKey.get(row.key)?.label ?? "Unsorted" }
+            : {}),
+        });
+      }
+      start = end;
+    }
     return groups;
-  }, [sidebarListItems]);
+  }, [sidebarListItems, allChats, grouping, spaceByThreadKey]);
+
   useEffect(() => {
     if (
       dragState !== null &&
@@ -3758,6 +3996,7 @@ export default function Sidebar() {
     () =>
       createSidebarSortingStrategy({
         items: sidebarListItems,
+        deviceHeaders: !allChats,
         deviceOrder: environments
           .toSorted(
             (left, right) =>
@@ -3773,6 +4012,7 @@ export default function Sidebar() {
         snoozedThreadCount: snoozedThreads.length,
       }),
     [
+      allChats,
       draggedSettledOrder,
       environments,
       routeThreadKey,
@@ -4695,6 +4935,17 @@ export default function Sidebar() {
         navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
         return true;
       };
+      if (command === "thread.quickReturn") {
+        const target = useWorkflowState
+          .getState()
+          .recentThreads.find((key) => key !== routeThreadKey && workflowThreadByKey.has(key));
+        if (target) {
+          event.preventDefault();
+          event.stopPropagation();
+          openWorkflowThread(target);
+        }
+        return;
+      }
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
         navigateToThreadKey(
@@ -4742,6 +4993,8 @@ export default function Sidebar() {
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [
     activeProfileId,
+    openWorkflowThread,
+    workflowThreadByKey,
     activeProfile.spaces,
     setSelectedSpaceId,
     keybindings,
@@ -4802,6 +5055,28 @@ export default function Sidebar() {
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
 
   const sidebarSwipeRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const viewport = sidebarSwipeRef.current?.querySelector<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    );
+    if (!viewport) return;
+    let position = useWorkflowState.getState().profileScroll[activeProfile.id] ?? 0;
+    viewport.scrollTop = position;
+    const trackScroll = () => {
+      position = viewport.scrollTop;
+    };
+    const saveScroll = () =>
+      useWorkflowState.setState((state) => ({
+        profileScroll: { ...state.profileScroll, [activeProfile.id]: position },
+      }));
+    viewport.addEventListener("scroll", trackScroll, { passive: true });
+    window.addEventListener("pagehide", saveScroll);
+    return () => {
+      saveScroll();
+      viewport.removeEventListener("scroll", trackScroll);
+      window.removeEventListener("pagehide", saveScroll);
+    };
+  }, [activeProfile.id]);
   const onScrollGesture =
     typeof window === "undefined" ? undefined : window.desktopBridge?.onScrollGesture;
   const canSwipeProfiles = resolvedProfiles.length > 1;
@@ -5425,7 +5700,12 @@ export default function Sidebar() {
                             jumpLabel={
                               showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
-                            hideEnvironment
+                            hideEnvironment={!allChats || grouping === "device"}
+                            spaceLabel={
+                              allChats && grouping !== "space"
+                                ? (spaceByThreadKey.get(threadKey)?.label ?? "Unsorted")
+                                : undefined
+                            }
                             deviceGroup={deviceGroupByThread.get(threadKey)}
                             deviceGroupsDragging={dragState !== null}
                             environmentTitle={
@@ -5437,6 +5717,9 @@ export default function Sidebar() {
                             }
                             environmentMachine={
                               environmentMachineById.get(thread.environmentId) ?? "server"
+                            }
+                            connectionPhase={
+                              presentationById.get(thread.environmentId)?.connection.phase
                             }
                             project={
                               projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
@@ -5639,6 +5922,38 @@ export default function Sidebar() {
                               ))}
                             </ul>
                           </SortableContext>
+                          {allChats && (
+                            <div
+                              role="group"
+                              aria-label="Group all chats"
+                              className="mt-2 flex items-center gap-0.5 rounded-lg bg-sidebar-foreground/[0.04] p-0.5"
+                              data-thread-selection-safe
+                            >
+                              {(
+                                [
+                                  { id: "recent", label: "Recent", icon: ClockIcon },
+                                  { id: "device", label: "Device", icon: LaptopIcon },
+                                  { id: "space", label: "Space", icon: Layers3Icon },
+                                ] as const
+                              ).map((option) => (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  aria-pressed={grouping === option.id}
+                                  onClick={() => setAllChatsGrouping(option.id)}
+                                  className={cn(
+                                    "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                    grouping === option.id
+                                      ? "bg-sidebar-row-active text-sidebar-foreground ring-1 ring-inset ring-sidebar-border"
+                                      : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover",
+                                  )}
+                                >
+                                  <option.icon aria-hidden className="size-3" />
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </li>,
                       );
                       const spaceTiles = items.splice(0);

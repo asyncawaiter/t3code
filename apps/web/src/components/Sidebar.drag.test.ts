@@ -973,6 +973,21 @@ it("keeps device headers above their rows when removing the other device's last 
   expect(base.rects[5]!.top + moved.get("b")!.y).toBe(base.rects[0]!.top + 31);
 });
 
+it("keeps All chats flat when a cross-device row moves to Settled", () => {
+  const flat = [pinnedHeader, divider, thread("a", "active"), thread("b", "active"), settledHeader];
+  const devices: SidebarListItem[] = flat.map((item) =>
+    item.kind === "thread" ? { ...item, environmentId: item.key, reorderable: false } : item,
+  );
+  const target = sidebarMarkerId("settled-header");
+  expect(
+    preview(
+      { items: devices, deviceHeaders: false, settledOrder: ["a"], settledExpanded: true },
+      "a",
+      target,
+    ),
+  ).toEqual(preview({ items: flat, settledOrder: ["a"], settledExpanded: true }, "a", target));
+});
+
 it("keeps Spaces above the visible profile Pinned header during reordering", () => {
   const items = [
     marker("spaces"),

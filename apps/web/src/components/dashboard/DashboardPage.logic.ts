@@ -1,3 +1,5 @@
+import { buildDashboard, classifyDashboardThread } from "@t3tools/client-runtime/state/dashboard";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { indexProfileSpaces } from "@t3tools/contracts";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 /**
@@ -86,22 +88,17 @@ export function filterBoardByEnvironment(
 }
 
 /**
- * Drops "done" entries the user has already seen: the thread's completion
- * (`entry.since`) is not later than the last time they visited that thread.
+ * Drops explicitly reviewed completions. Opening a chat does not review it.
  * Other lanes are untouched.
  */
-export function dropSeenDoneEntries(
+export function dropReviewedDoneEntries(
   board: DashboardBoard<EnvironmentThreadShell>,
-  threadLastVisitedAtById: Readonly<Record<string, string>>,
+  reviewed: Readonly<Record<string, string>>,
   keyForShell: (shell: EnvironmentThreadShell) => string,
 ): DashboardBoard<EnvironmentThreadShell> {
-  const done = board.lanes.done.filter((entry) => {
-    const lastVisitedAt = threadLastVisitedAtById[keyForShell(entry.shell)];
-    if (!lastVisitedAt) return true;
-    const visitedMs = Date.parse(lastVisitedAt);
-    const sinceMs = Date.parse(entry.since);
-    return Number.isNaN(visitedMs) || Number.isNaN(sinceMs) || sinceMs > visitedMs;
-  });
+  const done = board.lanes.done.filter(
+    (entry) => reviewed[keyForShell(entry.shell)] !== entry.since,
+  );
   return {
     lanes: { ...board.lanes, done },
     counts: { ...board.counts, done: done.length },
@@ -256,4 +253,33 @@ export function filterDashboardSpace(
         : undefined;
     return filter === "root" ? !space : space && `${space.profile.id}:${space.space.id}` === filter;
   });
+}
+
+/** Kept results remain in review beyond the usual 24-hour window, until a new turn replaces them. */
+export function buildReviewDashboard(
+  shells: ReadonlyArray<EnvironmentThreadShell>,
+  now: string,
+  kept: Readonly<Record<string, string>>,
+) {
+  const board = buildDashboard(shells, now);
+  const existing = new Set(
+    flattenBoardEntries(board).map((entry) =>
+      scopedThreadKey(scopeThreadRef(entry.shell.environmentId, entry.shell.id)),
+    ),
+  );
+  const retained = shells.flatMap((shell) => {
+    const key = scopedThreadKey(scopeThreadRef(shell.environmentId, shell.id));
+    const completion = kept[key];
+    if (
+      !completion ||
+      existing.has(key) ||
+      shell.latestTurn?.completedAt !== completion ||
+      (shell.snoozedUntil && Date.parse(shell.snoozedUntil) > Date.parse(now))
+    )
+      return [];
+    const entry = classifyDashboardThread(shell, completion);
+    return entry?.lane === "done" ? [entry] : [];
+  });
+  const done = [...board.lanes.done, ...retained];
+  return { lanes: { ...board.lanes, done }, counts: { ...board.counts, done: done.length } };
 }

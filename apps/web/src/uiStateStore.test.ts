@@ -230,6 +230,8 @@ describe("parsePersistedState", () => {
     });
 
     expect(parsed).toEqual({
+      spaceFiltersByProfile: {},
+      spaceSelection: undefined,
       bookmarkedThreadKey: null,
       bookmarkReturnThreadKey: null,
       projectExpandedById: {
@@ -355,6 +357,7 @@ describe("uiStateStore persistence", () => {
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
     expect(persisted).toEqual({
+      spaceFiltersByProfile: {},
       bookmarkedThreadKey: null,
       bookmarkReturnThreadKey: null,
       projectExpandedById: {
@@ -378,6 +381,8 @@ describe("uiStateStore persistence", () => {
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,
+      spaceFiltersByProfile: {},
+      spaceSelection: undefined,
     });
   });
 
@@ -418,4 +423,23 @@ describe("uiStateStore persistence", () => {
     ) as PersistedUiState;
     expect(resolveProjectExpanded(persisted.projectExpandedById ?? {}, ["unknown"])).toBe(true);
   });
+});
+
+it("restores each profile's Space including All chats across persistence", () => {
+  const work = selectSidebarSpace(makeUiState({ activeProfileId: "work" }), "work", "pod");
+  const personal = selectSidebarSpace(setActiveProfileId(work, "personal"), "personal", null);
+  expect(setActiveProfileId(personal, "work").spaceSelection).toEqual({
+    profileId: "work",
+    filter: "pod",
+  });
+  expect(setActiveProfileId(personal, "personal").spaceSelection).toEqual({
+    profileId: "personal",
+    filter: null,
+  });
+  expect(
+    parsePersistedState({
+      activeProfileId: "work",
+      spaceFiltersByProfile: personal.spaceFiltersByProfile!,
+    }).spaceSelection,
+  ).toEqual({ profileId: "work", filter: "pod" });
 });

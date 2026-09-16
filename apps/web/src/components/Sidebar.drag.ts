@@ -140,6 +140,7 @@ export function createSidebarCollisionDetection(
 export function createSidebarSortingStrategy(input: {
   items: readonly SidebarListItem[];
   deviceOrder?: readonly string[];
+  deviceHeaders?: boolean;
   settledOrder: readonly string[];
   settledExpanded: boolean;
   settledVisibleCount?: number;
@@ -241,7 +242,10 @@ export function createSidebarSortingStrategy(input: {
     if (controlsIndex >= 0) marker("controls");
     projected.push(...groups.pinned.filter((item) => spacePins.has(item.key)));
     marker("pinned-divider");
-    if (groups.active.some((item) => item.environmentId !== undefined)) {
+    if (
+      input.deviceHeaders !== false &&
+      groups.active.some((item) => item.environmentId !== undefined)
+    ) {
       const activeGroups = Arr.groupBy(groups.active, (item) => item.environmentId ?? "");
       const order = [
         ...new Set([

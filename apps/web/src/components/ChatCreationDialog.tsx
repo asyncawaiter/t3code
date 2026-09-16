@@ -215,12 +215,10 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
         });
         if (!opened) throw new Error("The draft changed while opening. Try again.");
         if (favoriteSelection)
-          useComposerDraftStore
-            .getState()
-            .setModelSelection(opened.draftId, favoriteSelection, {
-              explicit: true,
-              replaceOptions: true,
-            });
+          useComposerDraftStore.getState().setModelSelection(opened.draftId, favoriteSelection, {
+            explicit: true,
+            replaceOptions: true,
+          });
       }
       revealChatLocation(profileId, spaceId);
       close();
@@ -290,11 +288,11 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                 >
                   <SelectTrigger className="w-full min-w-0 font-normal" aria-label="Chat space">
                     <SelectValue>
-                      {profile?.spaces?.find((space) => space.id === spaceId)?.name ?? "Default"}
+                      {profile?.spaces?.find((space) => space.id === spaceId)?.name ?? "Unsorted"}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
-                    <SelectItem value="outside">Default</SelectItem>
+                    <SelectItem value="outside">Unsorted</SelectItem>
                     {profile?.spaces?.map((space) => (
                       <SelectItem key={space.id} value={space.id}>
                         {space.name}

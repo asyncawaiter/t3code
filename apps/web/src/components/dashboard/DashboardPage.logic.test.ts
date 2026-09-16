@@ -1,3 +1,5 @@
+import { buildReviewDashboard } from "./DashboardPage.logic";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId, EnvironmentId } from "@t3tools/contracts";
 import { indexProfileSpaces } from "@t3tools/contracts";
 import { filterDashboardSpace } from "./DashboardPage.logic";
@@ -8,7 +10,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 import {
   filterDashboardGit,
   deriveDashboardScope,
-  dropSeenDoneEntries,
+  dropReviewedDoneEntries,
   filterBoardByEnvironment,
   filterEntriesByEnvironment,
   filterEntriesByLane,
@@ -151,10 +153,10 @@ describe("filterBoardByEnvironment", () => {
   });
 });
 
-describe("dropSeenDoneEntries", () => {
+describe("dropReviewedDoneEntries", () => {
   const keyForShell = (s: EnvironmentThreadShell) => s.id;
 
-  it("drops a done entry whose completion is not later than the last visit", () => {
+  it("drops only the explicitly reviewed completion; a new result stays visible", () => {
     const seen = entry({
       lane: "done",
       reason: "completed",
@@ -177,9 +179,9 @@ describe("dropSeenDoneEntries", () => {
       lanes: { "needs-you": [], running: [], monitoring: [], done: [seen, unseen, neverVisited] },
       counts: { "needs-you": 0, running: 0, monitoring: 0, done: 3 },
     };
-    const result = dropSeenDoneEntries(
+    const result = dropReviewedDoneEntries(
       board,
-      { seen: "2026-09-04T11:00:00.000Z", unseen: "2026-09-04T11:00:00.000Z" },
+      { seen: "2026-09-04T10:00:00.000Z", unseen: "2026-09-04T11:00:00.000Z" },
       keyForShell,
     );
     expect(result.lanes.done).toEqual([unseen, neverVisited]);
@@ -196,7 +198,7 @@ describe("dropSeenDoneEntries", () => {
       lanes: { "needs-you": [], running: [runningEntry], monitoring: [], done: [] },
       counts: { "needs-you": 0, running: 1, monitoring: 0, done: 0 },
     };
-    expect(dropSeenDoneEntries(board, {}, keyForShell).lanes.running).toEqual([runningEntry]);
+    expect(dropReviewedDoneEntries(board, {}, keyForShell).lanes.running).toEqual([runningEntry]);
   });
 });
 
@@ -350,4 +352,29 @@ it("space scope includes archived threads, isolates devices, and handles root pl
     otherDevice,
   ]);
   expect(filterDashboardSpace([first], new Map(), "root")).toEqual([first]);
+});
+
+it("keeps an old result for review but never resurrects replaced or settled work", () => {
+  const completedAt = "2026-09-01T10:00:00Z";
+  const task = shell({
+    latestTurn: {
+      turnId: "old",
+      state: "completed",
+      requestedAt: completedAt,
+      startedAt: completedAt,
+      completedAt,
+      assistantMessageId: null,
+    } as EnvironmentThreadShell["latestTurn"],
+  });
+  const key = scopedThreadKey(scopeThreadRef(task.environmentId, task.id));
+  const kept = { [key]: completedAt };
+  expect(buildReviewDashboard([task], "2026-09-15T12:00:00Z", {}).counts.done).toBe(0);
+  expect(buildReviewDashboard([task], "2026-09-15T12:00:00Z", kept).counts.done).toBe(1);
+  expect(
+    buildReviewDashboard([{ ...task, settledOverride: "settled" }], "2026-09-15T12:00:00Z", kept)
+      .counts.done,
+  ).toBe(0);
+  expect(
+    buildReviewDashboard([{ ...task, latestTurn: null }], "2026-09-15T12:00:00Z", kept).counts.done,
+  ).toBe(0);
 });

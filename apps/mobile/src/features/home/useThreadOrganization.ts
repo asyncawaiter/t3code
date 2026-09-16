@@ -67,7 +67,7 @@ export function useThreadOrganization(thread: EnvironmentThreadShell) {
             image: "tag",
             attributes: { disabled: !source.writable },
             subactions: [
-              { id: "organization-space:", title: "Default" },
+              { id: "organization-space:", title: "Unsorted" },
               ...(owner.spaces ?? []).map((item) => ({
                 id: `organization-space:${item.id}`,
                 title: item.name,

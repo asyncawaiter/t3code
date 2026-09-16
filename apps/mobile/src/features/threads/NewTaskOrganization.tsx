@@ -89,7 +89,7 @@ export function NewTaskOrganization() {
   const changeSpace = () =>
     chooseAction("Space for this chat", [
       {
-        title: "Default",
+        title: "Unsorted",
         action: () =>
           flow.setOrganization({ profileId: profile?.id ?? null, spaceId: OUTSIDE_SPACES }),
       },
@@ -171,7 +171,7 @@ export function NewTaskOrganization() {
             className="min-h-11 flex-1 justify-center rounded-xl bg-subtle px-3"
           >
             <Text numberOfLines={1} className="text-sm text-foreground">
-              {space?.name ?? "Default"}
+              {space?.name ?? "Unsorted"}
             </Text>
           </Pressable>
         )}

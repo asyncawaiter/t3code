@@ -143,8 +143,14 @@ export function SpaceToolbar({
           variant="ghost"
           aria-pressed={selectedSpaceId === null}
           onClick={() => onFilterChange(null)}
-          className="h-6 px-1.5 text-[10px]"
+          className={cn(
+            "h-6 gap-1 rounded-md px-2 text-[10px] ring-1 ring-inset",
+            selectedSpaceId === null
+              ? "bg-[color-mix(in_srgb,var(--sidebar-row-active)_85%,transparent)] text-sidebar-foreground ring-sidebar-border hover:bg-sidebar-row-active"
+              : "text-sidebar-muted-foreground ring-transparent",
+          )}
         >
+          {selectedSpaceId === null && <CheckIcon aria-hidden className="size-3" />}
           All chats
         </Button>
         {profile.id !== ALL_PROFILE_ID ? (
@@ -221,7 +227,7 @@ export function DefaultSpaceTile({
     >
       <button
         type="button"
-        aria-label="Open Default space"
+        aria-label="Open Unsorted chats, not assigned to a space"
         aria-pressed={selected}
         onClick={onSelect}
         className={cn(
@@ -235,7 +241,7 @@ export function DefaultSpaceTile({
           <InboxIcon aria-hidden className="size-4" />
         </span>
         <span className="line-clamp-2 w-full break-words text-xs font-medium leading-3.5">
-          Default
+          Unsorted
         </span>
         <span className="mt-auto flex w-full min-w-0 items-center gap-1 pr-5 text-[10px] opacity-75">
           <span className="truncate">
@@ -247,7 +253,7 @@ export function DefaultSpaceTile({
       <Button
         size="icon-xs"
         variant="ghost"
-        aria-label="New chat in Default"
+        aria-label="New chat in Unsorted"
         onClick={onNewChat}
         className={cn(
           "absolute bottom-1 right-1 [--control-icon-color:currentColor]",
@@ -488,7 +494,9 @@ export function SpaceTile({
                           <Layers3Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                         )}
                         <div className="min-w-0 flex-1">
-                          <div className="break-words text-[11px] font-medium leading-4">{name}</div>
+                          <div className="break-words text-[11px] font-medium leading-4">
+                            {name}
+                          </div>
                           <div className="break-words text-[10px] leading-3.5 text-muted-foreground">
                             {device}
                             {key === space.newChatDefaults?.projectKey && " · New chats"}

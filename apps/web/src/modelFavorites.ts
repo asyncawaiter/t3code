@@ -55,15 +55,18 @@ export function modelFavoriteUnavailable(
   provider: ServerProvider | undefined,
   connected = true,
 ): string | null {
-  if (!connected) return "Device offline";
-  if (!provider) return "Login unavailable";
-  if (provider.auth.status === "unauthenticated") return "Sign in to use this favorite";
+  if (!connected) return "Host offline";
+  if (!provider) return "Provider not configured on this host";
+  if (provider.auth.status === "unauthenticated") return "Sign-in required";
+  if (!provider.installed) return "Provider is not installed";
+  if (!provider.enabled) return "Provider is disabled";
+  if (favorite.accountEmail && !provider.auth.email) return "Cannot verify the saved account";
   if (
     favorite.accountEmail &&
     provider.auth.email?.toLowerCase() !== favorite.accountEmail.toLowerCase()
   )
-    return "This login has changed. Sign in to the saved account.";
-  if (!provider.enabled || provider.availability === "unavailable" || provider.status !== "ready")
+    return "Different account signed in";
+  if (provider.availability === "unavailable" || provider.status !== "ready")
     return "Provider unavailable";
   const model = provider.models.find((item) => item.slug === favorite.model);
   if (!model) return "Model unavailable";

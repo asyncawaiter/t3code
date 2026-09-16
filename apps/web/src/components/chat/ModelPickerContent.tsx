@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import type { ModelFavorite } from "@t3tools/contracts";
 import {
   modelFavoriteKey,
@@ -190,6 +191,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const environmentId = props.environmentId ?? primaryEnvironmentId;
   const environment = useEnvironment(environmentId);
+  const navigate = useNavigate();
   const favorites = useMemo(
     () =>
       allFavorites.filter(
@@ -441,6 +443,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             .filter(Boolean)
             .join(" / "),
           disabledReason:
+            (environment?.connection.phase !== "connected" ? "Host offline" : null) ??
             (entry && !matchesLockedProvider(entry)
               ? "Start a new chat to use this login"
               : null) ??
@@ -1060,6 +1063,47 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 />
               </ComboboxListVirtualized>
             </div>
+            {selectedInstanceId === "favorites" &&
+            favoriteModels.some((item) => item.disabledReason) ? (
+              <div
+                className="max-h-44 space-y-2 overflow-y-auto border-t border-border/70 p-3"
+                aria-label="Unavailable favorites"
+              >
+                {favoriteModels
+                  .filter((item) => item.disabledReason)
+                  .map((item) => (
+                    <div key={item.key} className="text-xs">
+                      <div className="truncate font-medium">
+                        {item.name} · {item.instanceDisplayName}
+                      </div>
+                      <div className="text-muted-foreground">{item.disabledReason}</div>
+                      {item.disabledReason !== "Start a new chat to use this login" &&
+                      item.disabledReason !== "Model unavailable" &&
+                      item.disabledReason !== "Saved options are no longer supported" ? (
+                        <Button
+                          size="micro"
+                          variant="link"
+                          onClick={() => {
+                            props.onRequestClose?.();
+                            if (environment?.connection.phase !== "connected")
+                              void navigate({ to: "/settings/connections" });
+                            else if (
+                              props.onOpenProviderSetup &&
+                              entryByInstanceId.has(item.instanceId)
+                            )
+                              props.onOpenProviderSetup(item.instanceId);
+                            else void navigate({ to: "/settings/providers" });
+                          }}
+                        >
+                          {environment?.connection.phase !== "connected"
+                            ? "Review host connection"
+                            : "Review provider setup"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ))}
+              </div>
+            ) : null}
             {providerSetupEntries.length > 0 ? (
               <div className="max-h-44 shrink-0 overflow-y-auto border-t border-border/70 p-2">
                 {providerSetupEntries.map((entry) => (

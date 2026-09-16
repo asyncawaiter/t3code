@@ -123,6 +123,7 @@ export type SidebarListItem =
       readonly key: string;
       readonly section: SidebarSection;
       readonly environmentId?: string;
+      readonly reorderable?: boolean;
     }
   | { readonly kind: "device"; readonly environmentId: string }
   | { readonly kind: "marker"; readonly marker: SidebarListMarker };
@@ -176,6 +177,8 @@ export function resolveSidebarDropTarget(
   moved.splice(overIndex, 0, items[activeIndex]!);
   const section = sectionAtSidebarSlot(moved, overIndex);
   if (section === "snoozed") return null;
+  if (active?.kind === "thread" && active.reorderable === false && section === active.section)
+    return null;
   if (
     section === "active" &&
     active?.kind === "thread" &&

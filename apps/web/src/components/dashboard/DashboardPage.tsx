@@ -1,3 +1,6 @@
+import { DashboardSavedViews, type DashboardView } from "./DashboardSavedViews";
+import { useWorkflowState } from "../../workflowState";
+import { buildReviewDashboard } from "./DashboardPage.logic";
 import { useCallback } from "react";
 import { filterDashboardSpace } from "./DashboardPage.logic";
 import { indexProfileSpaces } from "@t3tools/contracts";
@@ -12,7 +15,6 @@ import { DashboardHistoryRow } from "./DashboardHistoryRow";
 import * as Schema from "effect/Schema";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useNavigate } from "@tanstack/react-router";
-import { Popover, PopoverTrigger, PopoverPopup } from "../ui/popover";
 import { Button } from "../ui/button";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentServerConfigsAtom } from "../../state/server";
@@ -23,11 +25,7 @@ import {
   scopedProjectKey,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import {
-  buildDashboard,
-  dashboardHistory,
-  type DashboardLane,
-} from "@t3tools/client-runtime/state/dashboard";
+import { dashboardHistory, type DashboardLane } from "@t3tools/client-runtime/state/dashboard";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   PROVIDER_DISPLAY_NAMES,
@@ -39,7 +37,7 @@ import {
   resolveProfiles,
   type EnvironmentId,
 } from "@t3tools/contracts";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useLayoutEffect, useRef } from "react";
 
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { Input } from "../ui/input";
@@ -58,7 +56,7 @@ import {
   deriveDashboardScope,
   DASHBOARD_LANE_ORDER,
   dashboardProjectKey,
-  dropSeenDoneEntries,
+  dropReviewedDoneEntries,
   flattenBoardEntries,
   groupEntriesByProject,
   type DashboardBoardEntry,
@@ -112,6 +110,25 @@ export function DashboardPage() {
     "active",
     DashboardVisibilitySchema,
   );
+  const boardRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (visibility !== "active") return;
+    const node = boardRef.current;
+    if (!node) return;
+    let position = useWorkflowState.getState().dashboardScroll;
+    node.scrollTop = position;
+    const track = () => {
+      position = node.scrollTop;
+    };
+    const save = () => useWorkflowState.setState({ dashboardScroll: position });
+    node.addEventListener("scroll", track, { passive: true });
+    window.addEventListener("pagehide", save);
+    return () => {
+      save();
+      node.removeEventListener("scroll", track);
+      window.removeEventListener("pagehide", save);
+    };
+  }, [visibility]);
   const { environments } = useEnvironments();
 
   const rawProfiles = usePrimarySettings((s) => s.profiles);
@@ -306,7 +323,9 @@ export function DashboardPage() {
     () => filterDashboardGit(matchingShells, branchFilter, prFilter),
     [matchingShells, branchFilter, prFilter],
   );
-  const board = useMemo(() => buildDashboard(gitShells, now), [gitShells, now]);
+  const reviewed = useWorkflowState((s) => s.reviewed);
+  const kept = useWorkflowState((s) => s.kept);
+  const board = useMemo(() => buildReviewDashboard(gitShells, now, kept), [gitShells, now, kept]);
   const history = useMemo(
     () => (visibility === "active" ? [] : dashboardHistory(gitShells, now, visibility)),
     [gitShells, now, visibility],
@@ -314,8 +333,8 @@ export function DashboardPage() {
 
   const threadLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
   const unseenBoard = useMemo(
-    () => dropSeenDoneEntries(board, threadLastVisitedAtById, threadVisitedKey),
-    [board, threadLastVisitedAtById],
+    () => dropReviewedDoneEntries(board, reviewed, threadVisitedKey),
+    [board, reviewed],
   );
 
   const [groupBy, setGroupBy] = useLocalStorage(
@@ -334,6 +353,159 @@ export function DashboardPage() {
   const projectGroups = useMemo(() => groupEntriesByProject(allEntries), [allEntries]);
   const visibleLanes = DASHBOARD_LANE_ORDER;
 
+  const activeFilters = [
+    ...(search ? [{ label: `Search: ${search}`, clear: () => setSearch("") }] : []),
+    ...(effectiveProjectFilter !== "all"
+      ? [
+          {
+            label: `Project: ${projectByKey.get(effectiveProjectFilter)?.title ?? "Unknown"}`,
+            clear: () => setProjectFilter("all"),
+          },
+        ]
+      : []),
+    ...(effectiveEnvironmentFilter
+      ? [
+          {
+            label: `Device: ${environmentByKind.get(effectiveEnvironmentFilter)?.label ?? "Unknown"}`,
+            clear: () => {
+              setEnvironmentFilter(null);
+              setProviderFilter("all");
+              setProjectFilter("all");
+            },
+          },
+        ]
+      : []),
+    ...(effectiveProviderFilter !== "all"
+      ? [
+          {
+            label: `Provider: ${selectedProvider ? (PROVIDER_DISPLAY_NAMES[selectedProvider.driverKind] ?? selectedProvider.driverKind) : "Unknown"}`,
+            clear: () => {
+              setProviderFilter("all");
+              setProjectFilter("all");
+            },
+          },
+        ]
+      : []),
+    ...(branchFilter
+      ? [{ label: `Branch: ${branchFilter}`, clear: () => setBranchFilter("") }]
+      : []),
+    ...(prFilter !== "all"
+      ? [
+          {
+            label: prFilter === "linked" ? "Linked PR" : "No linked PR",
+            clear: () => setPrFilter("all"),
+          },
+        ]
+      : []),
+  ];
+  const currentView: DashboardView = {
+    profileId: activeProfile.id,
+    space: effectiveSpaceFilter,
+    project: effectiveProjectFilter,
+    device: effectiveEnvironmentFilter,
+    provider: effectiveProviderFilter,
+    search,
+    branch: branchFilter,
+    pr: prFilter,
+    visibility,
+    group: groupBy,
+    recent: showRecent,
+  };
+  function applyView(view: DashboardView) {
+    const profile = resolvedProfiles.find((item) => item.id === view.profileId);
+    const spaceExists =
+      view.space === "all" ||
+      view.space === "root" ||
+      rawProfiles.some(
+        (item) =>
+          (view.profileId === ALL_PROFILE_ID || item.id === view.profileId) &&
+          item.spaces?.some((space) => `${item.id}:${space.id}` === view.space),
+      );
+    const projects = profile
+      ? allProjects.filter((item) =>
+          isProjectInProfile(profile, `${item.environmentId}:${item.id}`),
+        )
+      : [];
+    const shells = filterDashboardSpace(allShells, spaceIndex, view.space).filter((item) =>
+      projects.some(
+        (project) => project.environmentId === item.environmentId && project.id === item.projectId,
+      ),
+    );
+    const device = view.device
+      ? environments.find((item) => item.environmentId === view.device)?.environmentId
+      : null;
+    const scope = deriveDashboardScope(
+      projects,
+      shells,
+      providers,
+      device ?? null,
+      view.provider,
+      view.project,
+      view.search,
+    );
+    if (
+      !profile ||
+      !spaceExists ||
+      (view.device && !device) ||
+      scope.effectiveProjectFilter !== view.project ||
+      scope.effectiveProviderFilter !== view.provider
+    ) {
+      toastManager.add({
+        type: "error",
+        title: "Saved view is unavailable",
+        description:
+          "A profile, Space, device, provider or project in this view is no longer available. Your current view has been kept.",
+      });
+      return;
+    }
+    setActiveProfileId(profile.id === ALL_PROFILE_ID ? null : profile.id);
+    setSpaceFilter(view.space);
+    setProjectFilter(view.project);
+    setEnvironmentFilter(device ?? null);
+    setProviderFilter(view.provider);
+    setSearch(view.search);
+    setBranchFilter(view.branch);
+    setPrFilter(view.pr);
+    setVisibility(view.visibility);
+    setGroupBy(view.group);
+    setShowRecent(view.recent);
+    useWorkflowState.setState({ dashboardScroll: 0 });
+    if (boardRef.current) boardRef.current.scrollTop = 0;
+  }
+  function resetFilters() {
+    setSearch("");
+    setProjectFilter("all");
+    setEnvironmentFilter(null);
+    setProviderFilter("all");
+    setBranchFilter("");
+    setPrFilter("all");
+  }
+  const resultsControl = (
+    <Select
+      disabled={visibility !== "active"}
+      value={showRecent ? "recent" : "unreviewed"}
+      onValueChange={(value) => {
+        if (value) setShowRecent(value === "recent");
+      }}
+    >
+      <SelectTrigger
+        size="xs"
+        className="h-8 w-full min-w-0 sm:h-8 rounded-md border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
+        aria-label="Results to show"
+      >
+        <SelectValue>{showRecent ? "Recent 24h" : "Unreviewed results"}</SelectValue>
+      </SelectTrigger>
+      <SelectPopup alignItemWithTrigger={false}>
+        <SelectItem className="min-h-7 text-xs sm:text-xs" value="unreviewed">
+          Unreviewed results
+        </SelectItem>
+        <SelectItem className="min-h-7 text-xs sm:text-xs" value="recent">
+          Recent 24h
+        </SelectItem>
+      </SelectPopup>
+    </Select>
+  );
+
   function renderCard(entry: DashboardBoardEntry) {
     const project = projectByKey.get(
       dashboardProjectKey(entry.shell.environmentId, entry.shell.projectId),
@@ -345,7 +517,15 @@ export function DashboardPage() {
       <DashboardCard
         key={`${entry.shell.environmentId}:${entry.shell.id}`}
         entry={entry}
-        spaceName={shellSpace(entry.shell)?.name}
+        onOpen={() =>
+          useWorkflowState.setState({
+            triageProfileId: activeProfile.id,
+            triageQueue: allEntries
+              .filter((item) => item.lane === "needs-you" || item.lane === "done")
+              .map((item) => threadVisitedKey(item.shell)),
+          })
+        }
+        spaceName={shellSpace(entry.shell)?.name ?? "Unsorted"}
         providerEntry={providers
           .get(entry.shell.environmentId)
           ?.get(entry.shell.session?.providerInstanceId ?? entry.shell.modelSelection.instanceId)}
@@ -375,14 +555,14 @@ export function DashboardPage() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      <div className="@container/dashboard flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <WorkspacePageHeader
           electron={isElectron}
           className="h-auto min-h-12 flex-wrap border-b-0 py-2"
         >
           <WorkspaceBreadcrumb ariaLabel="Dashboard">
             <WorkspaceBreadcrumbItem current>
-              <h1 className="truncate">Dashboard</h1>
+              <h1 className="truncate text-base font-semibold">Dashboard</h1>
             </WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
           <div className="no-drag ml-auto flex min-w-0 flex-wrap items-center gap-2">
@@ -393,12 +573,12 @@ export function DashboardPage() {
               placeholder="Search tasks..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="h-8 w-40 min-w-0 rounded-full border-transparent bg-foreground/5 shadow-none sm:w-52"
+              className="h-8 w-40 min-w-0 rounded-md border-transparent bg-foreground/5 shadow-none sm:w-52"
             />
             <Button
               size="xs"
               variant="ghost"
-              className="h-8 shrink-0 rounded-full bg-foreground/5 px-3 text-xs"
+              className="h-8 shrink-0 rounded-md bg-foreground/5 px-3 text-xs"
               onClick={() => {
                 const project = projectByKey.get(effectiveProjectFilter);
                 void navigate({
@@ -420,408 +600,428 @@ export function DashboardPage() {
           </div>
         </WorkspacePageHeader>
         <div
-          className="flex shrink-0 flex-wrap items-center gap-2 px-4 pb-2 pt-3"
-          role="group"
-          aria-label="Dashboard scope"
+          className="shrink-0 space-y-3 border-b border-border/60 px-4 pb-3 pt-1"
+          aria-label="Dashboard controls"
         >
-          <span className="mr-1 text-[11px] font-medium text-muted-foreground">Scope</span>
-          <Select
-            value={activeProfile.id}
-            onValueChange={(value) => {
-              if (value !== null) {
-                setActiveProfileId(value);
-                setSpaceFilter("all");
-                setEnvironmentFilter(null);
-                setProviderFilter("all");
-                setProjectFilter("all");
-              }
-            }}
-          >
-            <SelectTrigger
-              size="xs"
-              className="h-7 min-w-0 w-28 sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-              aria-label="Filter dashboard by profile"
-            >
-              <SelectValue>
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <ProfileDot color={activeProfile.color} />
-                  <span className="truncate">{activeProfile.name}</span>
-                </span>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup alignItemWithTrigger={false}>
-              {resolvedProfiles.map((profile) => (
-                <SelectItem
-                  className="min-h-7 text-xs sm:text-xs"
-                  key={profile.id}
-                  value={profile.id}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <ProfileDot color={profile.color} />
-                    {profile.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-          {spaceOptions.length > 0 ? (
-            <Select
-              value={effectiveSpaceFilter}
-              onValueChange={(value) => {
-                if (value !== null) {
-                  setSpaceFilter(value);
-                  setProviderFilter("all");
-                  setProjectFilter("all");
-                }
-              }}
-            >
-              <SelectTrigger
-                size="xs"
-                className="h-7 w-36 min-w-0 sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-                aria-label="Filter dashboard by space"
-              >
-                <SelectValue>
-                  {effectiveSpaceFilter === "all"
-                    ? "All spaces"
-                    : effectiveSpaceFilter === "root"
-                      ? "Default"
-                      : spaceOptions.find((space) => space.key === effectiveSpaceFilter)?.name}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup alignItemWithTrigger={false}>
-                <SelectItem value="all" className="min-h-7 text-xs">
-                  All spaces
-                </SelectItem>
-                <SelectItem value="root" className="min-h-7 text-xs">
-                  Default
-                </SelectItem>
-                {spaceOptions.map((space) => (
-                  <SelectItem key={space.key} value={space.key} className="min-h-7 text-xs">
-                    {space.name}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          ) : null}
-          <Select
-            value={effectiveProjectFilter}
-            onValueChange={(value) => setProjectFilter(value ?? "all")}
-          >
-            <SelectTrigger
-              size="xs"
-              className="h-7 w-36 min-w-0 sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-              aria-label="Filter dashboard by project"
-            >
-              <SelectValue>
-                {effectiveProjectFilter === "all"
-                  ? "All projects"
-                  : projectByKey.get(effectiveProjectFilter)?.title}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup alignItemWithTrigger={false} className="w-80 max-w-[calc(100vw-2rem)]">
-              <SelectItem className="min-h-7 text-xs sm:text-xs" value="all">
-                All projects
-              </SelectItem>
-              {projectOptions.map((project) => (
-                <SelectItem
-                  className="min-h-7 text-xs sm:text-xs"
-                  key={dashboardProjectKey(project.environmentId, project.id)}
-                  value={dashboardProjectKey(project.environmentId, project.id)}
-                >
-                  <span className="flex min-w-0 flex-col gap-0.5 py-1">
-                    <span className="text-xs font-medium">{project.title}</span>
-                    <span className="break-all text-[11px] text-muted-foreground">
-                      {project.workspaceRoot}
-                    </span>
-                    <span className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                      <span>
-                        {environmentByKind.get(project.environmentId)?.label ?? "Unknown device"}
-                      </span>
-                      {[
-                        ...(projectProviders
-                          .get(dashboardProjectKey(project.environmentId, project.id))
-                          ?.entries() ?? []),
-                      ].map(([key, provider]) => (
-                        <span key={key} className="inline-flex items-center gap-1">
-                          {provider ? (
-                            <ProviderInstanceIcon
-                              driverKind={provider.driverKind}
-                              displayName={provider.displayName}
-                              iconClassName="size-3"
-                            />
-                          ) : null}
-                          {provider
-                            ? (PROVIDER_DISPLAY_NAMES[provider.driverKind] ?? provider.driverKind)
-                            : "Unknown provider"}
-                        </span>
-                      ))}
-                      {!projectProviders.has(
-                        dashboardProjectKey(project.environmentId, project.id),
-                      ) ? (
-                        <span>No threads</span>
-                      ) : null}
-                    </span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        </div>
-
-        <div className="flex shrink-0 flex-col gap-3 px-4 pb-2">
-          <div className="min-w-0" role="group" aria-label="Filter tasks">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Select
-                value={effectiveEnvironmentFilter ?? "all"}
-                onValueChange={(value) => {
-                  setEnvironmentFilter(value === "all" ? null : (value as EnvironmentId));
-                  setProviderFilter("all");
-                  setProjectFilter("all");
-                }}
-              >
-                <SelectTrigger
-                  size="xs"
-                  className="h-7 w-32 min-w-0 sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-                  aria-label="Filter dashboard by device"
-                >
-                  <SelectValue>
-                    {effectiveEnvironmentFilter === null
-                      ? "All devices"
-                      : environmentByKind.get(effectiveEnvironmentFilter)?.label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup alignItemWithTrigger={false}>
-                  <SelectItem className="min-h-7 text-xs sm:text-xs" value="all">
-                    All devices
-                  </SelectItem>
-                  {profileEnvironments.map((environment) => (
-                    <SelectItem
-                      className="min-h-7 text-xs sm:text-xs"
-                      key={environment.environmentId}
-                      value={environment.environmentId}
-                    >
-                      {environment.label}
-                      {environment.connection.phase !== "connected" ? " (offline)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              <Select
-                value={effectiveProviderFilter}
-                onValueChange={(value) => {
-                  setProviderFilter(value ?? "all");
-                  setProjectFilter("all");
-                }}
-              >
-                <SelectTrigger
-                  size="xs"
-                  className="h-7 w-32 min-w-0 sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-                  aria-label="Filter dashboard by provider"
-                >
-                  <SelectValue>
-                    {effectiveProviderFilter === "all"
-                      ? "All providers"
-                      : selectedProvider
-                        ? (PROVIDER_DISPLAY_NAMES[selectedProvider.driverKind] ??
-                          selectedProvider.driverKind)
-                        : "Unknown provider"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup alignItemWithTrigger={false}>
-                  <SelectItem className="min-h-7 text-xs sm:text-xs" value="all">
-                    All providers
-                  </SelectItem>
-                  {providerOptions.map(([key, provider]) => (
-                    <SelectItem className="min-h-7 text-xs sm:text-xs" key={key} value={key}>
-                      <span className="flex items-center gap-1.5">
-                        {provider ? (
-                          <ProviderInstanceIcon
-                            driverKind={provider.driverKind}
-                            displayName={provider.displayName}
-                            iconClassName="size-3"
-                          />
-                        ) : null}
-                        {provider
-                          ? (PROVIDER_DISPLAY_NAMES[provider.driverKind] ?? provider.driverKind)
-                          : "Unknown provider"}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <Button
+          <div className="grid gap-x-5 gap-y-3 @min-[900px]/dashboard:grid-cols-[2fr_3fr]">
+            <fieldset className="min-w-0">
+              <legend className="mb-1.5 text-[11px] font-medium text-foreground/80">Scope</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Profile</div>
+                  <Select
+                    value={activeProfile.id}
+                    onValueChange={(value) => {
+                      if (value !== null) {
+                        setActiveProfileId(value);
+                        setSpaceFilter("all");
+                        setEnvironmentFilter(null);
+                        setProviderFilter("all");
+                        setProjectFilter("all");
+                      }
+                    }}
+                  >
+                    <SelectTrigger
                       size="xs"
-                      variant="ghost"
-                      className="h-7 rounded-full bg-foreground/5 px-3 text-xs"
-                    />
-                  }
-                >
-                  Git{branchFilter || prFilter !== "all" ? " · Filtered" : ""}
-                </PopoverTrigger>
-                <PopoverPopup align="start" className="w-60" viewportClassName="p-2">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between px-1">
-                      <span className="text-xs font-medium">Git filters</span>
-                      <Button
-                        size="micro"
-                        variant="ghost-muted"
-                        disabled={!branchFilter && prFilter === "all"}
-                        onClick={() => {
-                          setBranchFilter("");
-                          setPrFilter("all");
-                        }}
-                      >
-                        Reset
-                      </Button>
-                    </div>
-                    <Input
-                      size="compact"
-                      className="w-full"
-                      list="dashboard-branches"
-                      aria-label="Filter by branch"
-                      placeholder="Branch..."
-                      value={branchFilter}
-                      onChange={(event) => setBranchFilter(event.target.value)}
-                    />
-                    <datalist id="dashboard-branches">
-                      {[
-                        ...new Set(
-                          matchingShells.flatMap((shell) => (shell.branch ? [shell.branch] : [])),
-                        ),
-                      ]
-                        .sort()
-                        .map((branch) => (
-                          <option key={branch} value={branch} />
-                        ))}
-                    </datalist>
-                    <Select
-                      value={prFilter}
-                      onValueChange={(value) => {
-                        if (value) setPrFilter(value);
-                      }}
+                      className="h-8 min-w-0 w-full sm:h-8 rounded-md border-sidebar-border bg-sidebar-row-active text-sidebar-foreground shadow-none"
+                      aria-label="Filter dashboard by profile"
                     >
-                      <SelectTrigger
-                        size="xs"
-                        className="h-7 w-full sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-                        aria-label="Filter by linked PR"
-                      >
-                        <SelectValue>
-                          {prFilter === "all"
-                            ? "Any PR"
-                            : prFilter === "linked"
-                              ? "Linked PR"
-                              : "No linked PR"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectPopup alignItemWithTrigger={false}>
-                        <SelectItem className="min-h-7 text-xs sm:text-xs" value="all">
-                          Any PR
+                      <SelectValue>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <ProfileDot color={activeProfile.color} />
+                          <span className="truncate">{activeProfile.name}</span>
+                        </span>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      {resolvedProfiles.map((profile) => (
+                        <SelectItem
+                          className="min-h-8 text-xs sm:text-xs"
+                          key={profile.id}
+                          value={profile.id}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <ProfileDot color={profile.color} />
+                            {profile.name}
+                          </span>
                         </SelectItem>
-                        <SelectItem className="min-h-7 text-xs sm:text-xs" value="linked">
-                          Linked PR
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>{" "}
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Space</div>
+                  <Select
+                    value={effectiveSpaceFilter}
+                    onValueChange={(value) => {
+                      if (value !== null) {
+                        setSpaceFilter(value);
+                        setProviderFilter("all");
+                        setProjectFilter("all");
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      size="xs"
+                      className={cn(
+                        "h-8 w-full min-w-0 sm:h-8 rounded-md border-transparent bg-muted/50 shadow-none",
+                        effectiveSpaceFilter !== "all" &&
+                          "bg-sidebar-row-active text-sidebar-foreground border-sidebar-border",
+                      )}
+                      aria-label="Filter dashboard by space"
+                    >
+                      <SelectValue>
+                        {effectiveSpaceFilter === "all"
+                          ? "All spaces"
+                          : effectiveSpaceFilter === "root"
+                            ? "Unsorted"
+                            : spaceOptions.find((space) => space.key === effectiveSpaceFilter)
+                                ?.name}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      <SelectItem value="all" className="min-h-8 text-xs">
+                        All spaces
+                      </SelectItem>
+                      <SelectItem value="root" className="min-h-8 text-xs">
+                        Unsorted
+                      </SelectItem>
+                      {spaceOptions.map((space) => (
+                        <SelectItem key={space.key} value={space.key} className="min-h-8 text-xs">
+                          {space.name}
                         </SelectItem>
-                        <SelectItem className="min-h-7 text-xs sm:text-xs" value="none">
-                          No linked PR
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset className="min-w-0">
+              <legend className="mb-1.5 text-[11px] font-medium text-foreground/80">
+                Execution
+              </legend>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Device</div>
+                  <Select
+                    value={effectiveEnvironmentFilter ?? "all"}
+                    onValueChange={(value) => {
+                      setEnvironmentFilter(value === "all" ? null : (value as EnvironmentId));
+                      setProviderFilter("all");
+                      setProjectFilter("all");
+                    }}
+                  >
+                    <SelectTrigger
+                      size="xs"
+                      className="h-8 w-full min-w-0 sm:h-8 rounded-md border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
+                      aria-label="Filter dashboard by device"
+                    >
+                      <SelectValue>
+                        {effectiveEnvironmentFilter === null
+                          ? "All devices"
+                          : environmentByKind.get(effectiveEnvironmentFilter)?.label}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="all">
+                        All devices
+                      </SelectItem>
+                      {profileEnvironments.map((environment) => (
+                        <SelectItem
+                          className="min-h-8 text-xs sm:text-xs"
+                          key={environment.environmentId}
+                          value={environment.environmentId}
+                        >
+                          {environment.label}
+                          {environment.connection.phase !== "connected" ? " (offline)" : ""}
                         </SelectItem>
-                      </SelectPopup>
-                    </Select>
-                  </div>
-                </PopoverPopup>
-              </Popover>
-            </div>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>{" "}
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Provider</div>
+                  <Select
+                    value={effectiveProviderFilter}
+                    onValueChange={(value) => {
+                      setProviderFilter(value ?? "all");
+                      setProjectFilter("all");
+                    }}
+                  >
+                    <SelectTrigger
+                      size="xs"
+                      className="h-8 w-full min-w-0 sm:h-8 rounded-md border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
+                      aria-label="Filter dashboard by provider"
+                    >
+                      <SelectValue>
+                        {effectiveProviderFilter === "all"
+                          ? "All providers"
+                          : selectedProvider
+                            ? (PROVIDER_DISPLAY_NAMES[selectedProvider.driverKind] ??
+                              selectedProvider.driverKind)
+                            : "Unknown provider"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="all">
+                        All providers
+                      </SelectItem>
+                      {providerOptions.map(([key, provider]) => (
+                        <SelectItem className="min-h-8 text-xs sm:text-xs" key={key} value={key}>
+                          <span className="flex items-center gap-1.5">
+                            {provider ? (
+                              <ProviderInstanceIcon
+                                driverKind={provider.driverKind}
+                                displayName={provider.displayName}
+                                iconClassName="size-3"
+                              />
+                            ) : null}
+                            {provider
+                              ? (PROVIDER_DISPLAY_NAMES[provider.driverKind] ?? provider.driverKind)
+                              : "Unknown provider"}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>{" "}
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Project</div>
+                  <Select
+                    value={effectiveProjectFilter}
+                    onValueChange={(value) => setProjectFilter(value ?? "all")}
+                  >
+                    <SelectTrigger
+                      size="xs"
+                      className="h-8 w-full min-w-0 sm:h-8 rounded-md border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
+                      aria-label="Filter dashboard by project"
+                    >
+                      <SelectValue>
+                        {effectiveProjectFilter === "all"
+                          ? "All projects"
+                          : projectByKey.get(effectiveProjectFilter)?.title}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup
+                      alignItemWithTrigger={false}
+                      className="w-80 max-w-[calc(100vw-2rem)]"
+                    >
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="all">
+                        All projects
+                      </SelectItem>
+                      {projectOptions.map((project) => (
+                        <SelectItem
+                          className="min-h-8 text-xs sm:text-xs"
+                          key={dashboardProjectKey(project.environmentId, project.id)}
+                          value={dashboardProjectKey(project.environmentId, project.id)}
+                        >
+                          <span className="flex min-w-0 flex-col gap-0.5 py-1">
+                            <span className="text-xs font-medium">{project.title}</span>
+                            <span className="break-all text-[11px] text-muted-foreground">
+                              {project.workspaceRoot}
+                            </span>
+                            <span className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                              <span>
+                                {environmentByKind.get(project.environmentId)?.label ??
+                                  "Unknown device"}
+                              </span>
+                              {[
+                                ...(projectProviders
+                                  .get(dashboardProjectKey(project.environmentId, project.id))
+                                  ?.entries() ?? []),
+                              ].map(([key, provider]) => (
+                                <span key={key} className="inline-flex items-center gap-1">
+                                  {provider ? (
+                                    <ProviderInstanceIcon
+                                      driverKind={provider.driverKind}
+                                      displayName={provider.displayName}
+                                      iconClassName="size-3"
+                                    />
+                                  ) : null}
+                                  {provider
+                                    ? (PROVIDER_DISPLAY_NAMES[provider.driverKind] ??
+                                      provider.driverKind)
+                                    : "Unknown provider"}
+                                </span>
+                              ))}
+                              {!projectProviders.has(
+                                dashboardProjectKey(project.environmentId, project.id),
+                              ) ? (
+                                <span>No threads</span>
+                              ) : null}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>
+              </div>
+            </fieldset>
           </div>
-          <div
-            className="min-w-0 border-t border-border/50 pt-2"
-            role="group"
-            aria-label="Board view"
-          >
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Select
-                value={visibility}
-                onValueChange={(value) => {
-                  if (value) setVisibility(value);
-                }}
+          <div className="flex flex-wrap items-end gap-x-5 gap-y-3 border-t border-border/40 pt-2">
+            <fieldset className="min-w-0 flex-[2_1_17rem]">
+              <legend className="mb-1.5 text-[11px] font-medium text-foreground/80">Git</legend>
+              <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-2">
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Branch</div>
+                  <Input
+                    size="compact"
+                    className="h-8 w-full rounded-md bg-foreground/5 shadow-none"
+                    list="dashboard-branches"
+                    aria-label="Filter by branch"
+                    placeholder="Any branch"
+                    value={branchFilter}
+                    onChange={(event) => setBranchFilter(event.target.value)}
+                  />
+                  <datalist id="dashboard-branches">
+                    {[
+                      ...new Set(
+                        matchingShells.flatMap((shell) => (shell.branch ? [shell.branch] : [])),
+                      ),
+                    ]
+                      .sort()
+                      .map((branch) => (
+                        <option key={branch} value={branch} />
+                      ))}
+                  </datalist>
+                </div>{" "}
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Pull request</div>
+                  <Select
+                    value={prFilter}
+                    onValueChange={(value) => {
+                      if (value) setPrFilter(value);
+                    }}
+                  >
+                    <SelectTrigger
+                      size="xs"
+                      className="h-8 w-full sm:h-8 rounded-md border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
+                      aria-label="Filter by linked PR"
+                    >
+                      <SelectValue>
+                        {prFilter === "all"
+                          ? "Any PR"
+                          : prFilter === "linked"
+                            ? "Linked PR"
+                            : "No linked PR"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="all">
+                        Any PR
+                      </SelectItem>
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="linked">
+                        Linked PR
+                      </SelectItem>
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="none">
+                        No linked PR
+                      </SelectItem>
+                    </SelectPopup>
+                  </Select>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset className="min-w-0 flex-[3_1_25rem]">
+              <legend className="mb-1.5 text-[11px] font-medium text-foreground/80">View</legend>
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)] gap-2">
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Status</div>
+                  <Select
+                    value={visibility}
+                    onValueChange={(value) => {
+                      if (value) setVisibility(value);
+                    }}
+                  >
+                    <SelectTrigger
+                      size="xs"
+                      className="h-8 w-full min-w-0 sm:h-8 rounded-md border-sidebar-border bg-sidebar-row-active text-sidebar-foreground shadow-none"
+                      aria-label="Task visibility"
+                    >
+                      <SelectValue>
+                        <span className="capitalize">{visibility}</span>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      {(["active", "snoozed", "settled", "archived"] as const).map((value) => (
+                        <SelectItem
+                          className="min-h-8 text-xs sm:text-xs"
+                          key={value}
+                          value={value}
+                        >
+                          <span className="capitalize">{value}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>{" "}
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Group by</div>
+                  <Select
+                    disabled={visibility !== "active"}
+                    value={groupBy}
+                    onValueChange={(value) => {
+                      if (value) setGroupBy(value);
+                    }}
+                  >
+                    <SelectTrigger
+                      size="xs"
+                      className="h-8 w-full min-w-0 sm:h-8 rounded-md border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
+                      aria-label="Group tasks"
+                    >
+                      <SelectValue>
+                        {groupBy === "state"
+                          ? "By state"
+                          : groupBy === "space"
+                            ? "By space"
+                            : "By project"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="state">
+                        By state
+                      </SelectItem>
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="project">
+                        By project
+                      </SelectItem>
+                      <SelectItem className="min-h-8 text-xs sm:text-xs" value="space">
+                        By space
+                      </SelectItem>
+                    </SelectPopup>
+                  </Select>
+                </div>{" "}
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] leading-4 text-muted-foreground">Results</div>
+                  {resultsControl}
+                </div>
+              </div>
+            </fieldset>
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={!activeFilters.length}
+                onClick={resetFilters}
               >
-                <SelectTrigger
-                  size="xs"
-                  className="h-7 w-28 min-w-0 sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-                  aria-label="Task visibility"
-                >
-                  <SelectValue>
-                    <span className="capitalize">{visibility}</span>
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup alignItemWithTrigger={false}>
-                  {(["active", "snoozed", "settled", "archived"] as const).map((value) => (
-                    <SelectItem className="min-h-7 text-xs sm:text-xs" key={value} value={value}>
-                      <span className="capitalize">{value}</span>
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              {visibility === "active" ? (
-                <Select
-                  value={groupBy}
-                  onValueChange={(value) => {
-                    if (value) setGroupBy(value);
-                  }}
-                >
-                  <SelectTrigger
-                    size="xs"
-                    className="h-7 w-32 min-w-0 sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-                    aria-label="Group tasks"
-                  >
-                    <SelectValue>
-                      {groupBy === "state"
-                        ? "By state"
-                        : groupBy === "space"
-                          ? "By space"
-                          : "By project"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup alignItemWithTrigger={false}>
-                    <SelectItem className="min-h-7 text-xs sm:text-xs" value="state">
-                      By state
-                    </SelectItem>
-                    <SelectItem className="min-h-7 text-xs sm:text-xs" value="project">
-                      By project
-                    </SelectItem>
-                    <SelectItem className="min-h-7 text-xs sm:text-xs" value="space">
-                      By space
-                    </SelectItem>
-                  </SelectPopup>
-                </Select>
-              ) : null}
-              {visibility === "active" ? (
-                <Select
-                  value={showRecent ? "recent" : "unreviewed"}
-                  onValueChange={(value) => {
-                    if (value) setShowRecent(value === "recent");
-                  }}
-                >
-                  <SelectTrigger
-                    size="xs"
-                    className="h-7 w-32 min-w-0 sm:h-7 rounded-full border-transparent bg-foreground/5 shadow-none hover:bg-foreground/10"
-                    aria-label="Results to show"
-                  >
-                    <SelectValue>{showRecent ? "Recent 24h" : "Unreviewed"}</SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup alignItemWithTrigger={false}>
-                    <SelectItem className="min-h-7 text-xs sm:text-xs" value="unreviewed">
-                      Unreviewed
-                    </SelectItem>
-                    <SelectItem className="min-h-7 text-xs sm:text-xs" value="recent">
-                      Recent 24h
-                    </SelectItem>
-                  </SelectPopup>
-                </Select>
-              ) : null}
+                Reset filters
+              </Button>
+              <DashboardSavedViews current={currentView} onApply={applyView} />
             </div>
           </div>
         </div>
+        {activeFilters.length > 0 &&
+        (visibility === "active" ? allEntries.length === 0 : history.length === 0) &&
+        !(visibility === "archived" && (archive.isLoading || archive.error)) ? (
+          <div
+            role="status"
+            className="mx-4 mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground"
+          >
+            No tasks match these filters.
+            <Button size="xs" variant="ghost" onClick={resetFilters}>
+              Clear filters
+            </Button>
+          </div>
+        ) : null}
         {visibility !== "active" ? (
           <section
             className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
@@ -896,7 +1096,16 @@ export function DashboardPage() {
             ) : null}
           </section>
         ) : (
-          <div className="flex min-h-0 flex-1 gap-0 overflow-x-auto p-3" aria-label="Task board">
+          <div
+            className={cn(
+              "grid min-h-0 flex-1 content-start items-start gap-3 overflow-y-auto p-4",
+              groupBy === "state"
+                ? "@min-[1120px]/dashboard:grid-cols-4"
+                : "@min-[640px]/dashboard:grid-cols-2 @min-[1000px]/dashboard:grid-cols-3",
+            )}
+            aria-label="Task board"
+            ref={boardRef}
+          >
             {groupBy === "state" ? (
               visibleLanes.map((lane) => {
                 const entries = filteredBoard.lanes[lane];
@@ -904,9 +1113,9 @@ export function DashboardPage() {
                   <section
                     key={lane}
                     aria-label={LANE_TILE_LABELS[lane]}
-                    className="flex min-h-0 min-w-56 flex-1 flex-col border-r border-border/40 px-2 last:border-r-0"
+                    className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-muted/15 p-3"
                   >
-                    <div className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1">
+                    <div className="flex min-h-7 flex-wrap items-center gap-2">
                       <span
                         className={cn(
                           "size-1.5 rounded-full",
@@ -919,29 +1128,26 @@ export function DashboardPage() {
                                 : "bg-emerald-500",
                         )}
                       />
-                      <h2 className="text-xs font-semibold">
+                      <h2 className="text-[13px] font-semibold">
                         {lane === "done"
                           ? showRecent
                             ? "Recent results"
                             : "Ready to review"
                           : LANE_TILE_LABELS[lane]}
                       </h2>
-                      <span className="rounded-full bg-foreground/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                      <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
                         {entries.length}
                       </span>
                     </div>
-                    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pb-2">
+                    <div className="space-y-2 [&:not(:empty)]:mt-2">
                       {entries.length ? (
                         entries.map(renderCard)
                       ) : (
-                        <p className="px-1 py-2 text-xs text-muted-foreground/70">
-                          {search ||
-                          branchFilter ||
-                          prFilter !== "all" ||
-                          effectiveProjectFilter !== "all"
+                        <p className="text-xs text-muted-foreground">
+                          {activeFilters.length > 0
                             ? "No matching tasks"
                             : lane === "needs-you"
-                              ? "No requests waiting"
+                              ? "Nothing needs attention"
                               : lane === "running"
                                 ? "No active tasks"
                                 : lane === "monitoring"
@@ -953,7 +1159,7 @@ export function DashboardPage() {
                   </section>
                 );
               })
-            ) : groupBy === "space" ? (
+            ) : groupBy === "space" && allEntries.length > 0 ? (
               [
                 ...new Set(
                   DASHBOARD_LANE_ORDER.flatMap((lane) =>
@@ -969,15 +1175,13 @@ export function DashboardPage() {
                 return (
                   <section
                     key={key}
-                    className="flex min-h-0 min-w-72 flex-1 flex-col border-r border-border/40 px-2 last:border-r-0"
+                    className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-muted/15 p-3"
                   >
                     <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-xs font-semibold">
-                      {spaceOptions.find((space) => space.key === key)?.name ?? "Default"}
+                      {spaceOptions.find((space) => space.key === key)?.name ?? "Unsorted"}
                       <span className="text-muted-foreground">{entries.length}</span>
                     </h2>
-                    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-                      {entries.map(renderCard)}
-                    </div>
+                    <div className="space-y-2">{entries.map(renderCard)}</div>
                   </section>
                 );
               })
@@ -985,15 +1189,13 @@ export function DashboardPage() {
               projectGroups.map((group) => (
                 <section
                   key={group.projectKey}
-                  className="flex min-h-0 min-w-72 flex-1 flex-col border-r border-border/40 px-2 last:border-r-0"
+                  className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-muted/15 p-3"
                 >
                   <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-xs font-semibold">
                     {projectByKey.get(group.projectKey)?.title ?? "Unknown project"}
                     <span className="text-muted-foreground">{group.entries.length}</span>
                   </h2>
-                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-                    {group.entries.map(renderCard)}
-                  </div>
+                  <div className="space-y-2">{group.entries.map(renderCard)}</div>
                 </section>
               ))
             ) : (

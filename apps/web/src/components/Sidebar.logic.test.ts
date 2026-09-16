@@ -2517,3 +2517,21 @@ describe("resolveSidebarDropVerb", () => {
     expect(resolveSidebarDropVerb("active", "snoozed")).toBeNull();
   });
 });
+
+it("automatic All chats ordering rejects manual reorder but permits section moves", () => {
+  const items: SidebarListItem[] = [
+    { kind: "marker", marker: "pinned-header" },
+    { kind: "marker", marker: "pinned-divider" },
+    { kind: "thread", key: "work:a", environmentId: "work", section: "active", reorderable: false },
+    { kind: "thread", key: "work:b", environmentId: "work", section: "active", reorderable: false },
+    { kind: "marker", marker: "settled-header" },
+    { kind: "marker", marker: "settled-placeholder" },
+  ];
+  expect(resolveSidebarDropTarget(items, "work:a", "work:b")).toBeNull();
+  expect(
+    resolveSidebarDropTarget(items, "work:a", sidebarMarkerId("settled-placeholder"))?.section,
+  ).toBe("settled");
+  expect(resolveSidebarDropTarget(items, "work:a", sidebarMarkerId("pinned-header"))?.section).toBe(
+    "pinned",
+  );
+});

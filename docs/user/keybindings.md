@@ -7,7 +7,7 @@ also lists the command IDs and defaults available in your version.
 
 On macOS, numbered shortcuts have separate scopes:
 
-- `Cmd+1` through `Cmd+9`: select a Space in the current profile. Default is first.
+- `Cmd+1` through `Cmd+9`: select a Space in the current profile. Unsorted is first.
 - `Cmd+Option+1` through `Cmd+Option+9`: select a profile. All is first.
 - `Cmd+Control+1` through `Cmd+Control+9`: open a chat in the current sidebar order.
 
@@ -18,6 +18,12 @@ The old default chat-number bindings move automatically; customized shortcuts ar
 
 On Windows and Linux, Space and profile shortcuts use Control instead of Command.
 Chat shortcuts use Meta+Control; change them in Settings if your desktop reserves that chord.
+
+Press `Cmd+Option+Q` (`Ctrl+Alt+Q` on Windows and Linux) to return to the previous chat.
+Press it again to switch back. This follows your recent chat history across profiles, Spaces,
+and devices, revealing the destination's profile and Space. It does not change the numbered
+shortcuts or next/previous sidebar order. The command palette also offers **Return to previous
+chat**. Customize `thread.quickReturn` in Settings; its default leaves focused terminals alone.
 
 ## Edit the configuration file
 

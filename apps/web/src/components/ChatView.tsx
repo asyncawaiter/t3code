@@ -1,3 +1,4 @@
+import { DashboardReviewBar } from "./dashboard/DashboardReviewBar";
 import { inheritForkPlacement } from "@t3tools/client-runtime/state/profiles";
 import { useSaveProfiles } from "../hooks/useProfileSync";
 import { EditMessageDialog } from "./chat/EditMessageDialog";
@@ -8329,6 +8330,7 @@ export default function ChatView(props: ChatViewProps) {
           />
         </WorkspacePageHeader>
 
+        {serverThread ? <DashboardReviewBar thread={serverThread} /> : null}
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
