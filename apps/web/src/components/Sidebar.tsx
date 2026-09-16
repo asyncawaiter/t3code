@@ -4973,6 +4973,7 @@ export default function Sidebar() {
       }
       const profileIndex = PROFILE_JUMP_KEYBINDING_COMMANDS.findIndex((item) => item === command);
       const spaceIndex = SPACE_JUMP_KEYBINDING_COMMANDS.findIndex((item) => item === command);
+      if (spaceIndex >= 0 && activeProfile.id === ALL_PROFILE_ID) return;
       if (profileIndex >= 0 || spaceIndex >= 0) {
         event.preventDefault();
         event.stopPropagation();
@@ -4996,6 +4997,7 @@ export default function Sidebar() {
     openWorkflowThread,
     workflowThreadByKey,
     activeProfile.spaces,
+    activeProfile.id,
     setSelectedSpaceId,
     keybindings,
     navigateToThread,
@@ -5824,109 +5826,131 @@ export default function Sidebar() {
                       items.push(
                         <li
                           key="spaces"
-                          className="mx-1 mb-2 list-none rounded-2xl bg-sidebar-foreground/[0.025] p-1.5"
+                          className={cn(
+                            "mx-1 mb-2 list-none",
+                            activeProfile.id !== ALL_PROFILE_ID &&
+                              "rounded-2xl bg-sidebar-foreground/[0.025] p-1.5",
+                          )}
                           role="group"
-                          aria-label={`Spaces in ${activeProfile.name}`}
+                          aria-label={
+                            activeProfile.id === ALL_PROFILE_ID
+                              ? "All chats"
+                              : `Spaces in ${activeProfile.name}`
+                          }
                         >
-                          <SpaceToolbar
-                            onCreated={setNewSpaceSetupId}
-                            key={activeProfile.id}
-                            profile={activeProfile}
-                            onChange={changeSpaces}
-                            selectedSpaceId={spaceFilter}
-                            onFilterChange={setSelectedSpaceId}
-                            disabled={!primarySettingsLoaded}
-                          />
-                          <SortableContext
-                            items={
-                              activeProfile.spaces?.map((space) =>
-                                spaceDragId(activeProfile.id, space.id),
-                              ) ?? []
-                            }
-                            strategy={spaceSortingStrategy}
-                          >
-                            <ul aria-label="Spaces" className="mt-1 grid grid-cols-3 gap-1.5">
-                              <DefaultSpaceTile
-                                shortcut={shortcutLabelForCommand(keybindings, "space.jump.1")}
-                                profileId={activeProfile.id}
-                                dropDisabled={!primarySettingsLoaded}
-                                count={spaceCounts.get(OUTSIDE_SPACES) ?? 0}
-                                selected={spaceFilter === OUTSIDE_SPACES}
-                                onSelect={() => setSelectedSpaceId(OUTSIDE_SPACES)}
-                                onNewChat={() => {
-                                  setSelectedSpaceId(OUTSIDE_SPACES);
-                                  openChatCreation();
-                                }}
+                          {activeProfile.id !== ALL_PROFILE_ID && (
+                            <>
+                              <SpaceToolbar
+                                onCreated={setNewSpaceSetupId}
+                                key={activeProfile.id}
+                                profile={activeProfile}
+                                onChange={changeSpaces}
+                                selectedSpaceId={spaceFilter}
+                                onFilterChange={setSelectedSpaceId}
+                                disabled={!primarySettingsLoaded}
                               />
-                              {activeProfile.spaces?.map((space, index) => (
-                                <SpaceTile
-                                  offerSetup={newSpaceSetupId === space.id}
-                                  key={space.id}
-                                  profile={activeProfile}
-                                  space={space}
-                                  shortcut={
-                                    SPACE_JUMP_KEYBINDING_COMMANDS[index + 1]
-                                      ? shortcutLabelForCommand(
-                                          keybindings,
-                                          SPACE_JUMP_KEYBINDING_COMMANDS[index + 1]!,
+                              <SortableContext
+                                items={
+                                  activeProfile.spaces?.map((space) =>
+                                    spaceDragId(activeProfile.id, space.id),
+                                  ) ?? []
+                                }
+                                strategy={spaceSortingStrategy}
+                              >
+                                <ul aria-label="Spaces" className="mt-1 grid grid-cols-3 gap-1.5">
+                                  <DefaultSpaceTile
+                                    shortcut={shortcutLabelForCommand(keybindings, "space.jump.1")}
+                                    profileId={activeProfile.id}
+                                    dropDisabled={!primarySettingsLoaded}
+                                    count={spaceCounts.get(OUTSIDE_SPACES) ?? 0}
+                                    selected={spaceFilter === OUTSIDE_SPACES}
+                                    onSelect={() => setSelectedSpaceId(OUTSIDE_SPACES)}
+                                    onNewChat={() => {
+                                      setSelectedSpaceId(OUTSIDE_SPACES);
+                                      openChatCreation();
+                                    }}
+                                  />
+                                  {activeProfile.spaces?.map((space, index) => (
+                                    <SpaceTile
+                                      offerSetup={newSpaceSetupId === space.id}
+                                      key={space.id}
+                                      profile={activeProfile}
+                                      space={space}
+                                      shortcut={
+                                        SPACE_JUMP_KEYBINDING_COMMANDS[index + 1]
+                                          ? shortcutLabelForCommand(
+                                              keybindings,
+                                              SPACE_JUMP_KEYBINDING_COMMANDS[index + 1]!,
+                                            )
+                                          : null
+                                      }
+                                      projects={spaceProjectKeys(space).map((key) => ({
+                                        key,
+                                        project: projectByKey.get(key) ?? null,
+                                        name:
+                                          projectDisplayNameByKey.get(key) ??
+                                          projectByKey.get(key)?.title ??
+                                          "Unavailable project",
+                                        device:
+                                          environmentLabelById.get(key.split(":")[0]!) ??
+                                          (key === space.newChatDefaults?.projectKey
+                                            ? space.newChatDefaults.deviceLabel
+                                            : null) ??
+                                          "Unavailable device",
+                                      }))}
+                                      count={spaceCounts.get(space.id) ?? 0}
+                                      attention={threads.some(
+                                        (thread) =>
+                                          threadSpace(thread)?.id === space.id &&
+                                          spaceAttention.has(
+                                            scopedThreadKey(
+                                              scopeThreadRef(thread.environmentId, thread.id),
+                                            ),
+                                          ),
+                                      )}
+                                      selected={selectedSpace?.id === space.id}
+                                      onSelect={() =>
+                                        setSelectedSpaceId(
+                                          selectedSpace?.id === space.id
+                                            ? OUTSIDE_SPACES
+                                            : space.id,
                                         )
-                                      : null
-                                  }
-                                  projects={spaceProjectKeys(space).map((key) => ({
-                                    key,
-                                    project: projectByKey.get(key) ?? null,
-                                    name:
-                                      projectDisplayNameByKey.get(key) ??
-                                      projectByKey.get(key)?.title ??
-                                      "Unavailable project",
-                                    device:
-                                      environmentLabelById.get(key.split(":")[0]!) ??
-                                      (key === space.newChatDefaults?.projectKey
-                                        ? space.newChatDefaults.deviceLabel
-                                        : null) ??
-                                      "Unavailable device",
-                                  }))}
-                                  count={spaceCounts.get(space.id) ?? 0}
-                                  attention={threads.some(
-                                    (thread) =>
-                                      threadSpace(thread)?.id === space.id &&
-                                      spaceAttention.has(
-                                        scopedThreadKey(
-                                          scopeThreadRef(thread.environmentId, thread.id),
-                                        ),
-                                      ),
-                                  )}
-                                  selected={selectedSpace?.id === space.id}
-                                  onSelect={() =>
-                                    setSelectedSpaceId(
-                                      selectedSpace?.id === space.id ? OUTSIDE_SPACES : space.id,
-                                    )
-                                  }
-                                  onChange={changeSpaces}
-                                  onLaunch={async (projectRef, defaults) => {
-                                    const opened = await handleNewThreadRef.current(projectRef, {
-                                      forceNew: true,
-                                      spaceId: space.id,
-                                      useProjectDefaults: true,
-                                      ...(defaults.modelSelection
-                                        ? { modelSelection: defaults.modelSelection }
-                                        : {}),
-                                      ...(defaults.envMode ? { envMode: defaults.envMode } : {}),
-                                    });
-                                    if (!opened)
-                                      throw new Error("Could not open the draft. Try again.");
-                                    setProjectScopeKey(null);
-                                  }}
-                                  writeBlockReason={profileWriteBlockReason}
-                                />
-                              ))}
-                            </ul>
-                          </SortableContext>
+                                      }
+                                      onChange={changeSpaces}
+                                      onLaunch={async (projectRef, defaults) => {
+                                        const opened = await handleNewThreadRef.current(
+                                          projectRef,
+                                          {
+                                            forceNew: true,
+                                            spaceId: space.id,
+                                            useProjectDefaults: true,
+                                            ...(defaults.modelSelection
+                                              ? { modelSelection: defaults.modelSelection }
+                                              : {}),
+                                            ...(defaults.envMode
+                                              ? { envMode: defaults.envMode }
+                                              : {}),
+                                          },
+                                        );
+                                        if (!opened)
+                                          throw new Error("Could not open the draft. Try again.");
+                                        setProjectScopeKey(null);
+                                      }}
+                                      writeBlockReason={profileWriteBlockReason}
+                                    />
+                                  ))}
+                                </ul>
+                              </SortableContext>
+                            </>
+                          )}
                           {allChats && (
                             <div
                               role="group"
                               aria-label="Group all chats"
-                              className="mt-2 flex items-center gap-0.5 rounded-lg bg-sidebar-foreground/[0.04] p-0.5"
+                              className={cn(
+                                "flex items-center gap-0.5 rounded-lg bg-sidebar-foreground/[0.04] p-0.5",
+                                activeProfile.id !== ALL_PROFILE_ID && "mt-2",
+                              )}
                               data-thread-selection-safe
                             >
                               {(

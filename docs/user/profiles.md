@@ -112,8 +112,11 @@ preceding chats by an inactive gap, so clicking just below a chat does not toggl
 
 Spaces organize threads within a profile. Click **New space** beside the Spaces heading,
 enter a name, and press Enter. Each tile shows its chat count. **Unsorted** is always the
-first tile and contains chats without a Space assignment. It also appears in **All**, where
-it collects unassigned chats across profiles. Unsorted cannot be renamed or deleted.
+first tile in individual profiles and contains chats without a Space assignment.
+Unsorted cannot be renamed or deleted. On web and desktop, **All** shows chats across
+profiles without Space tiles or an All chats button. Its Recent / Device / Space controls
+sit below the profile switcher. Space groups include the owning profile name; unassigned
+chats appear in an Unsorted group. Space shortcuts apply only within individual profiles.
 Select a named tile to show its chats. Click it again to return to Unsorted. Switching to
 a profile restores its last selected Space on web and desktop, or Unsorted on the first visit.
 Creating a Space does not select it or hide unassigned chats.

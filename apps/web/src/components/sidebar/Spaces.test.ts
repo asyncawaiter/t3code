@@ -118,6 +118,12 @@ import {
 } from "./Spaces.logic";
 
 describe("sidebar space scope", () => {
+  it("shows all chats in All even with a previously saved space filter", () => {
+    const all = { ...profile, id: "all", name: "All" };
+    for (const stored of [null, OUTSIDE_SPACES, "build", "deleted"]) {
+      expect(resolveSidebarSpaceFilter(all, stored)).toBeNull();
+    }
+  });
   it("includes root chats in All threads and isolates them in Outside spaces", () => {
     const assigned = moveThreadsToSpace(profile, [first], "build");
     const refs = [first, second];

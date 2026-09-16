@@ -29,13 +29,12 @@ export function getSpaceDragData(data: Record<string, unknown> | undefined) {
 }
 
 export function resolveSidebarSpaceFilter(profile: Profile, storedId: string | null) {
+  if (profile.id === ALL_PROFILE_ID) return null;
   return storedId === null ||
     storedId === OUTSIDE_SPACES ||
     profile.spaces?.some((space) => space.id === storedId)
     ? storedId
-    : profile.id === ALL_PROFILE_ID
-      ? null
-      : OUTSIDE_SPACES;
+    : OUTSIDE_SPACES;
 }
 
 export function matchesSidebarSpace(spaceId: string | undefined, filterId: string | null) {
