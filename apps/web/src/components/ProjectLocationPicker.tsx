@@ -4,6 +4,7 @@ import {
   ArrowUpIcon,
   ChevronRightIcon,
   FolderOpenIcon,
+  FolderPlusIcon,
   MonitorIcon,
   WifiOffIcon,
   SearchIcon,
@@ -16,7 +17,7 @@ import { useEnvironments } from "../state/environments";
 import { useProjects } from "../state/entities";
 import { filesystemEnvironment } from "../state/filesystem";
 import { useEnvironmentQuery } from "../state/query";
-import { ensureBrowseDirectoryPath } from "../lib/projectPaths";
+import { ensureBrowseDirectoryPath, newProjectFolderPath } from "../lib/projectPaths";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { ChatLocation } from "../hooks/useChatCreation";
 import { Button } from "./ui/button";
@@ -45,6 +46,7 @@ export function ProjectLocationPicker({
   );
   const [browsing, setBrowsing] = useState(!value);
   const [query, setQuery] = useState("");
+  const [newFolderName, setNewFolderName] = useState<string | null>(null);
   const chosenId = value?.environmentId ?? deviceId;
   const environment = environments.find((env) => env.environmentId === chosenId);
   const connected = environment?.connection.phase === "connected";
@@ -67,9 +69,34 @@ export function ProjectLocationPicker({
       project.environmentId === chosenId &&
       `${project.title} ${project.workspaceRoot}`.toLowerCase().includes(query.toLowerCase()),
   );
+  let newFolderPath: string | null = null;
+  let newFolderError: string | null = null;
+  if (
+    newFolderName !== null &&
+    newFolderName.trim() &&
+    folder.data &&
+    !folder.isPending &&
+    !folder.error
+  ) {
+    try {
+      newFolderPath = newProjectFolderPath(folder.data.parentPath, newFolderName, platform);
+      if (
+        folder.data.entries.some((entry) =>
+          platform === "linux"
+            ? entry.name === newFolderName.trim()
+            : entry.name.toLowerCase() === newFolderName.trim().toLowerCase(),
+        )
+      ) {
+        newFolderError = "This folder already exists. Select it from the list.";
+        newFolderPath = null;
+      }
+    } catch (cause) {
+      newFolderError = cause instanceof Error ? cause.message : "Choose another folder name.";
+    }
+  }
   // Only expose the displayed directory after this device has resolved it.
   useEffect(() => {
-    if (!browsing || disabled) return;
+    if (!browsing || disabled || newFolderName !== null) return;
     const workspaceRoot =
       connected && path.isBrowsing && !path.filterQuery && !folder.isPending && !folder.error
         ? folder.data?.parentPath
@@ -80,6 +107,7 @@ export function ProjectLocationPicker({
     } else if (value) onChange(null);
   }, [
     browsing,
+    newFolderName,
     disabled,
     connected,
     path.isBrowsing,
@@ -92,6 +120,7 @@ export function ProjectLocationPicker({
     onChange,
   ]);
   const browse = (nextQuery: string) => {
+    setNewFolderName(null);
     onChange(null);
     setQuery(nextQuery);
     setBrowsing(true);
@@ -101,6 +130,25 @@ export function ProjectLocationPicker({
     onChange({ environmentId: chosenId, workspaceRoot });
     setBrowsing(false);
     setQuery("");
+  };
+  const useNewFolder = () => {
+    if (
+      disabled ||
+      !connected ||
+      !chosenId ||
+      !newFolderPath ||
+      !folder.data ||
+      newFolderName === null
+    )
+      return;
+    onChange({
+      environmentId: chosenId,
+      workspaceRoot: newFolderPath,
+      newFolder: { parentPath: folder.data.parentPath, name: newFolderName.trim() },
+    });
+    setBrowsing(false);
+    setQuery("");
+    setNewFolderName(null);
   };
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-background/50">
@@ -115,6 +163,7 @@ export function ProjectLocationPicker({
             const env = environments.find((item) => item.environmentId === id);
             if (!env) return;
             setDeviceId(env.environmentId);
+            setNewFolderName(null);
             onChange(null);
             setQuery("");
             setBrowsing(true);
@@ -144,7 +193,7 @@ export function ProjectLocationPicker({
           disabled={disabled}
           onClick={() => {
             setDeviceId(value.environmentId);
-            browse(ensureBrowseDirectoryPath(value.workspaceRoot));
+            browse(ensureBrowseDirectoryPath(value.newFolder?.parentPath ?? value.workspaceRoot));
           }}
           className="flex w-full min-w-0 items-center gap-2.5 p-3 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-60"
           aria-label="Change folder"
@@ -156,7 +205,9 @@ export function ProjectLocationPicker({
             </TooltipTrigger>
             <TooltipPopup>{value.workspaceRoot}</TooltipPopup>
           </Tooltip>
-          <span className="shrink-0 text-xs text-muted-foreground">Change</span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {value.newFolder ? "New folder" : "Change"}
+          </span>
         </button>
       ) : chosenId && connected ? (
         <div>
@@ -249,6 +300,65 @@ export function ProjectLocationPicker({
               </>
             )}
           </div>
+          {newFolderName !== null && (
+            <div
+              className="space-y-2 border-t border-border/60 p-3"
+              role="group"
+              aria-label="New folder"
+            >
+              <p className="break-all text-[11px] text-muted-foreground">
+                {folder.data && !folder.isPending && !folder.error
+                  ? `In ${folder.data.parentPath}`
+                  : "Choose a parent folder above"}
+              </p>
+              <Input
+                size="compact"
+                autoFocus
+                aria-label="New folder name"
+                placeholder="Folder name"
+                value={newFolderName}
+                disabled={disabled}
+                aria-invalid={!!newFolderError}
+                onChange={(event) => setNewFolderName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    useNewFolder();
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setNewFolderName(null);
+                  }
+                }}
+              />
+              {newFolderError && (
+                <p role="alert" className="text-xs text-destructive">
+                  {newFolderError}
+                </p>
+              )}
+              <div className="flex justify-end gap-1">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  disabled={disabled}
+                  onClick={() => setNewFolderName(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={disabled || !newFolderPath}
+                  onClick={useNewFolder}
+                >
+                  Use new folder
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="flex min-h-9 items-center gap-2 border-t border-border/60 px-3 py-1.5">
             {path.isBrowsing ? (
               <Tooltip>
@@ -266,16 +376,41 @@ export function ProjectLocationPicker({
                 size="xs"
                 variant="ghost"
                 disabled={disabled}
-                className="w-full justify-start"
+                className="min-w-0 flex-1 justify-start"
                 onClick={() => browse("~/")}
               >
                 <FolderOpenIcon className="size-3" />
                 Browse this device
               </Button>
             )}
+            {newFolderName === null && (
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={
+                  disabled ||
+                  (path.isBrowsing && (folder.isPending || !!folder.error || !folder.data))
+                }
+                onClick={() => {
+                  if (!path.isBrowsing) browse("~/");
+                  onChange(null);
+                  setNewFolderName(path.isBrowsing ? path.filterQuery : "");
+                }}
+              >
+                <FolderPlusIcon className="size-3" />
+                New folder
+              </Button>
+            )}
           </div>
         </div>
       ) : null}
+      {value?.newFolder && !browsing && (
+        <p className="px-3 pb-2 text-[11px] text-muted-foreground">
+          This folder will be created on {environment?.label ?? "the selected device"} when you
+          save.
+        </p>
+      )}
       {environment && !connected && (
         <div
           role="status"

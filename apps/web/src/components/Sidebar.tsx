@@ -3178,15 +3178,29 @@ export default function Sidebar() {
     () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
     [],
   );
-  const [settledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
+  const [savedSettledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
     SETTLED_SHELF_EXPANDED_KEY,
     false,
     Schema.Boolean,
   );
-  const toggleSettledShelf = useCallback(
-    () => setSettledShelfExpanded((value) => !value),
-    [setSettledShelfExpanded],
-  );
+  const autoExpandedSpaceKey =
+    spaceFilter !== null &&
+    activeThreads.length === 0 &&
+    !pinnedThreads.some((thread) => (threadSpace(thread)?.id ?? OUTSIDE_SPACES) === spaceFilter) &&
+    settledThreads.length > 0
+      ? JSON.stringify([activeProfile.id, spaceFilter])
+      : null;
+  const [collapsedAutoSpace, setCollapsedAutoSpace] = useState<string | null>(null);
+  if (collapsedAutoSpace !== null && collapsedAutoSpace !== autoExpandedSpaceKey) {
+    setCollapsedAutoSpace(null);
+  }
+  const settledShelfExpanded =
+    savedSettledShelfExpanded ||
+    (autoExpandedSpaceKey !== null && collapsedAutoSpace !== autoExpandedSpaceKey);
+  const toggleSettledShelf = useCallback(() => {
+    setSettledShelfExpanded(!settledShelfExpanded);
+    setCollapsedAutoSpace(settledShelfExpanded ? autoExpandedSpaceKey : null);
+  }, [autoExpandedSpaceKey, settledShelfExpanded, setSettledShelfExpanded]);
   const renderedSettledThreads = useMemo(() => {
     if (settledShelfExpanded) {
       return allChats && grouping !== "recent"

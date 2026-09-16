@@ -7,6 +7,7 @@ import {
   findProjectByPath,
   inferProjectTitleFromPath,
   ensureBrowseDirectoryPath,
+  newProjectFolderPath,
 } from "../lib/projectPaths";
 import { newProjectId } from "../lib/utils";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -21,6 +22,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 export interface ChatLocation {
   environmentId: EnvironmentId;
   workspaceRoot: string;
+  newFolder?: { parentPath: string; name: string };
 }
 
 export { useSaveProfiles } from "./useProfileSync";
@@ -40,10 +42,20 @@ export function useResolveChatProject() {
       throw new Error("This device is offline. Reconnect it or choose another device.");
     const folder = await browse({
       environmentId: location.environmentId,
-      input: { partialPath: ensureBrowseDirectoryPath(location.workspaceRoot) },
+      input: {
+        partialPath: ensureBrowseDirectoryPath(
+          location.newFolder?.parentPath ?? location.workspaceRoot,
+        ),
+      },
     });
     if (folder._tag === "Failure") throw squashAtomCommandFailure(folder);
-    const workspaceRoot = folder.value.parentPath;
+    const workspaceRoot = location.newFolder
+      ? newProjectFolderPath(
+          folder.value.parentPath,
+          location.newFolder.name,
+          environment.serverConfig?.environment.platform.os ?? "",
+        )
+      : folder.value.parentPath;
     const existing = findProjectByPath(
       readProjects().filter((project) => project.environmentId === location.environmentId),
       workspaceRoot,
@@ -70,7 +82,7 @@ export function useResolveChatProject() {
           projectId,
           title: inferProjectTitleFromPath(workspaceRoot),
           workspaceRoot,
-          createWorkspaceRootIfMissing: false,
+          createWorkspaceRootIfMissing: !!location.newFolder,
           defaultModelSelection: null,
         },
       });

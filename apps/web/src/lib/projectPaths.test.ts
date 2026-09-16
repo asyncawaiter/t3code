@@ -1,4 +1,23 @@
 import { describe, expect, it } from "vite-plus/test";
+import { newProjectFolderPath } from "./projectPaths";
+
+describe("new project folders", () => {
+  it("creates a single child under the chosen device's parent path", () => {
+    expect(newProjectFolderPath("/Users/me/Projects", " New app ", "darwin")).toBe(
+      "/Users/me/Projects/New app",
+    );
+    expect(newProjectFolderPath("C:\\Projects", "New app", "win32")).toBe("C:\\Projects\\New app");
+    expect(newProjectFolderPath("/", "app", "linux")).toBe("/app");
+  });
+  it("rejects traversal, separators, empty names, and invalid Windows names", () => {
+    for (const name of ["", " ", ".", "..", "../other", "a/b", "a\\b", "a\u0000b"]) {
+      expect(() => newProjectFolderPath("/projects", name, "linux")).toThrow();
+    }
+    for (const name of ["CON", "nul.txt", "COM1", "app.", "app:one", "app?", "app*"]) {
+      expect(() => newProjectFolderPath("C:\\Projects", name, "win32")).toThrow();
+    }
+  });
+});
 
 import {
   appendBrowsePathSegment,

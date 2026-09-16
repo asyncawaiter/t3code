@@ -120,6 +120,9 @@ chats appear in an Unsorted group. Space shortcuts apply only within individual 
 Select a named tile to show its chats. Click it again to return to Unsorted. Switching to
 a profile restores its last selected Space on web and desktop, or Unsorted on the first visit.
 Creating a Space does not select it or hide unassigned chats.
+Selecting a Space with only settled chats opens its Settled section automatically. You can
+collapse it for the current visit; returning to the Space opens it again if it still has no
+active or pinned chats. This also applies to Unsorted.
 Use **All chats** beside the Spaces heading to include both assigned and unassigned chats.
 The selected button uses the same theme highlight as the tiles. In the web and desktop
 sidebar, All chats shows a **Recent / Device / Space** control below the space tiles.
@@ -205,7 +208,10 @@ source chooser. Saved destinations can still be previewed while the source is un
 
 Choose any connected device, then search saved projects or browse its folders. The
 folder does not need to be an existing project. **Save & open chat** saves the shortcut
-and opens its first draft. Creating a space offers this setup immediately; dismiss it
+and opens its first draft. To start in a new folder on web or desktop, browse to its parent,
+choose **New folder**, enter a name, and choose **Use new folder**. The destination is
+created on the selected device when you save; cancelling leaves its filesystem unchanged.
+Creating a space offers this setup immediately; dismiss it
 to keep an empty space without a default location. The settings button lets you change
 or reset these defaults. Optional model and
 workspace choices override the project's defaults for future chats only.
