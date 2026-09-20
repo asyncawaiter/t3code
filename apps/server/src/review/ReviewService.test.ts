@@ -4,6 +4,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -14,8 +16,25 @@ function makeLayer(input: {
   readonly workspaceRoot: string;
   readonly baseDir: string;
   readonly detectCalls?: Array<{ readonly cwd: string }>;
+  readonly registeredRoot?: string;
+  readonly worktreeRoot?: string;
+  readonly deleted?: boolean;
 }) {
+  const database = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`CREATE TABLE projection_projects (project_id TEXT, workspace_root TEXT, deleted_at TEXT)`;
+      yield* sql`CREATE TABLE projection_threads (project_id TEXT, worktree_path TEXT, deleted_at TEXT)`;
+      if (input.registeredRoot) {
+        yield* sql`INSERT INTO projection_projects VALUES ('folder', ${input.registeredRoot}, ${input.deleted ? "deleted" : null})`;
+      }
+      if (input.worktreeRoot) {
+        yield* sql`INSERT INTO projection_threads VALUES ('folder', ${input.worktreeRoot}, NULL)`;
+      }
+    }),
+  ).pipe(Layer.provideMerge(NodeSqliteClient.layerMemory()));
   return ReviewService.layer.pipe(
+    Layer.provide(database),
     Layer.provide(
       Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
         get: () => Effect.die("unexpected VCS registry get"),
@@ -34,6 +53,37 @@ function makeLayer(input: {
 }
 
 describe("ReviewService", () => {
+  it.effect("allows registered folders and worktrees but rejects deleted registrations", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "review-startup-" });
+      const registeredRoot = yield* fs.makeTempDirectoryScoped({ prefix: "review-folder-" });
+      const worktreeRoot = yield* fs.makeTempDirectoryScoped({ prefix: "review-worktree-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "review-state-" });
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+      yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        yield* review.getDiffPreview({ cwd: registeredRoot });
+        yield* review.getDiffPreview({ cwd: worktreeRoot });
+      }).pipe(
+        Effect.provide(
+          makeLayer({ workspaceRoot, registeredRoot, worktreeRoot, baseDir, detectCalls }),
+        ),
+      );
+      assert.deepStrictEqual(detectCalls, [{ cwd: registeredRoot }, { cwd: worktreeRoot }]);
+      yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        for (const cwd of [registeredRoot, worktreeRoot]) {
+          const error = yield* review.getDiffPreview({ cwd }).pipe(Effect.flip);
+          assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+        }
+      }).pipe(
+        Effect.provide(
+          makeLayer({ workspaceRoot, registeredRoot, worktreeRoot, baseDir, deleted: true }),
+        ),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
   it.effect("rejects diff preview cwd outside the configured workspace roots", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

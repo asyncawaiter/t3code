@@ -43,3 +43,5 @@ export * from "./usageLimits.ts";
 export * from "./rpc.ts";
 
 export * from "./threadRewind.ts";
+
+export * from "./workItem.ts";

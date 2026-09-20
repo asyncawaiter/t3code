@@ -4,6 +4,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import {
   VcsRepositoryDetectionError,
@@ -38,6 +41,18 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
+  const sql = yield* SqlClient.SqlClient;
+  const registeredRoots = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({ root: Schema.String }),
+    execute: () => sql`
+      SELECT workspace_root AS root FROM projection_projects WHERE deleted_at IS NULL
+      UNION
+      SELECT t.worktree_path AS root FROM projection_threads t
+      JOIN projection_projects p ON p.project_id = t.project_id
+      WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL AND t.worktree_path IS NOT NULL
+    `,
+  });
 
   const canonicalizePath = (value: string) => {
     const resolvedPath = path.resolve(value);
@@ -75,6 +90,21 @@ export const make = Effect.gen(function* () {
 
     if (isWithinRoot(candidate, workspaceRoot) || isWithinRoot(candidate, worktreesRoot)) {
       return;
+    }
+
+    const roots = yield* registeredRoots().pipe(
+      Effect.mapError(
+        (cause) =>
+          new VcsRepositoryDetectionError({
+            operation,
+            cwd,
+            detail: "Could not validate registered folders for review.",
+            cause,
+          }),
+      ),
+    );
+    for (const { root } of roots) {
+      if (isWithinRoot(candidate, yield* canonicalizePath(root))) return;
     }
 
     return yield* new VcsRepositoryDetectionError({

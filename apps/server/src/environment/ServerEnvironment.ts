@@ -223,6 +223,8 @@ export const make = Effect.gen(function* () {
       threadSettlement: true,
       threadAutoSettlement: true,
       profileSynchronization: true,
+      spaceDeviceDefaults: true,
+        workItems: true,
       threadRestartContinuation: true,
       threadSnooze: true,
       environmentThemes: true,

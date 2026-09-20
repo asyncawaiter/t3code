@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
+import { WorkItems } from "./workItem.ts";
 import { Profile } from "./profile.ts";
 import { EnvironmentId, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
@@ -138,6 +139,8 @@ import {
 } from "./relayClient.ts";
 import {
   ProjectListEntriesError,
+  ProjectInstructionsResult,
+  ProjectInstructionsError,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
   ProjectReadFileError,
@@ -250,6 +253,7 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsListEntries: "projects.listEntries",
+  projectsInstructions: "projects.instructions",
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
@@ -534,6 +538,7 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
   payload: Schema.Struct({
     patch: ServerSettingsPatch,
     baseProfiles: Schema.optionalKey(Schema.Array(Profile)),
+    baseWorkItems: Schema.optionalKey(WorkItems),
     expectedProfileSourceId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
   }),
   success: ServerSettings,
@@ -820,6 +825,12 @@ const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries, {
   payload: ProjectListEntriesInput,
   success: ProjectListEntriesResult,
   error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectsInstructionsRpc = Rpc.make(WS_METHODS.projectsInstructions, {
+  payload: ProjectListEntriesInput,
+  success: ProjectInstructionsResult,
+  error: Schema.Union([ProjectInstructionsError, EnvironmentAuthorizationError]),
 });
 
 const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
@@ -1289,6 +1300,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectsListEntriesRpc,
+  WsProjectsInstructionsRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,
   WsProjectsSearchEntriesRpc,

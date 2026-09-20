@@ -1,3 +1,4 @@
+import { withSpaceDeviceDefaults } from "@t3tools/contracts";
 import {
   ALL_PROFILE,
   profileForProject,
@@ -120,19 +121,16 @@ export function NewTaskOrganization() {
                 ...item,
                 spaces: item.spaces?.map((entry) =>
                   entry.id === space.id
-                    ? {
-                        ...entry,
-                        newChatDefaults: {
-                          projectKey: key,
-                          workspaceRoot: project.workspaceRoot,
-                          deviceLabel:
-                            flow.environments.find(
-                              (env) => env.environmentId === project.environmentId,
-                            )?.environmentLabel ?? "Device",
-                          ...(flow.selectedModel ? { modelSelection: flow.selectedModel } : {}),
-                          envMode: flow.workspaceMode,
-                        },
-                      }
+                    ? withSpaceDeviceDefaults(entry, project.environmentId, {
+                        projectKey: key,
+                        workspaceRoot: project.workspaceRoot,
+                        deviceLabel:
+                          flow.environments.find(
+                            (env) => env.environmentId === project.environmentId,
+                          )?.environmentLabel ?? "Device",
+                        ...(flow.selectedModel ? { modelSelection: flow.selectedModel } : {}),
+                        envMode: flow.workspaceMode,
+                      })
                     : entry,
                 ),
               }

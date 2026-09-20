@@ -1,3 +1,5 @@
+import { spaceDeviceDefaults } from "@t3tools/contracts";
+import { spaceProjectKeys } from "./sidebar/Spaces.logic";
 import type { ModelFavorite } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { modelFavoriteUnavailable } from "../modelFavorites";
@@ -86,11 +88,30 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
             ui.spaceSelection?.profileId === initialProfile.id &&
             ui.spaceSelection.filter === space.id,
         )?.id;
+  const initialSelectedSpace = initialProfile?.spaces?.find((space) => space.id === initialSpace);
+  const initialSpaceKeys = initialSelectedSpace ? spaceProjectKeys(initialSelectedSpace) : null;
+  const initialDefaults = initialSelectedSpace ? spaceDeviceDefaults(initialSelectedSpace) : {};
+  const initialDefaultKey =
+    (initialProject ? initialDefaults[initialProject.environmentId] : undefined)?.projectKey ??
+    Object.values(initialDefaults)[0]?.projectKey;
+  const initialLocationProject = request.draftId
+    ? initialProject
+    : initialSpaceKeys
+      ? (projects.find(
+          (project) => `${project.environmentId}:${project.id}` === initialDefaultKey,
+        ) ??
+        projects.find((project) =>
+          initialSpaceKeys.includes(`${project.environmentId}:${project.id}`),
+        ))
+      : initialProject;
   const [profileId, setProfileId] = useState(initialProfileId);
   const [spaceId, setSpaceId] = useState<string | null>(initialSpace ?? null);
   const [location, setLocation] = useState<ChatLocation | null>(
-    initialProject
-      ? { environmentId: initialProject.environmentId, workspaceRoot: initialProject.workspaceRoot }
+    initialLocationProject
+      ? {
+          environmentId: initialLocationProject.environmentId,
+          workspaceRoot: initialLocationProject.workspaceRoot,
+        }
       : null,
   );
   const locationAvailable = environments.some(
@@ -107,6 +128,33 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const saveProfiles = useSaveProfiles();
   const grouping = useClientSettings(selectProjectGroupingSettings);
   const profile = profiles.find((item) => item.id === profileId);
+  const selectedSpace = profile?.spaces?.find((space) => space.id === spaceId);
+  const spaceKeys = selectedSpace ? spaceProjectKeys(selectedSpace) : null;
+  const suggestedProjects = spaceKeys
+    ? projects.filter((project) => spaceKeys.includes(`${project.environmentId}:${project.id}`))
+    : undefined;
+  const changeScope = (nextProfileId: string, nextSpaceId: string | null) => {
+    const nextProfile = profiles.find((item) => item.id === nextProfileId);
+    const nextSpace = nextProfile?.spaces?.find((item) => item.id === nextSpaceId);
+    const keys = nextSpace ? spaceProjectKeys(nextSpace) : nextProfile?.projectKeys;
+    const candidates = projects.filter(
+      (project) => !keys || keys.includes(`${project.environmentId}:${project.id}`),
+    );
+    const defaults = nextSpace ? spaceDeviceDefaults(nextSpace) : {};
+    const defaultKey =
+      (location ? defaults[location.environmentId] : undefined)?.projectKey ??
+      Object.values(defaults)[0]?.projectKey;
+    const next =
+      candidates.find((project) => `${project.environmentId}:${project.id}` === defaultKey) ??
+      candidates.find((project) => project.environmentId === location?.environmentId) ??
+      candidates[0];
+    setProfileId(nextProfileId);
+    setSpaceId(nextSpaceId);
+    setLocation(
+      next ? { environmentId: next.environmentId, workspaceRoot: next.workspaceRoot } : null,
+    );
+    if (favorite && favorite.environmentId !== next?.environmentId) setFavorite(null);
+  };
   const close = () => useChatCreationStore.setState({ request: null });
   const submit = async () => {
     if (!location || !locationAvailable || pending.current) return;
@@ -261,8 +309,7 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                   value={profileId}
                   onValueChange={(id) => {
                     if (id) {
-                      setProfileId(id);
-                      setSpaceId(null);
+                      changeScope(id, null);
                     }
                   }}
                 >
@@ -284,7 +331,9 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                 <Select
                   value={spaceId ?? "outside"}
                   disabled={!profile}
-                  onValueChange={(id) => setSpaceId(id === "outside" ? null : id)}
+                  onValueChange={(id) => {
+                    if (id) changeScope(profileId, id === "outside" ? null : id);
+                  }}
                 >
                   <SelectTrigger className="w-full min-w-0 font-normal" aria-label="Chat space">
                     <SelectValue>
@@ -307,9 +356,14 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
               onChange={(next) => {
                 setFavorite(next);
                 if (next?.environmentId && next.environmentId !== location?.environmentId) {
-                  const project = projects.find(
-                    (item) => item.environmentId === next.environmentId,
-                  );
+                  const project = (
+                    suggestedProjects ??
+                    projects.filter(
+                      (item) =>
+                        !profile ||
+                        profile.projectKeys.includes(`${item.environmentId}:${item.id}`),
+                    )
+                  ).find((item) => item.environmentId === next.environmentId);
                   setLocation(
                     project
                       ? {
@@ -322,7 +376,8 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
               }}
             />
             <ProjectLocationPicker
-              key={favorite?.environmentId ?? "location"}
+              key={`${profileId}:${spaceId ?? "outside"}:${favorite?.environmentId ?? "location"}`}
+              suggestedProjects={suggestedProjects}
               initialEnvironmentId={favorite?.environmentId}
               value={location}
               onChange={(next) => {

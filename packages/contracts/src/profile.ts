@@ -45,17 +45,28 @@ export const PROFILE_COLORS = [
 export const ProfileColor = Schema.Literals(PROFILE_COLORS);
 export type ProfileColor = typeof ProfileColor.Type;
 
+export const SpaceNewChatDefaults = Schema.Struct({
+  projectKey: TrimmedNonEmptyString,
+  deviceLabel: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  workspaceRoot: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+  modelSelection: Schema.optional(ModelSelection),
+  envMode: Schema.optional(Schema.Literals(["local", "worktree"])),
+});
+export type SpaceNewChatDefaults = typeof SpaceNewChatDefaults.Type;
+
 export const ProfileSpace = Schema.Struct({
   id: ProfileId,
   name: ProfileName,
-  newChatDefaults: Schema.optional(
-    Schema.Struct({
-      projectKey: TrimmedNonEmptyString,
-      deviceLabel: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
-      workspaceRoot: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
-      modelSelection: Schema.optional(ModelSelection),
-      envMode: Schema.optional(Schema.Literals(["local", "worktree"])),
-    }),
+  // Read existing single-device shortcuts until their next edit.
+  newChatDefaults: Schema.optional(SpaceNewChatDefaults),
+  newChatDefaultsByDevice: Schema.optional(
+    Schema.Record(TrimmedNonEmptyString, SpaceNewChatDefaults).check(
+      Schema.makeFilter((defaults) =>
+        Object.entries(defaults).every(([device, value]) =>
+          value.projectKey.startsWith(`${device}:`),
+        ),
+      ),
+    ),
   ),
   threads: Schema.Array(
     Schema.Struct({
@@ -65,6 +76,31 @@ export const ProfileSpace = Schema.Struct({
   ).check(Schema.isMaxLength(10000)),
 });
 export type ProfileSpace = typeof ProfileSpace.Type;
+
+/** Include legacy shortcuts without letting them override a device's newer settings. */
+export function spaceDeviceDefaults(
+  space: ProfileSpace,
+): Readonly<Record<string, SpaceNewChatDefaults>> {
+  const legacy = space.newChatDefaults;
+  return {
+    ...(legacy ? { [legacy.projectKey.split(":")[0]!]: legacy } : {}),
+    ...space.newChatDefaultsByDevice,
+  };
+}
+
+/** Change one device while retaining every other device's shortcut. */
+export function withSpaceDeviceDefaults(
+  space: ProfileSpace,
+  environmentId: string,
+  defaults: SpaceNewChatDefaults | undefined,
+): ProfileSpace {
+  if (defaults && !defaults.projectKey.startsWith(`${environmentId}:`))
+    throw new Error("The default folder must belong to this device.");
+  const byDevice = { ...spaceDeviceDefaults(space) };
+  if (defaults) byDevice[environmentId] = defaults;
+  else delete byDevice[environmentId];
+  return { ...space, newChatDefaults: undefined, newChatDefaultsByDevice: byDevice };
+}
 
 export const Profile = Schema.Struct({
   id: ProfileId,
@@ -155,10 +191,14 @@ function mergeSpace(current: ProfileSpace, base: ProfileSpace, edited: ProfileSp
   return {
     ...current,
     name: mergeValue(current.name, base.name, edited.name),
-    newChatDefaults: mergeValue(
-      current.newChatDefaults,
-      base.newChatDefaults,
-      edited.newChatDefaults,
+    newChatDefaults: undefined,
+    newChatDefaultsByDevice: Object.fromEntries(
+      mergeRows(
+        Object.entries(spaceDeviceDefaults(current)),
+        Object.entries(spaceDeviceDefaults(base)),
+        Object.entries(spaceDeviceDefaults(edited)),
+        ([device]) => device,
+      ),
     ),
     threads: mergeRows(current.threads, base.threads, edited.threads, (thread) => thread.threadKey),
   };

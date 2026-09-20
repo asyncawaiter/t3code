@@ -1,4 +1,7 @@
+import { request } from "../rpc/client.ts";
 import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -7,6 +10,7 @@ import {
   createEnvironmentCommand,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentQueryAtomFamily,
 } from "./runtime.ts";
 import {
   type CreateProjectInput,
@@ -39,6 +43,44 @@ function optimisticProjectFileKey(target: OptimisticProjectFileTarget): string {
   return JSON.stringify([target.environmentId, target.cwd, target.relativePath]);
 }
 
+export const loadProjectInstructions = Effect.fn("loadProjectInstructions")(function* (input: {
+  cwd: string;
+}) {
+  return yield* request(WS_METHODS.projectsInstructions, input).pipe(
+    Effect.catchCause(
+      Effect.fn(function* (cause) {
+        // Older connected devices report an unknown method as a string defect.
+        if (Cause.squash(cause) !== `Unknown request tag: ${WS_METHODS.projectsInstructions}`)
+          return yield* Effect.failCause(cause);
+        return yield* request(WS_METHODS.projectsListEntries, input).pipe(
+          Effect.map((listing) => ({
+            files: listing.entries
+              .filter(
+                (entry) =>
+                  entry.kind === "file" &&
+                  (/(?:^|[/\\])(?:AGENTS(?:\.override)?\.md|CLAUDE\.md|GEMINI\.md|\.cursorrules)$/.test(
+                    entry.path,
+                  ) ||
+                    /(?:^|[/\\])\.(?:cursor|claude)[/\\]rules[/\\].*\.(?:md|mdc)$/.test(
+                      entry.path,
+                    )),
+              )
+              .map((entry) => ({
+                path: `${input.cwd.replace(/[/\\]+$/, "")}/${entry.path}`,
+                scope: /[/\\]/.test(entry.path) ? ("subfolder" as const) : ("root" as const),
+              })),
+            truncated: listing.truncated,
+            warnings: [
+              "This device runs an older T3 server. Showing indexed instruction files only. Update T3 on this device to include parent and ignored instruction files.",
+            ],
+            excludedDirectories: [],
+          })),
+        );
+      }),
+    ),
+  );
+});
+
 export function createProjectEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
 ) {
@@ -55,6 +97,12 @@ export function createProjectEnvironmentAtoms<R, E>(
       JSON.stringify([environmentId, input.projectId]),
   };
   return {
+    instructions: createEnvironmentQueryAtomFamily(runtime, {
+      label: "environment-data:projects:instructions",
+      execute: loadProjectInstructions,
+      staleTimeMs: 30_000,
+      idleTtlMs: 60_000,
+    }),
     searchEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:search-entries",
       tag: WS_METHODS.projectsSearchEntries,

@@ -1,3 +1,8 @@
+import {
+  spaceDeviceDefaults,
+  withSpaceDeviceDefaults,
+  type EnvironmentId,
+} from "@t3tools/contracts";
 import { useChatBookmark } from "../threads/use-chat-bookmark";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentServerConfigsAtom } from "../../state/server";
@@ -272,13 +277,20 @@ export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
       {
         title: "Clear new-chat defaults",
         action: () =>
-          run(() =>
-            updateProfile({
-              ...state.profile,
-              spaces: state.profile.spaces?.map((item) =>
-                item.id === space.id ? { ...item, newChatDefaults: undefined } : item,
-              ),
-            }),
+          chooseAction(
+            "Reset default folder on device",
+            Object.entries(spaceDeviceDefaults(space)).map(([id, defaults]) => ({
+              title: defaults.deviceLabel,
+              action: () =>
+                run(() =>
+                  updateProfile({
+                    ...state.profile,
+                    spaces: state.profile.spaces?.map((item) =>
+                      item.id === space.id ? withSpaceDeviceDefaults(item, id, undefined) : item,
+                    ),
+                  }),
+                ),
+            })),
           ),
       },
       {
@@ -315,46 +327,51 @@ export function ProfilesPanel(props: { currentThreadKey?: string | null }) {
     ]);
   };
   const launchSpace = (space: ProfileSpace) => {
-    const defaults = space.newChatDefaults;
-    const project = projects.find(
-      (item) => `${item.environmentId}:${item.id}` === defaults?.projectKey,
-    );
-    const openPicker = () => {
+    const defaults = spaceDeviceDefaults(space);
+    const openPicker = (environmentId?: EnvironmentId) => {
       if (!requireWritable()) return;
       selectSpace(space.id);
-      navigation.navigate("NewTaskSheet", { screen: "NewTask" });
+      navigation.navigate("NewTaskSheet", {
+        screen: "NewTask",
+        params: environmentId ? { environmentId } : undefined,
+      });
     };
-    if (!defaults) return openPicker();
-    chooseAction(`${defaults.deviceLabel}\n${defaults.workspaceRoot}`, [
-      {
-        title: "Open new chat",
-        action: () => {
-          if (!requireWritable()) return;
-          if (
-            !project ||
-            !environments.some(
-              (env) =>
-                env.environmentId === project.environmentId && env.connectionState === "connected",
-            )
-          )
-            return Alert.alert(
-              "Destination unavailable",
-              "Connect this device or choose another location.",
-            );
-          selectSpace(space.id);
-          navigation.navigate("NewTaskSheet", {
-            screen: "NewTaskDraft",
-            params: {
-              environmentId: project.environmentId,
-              projectId: project.id,
-              title: project.title,
+    chooseAction(`New chat in ${space.name}`, [
+      ...environments
+        .filter((env) => env.connectionState === "connected" || defaults[env.environmentId])
+        .map((env) => {
+          const value = defaults[env.environmentId];
+          const project = projects.find(
+            (item) => `${item.environmentId}:${item.id}` === value?.projectKey,
+          );
+          return {
+            title: value
+              ? `${value.deviceLabel}: ${value.workspaceRoot}`
+              : `${env.environmentLabel}: Choose folder`,
+            action: () => {
+              if (!value) return openPicker(env.environmentId);
+              if (!requireWritable()) return;
+              if (!project || env.connectionState !== "connected")
+                return Alert.alert(
+                  "Destination unavailable",
+                  "Connect this device or choose another location.",
+                );
+              selectSpace(space.id);
+              navigation.navigate("NewTaskSheet", {
+                screen: "NewTaskDraft",
+                params: {
+                  environmentId: project.environmentId,
+                  projectId: project.id,
+                  title: project.title,
+                },
+              });
             },
-          });
-        },
-      },
-      { title: "Change destination", action: openPicker },
+          };
+        }),
+      { title: "Choose another folder", action: () => openPicker() },
     ]);
   };
+
   const counts = useMemo(
     () => profileSpaceCounts(state.profiles, state.profile.id, threads),
     [state.profiles, state.profile.id, threads],

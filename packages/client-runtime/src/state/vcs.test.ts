@@ -217,6 +217,51 @@ describe("cached VCS refs", () => {
     ),
   );
 
+  it.effect(
+    "reads graph requests live without using or replacing the small branch-picker cache",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const graphResult: VcsListRefsResult = {
+            ...LIVE_REFS,
+            graph: {
+              defaultBranch: "main",
+              branches: [],
+              commits: [],
+              worktrees: [],
+              truncated: false,
+            },
+          };
+          const client = {
+            [WS_METHODS.vcsListRefs]: () => Effect.succeed(graphResult),
+          } as unknown as WsRpcProtocolClient;
+          const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+            target: TARGET,
+            state: yield* SubscriptionRef.make(CONNECTED_CONNECTION_STATE),
+            session: yield* SubscriptionRef.make(Option.some(session(client))),
+            prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+            connect: Effect.void,
+            disconnect: Effect.void,
+            retryNow: Effect.void,
+          });
+          const saved = yield* Ref.make(0);
+          const refs = yield* Stream.unwrap(
+            makeCachedVcsRefsChanges({ cwd: "/repo", limit: 100, includeGraph: true }).pipe(
+              Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+              Effect.provideService(
+                Persistence.EnvironmentCacheStore,
+                cacheWithRefs(Option.some(CACHED_REFS), {
+                  saveVcsRefs: () => Ref.update(saved, (count) => count + 1),
+                }),
+              ),
+            ),
+          ).pipe(Stream.runHead);
+          expect(Option.getOrThrow(refs)).toEqual(graphResult);
+          expect(yield* Ref.get(saved)).toBe(0);
+        }),
+      ),
+  );
+
   it.effect("does not repersist a refresh superseded by ref invalidation", () =>
     Effect.scoped(
       Effect.gen(function* () {

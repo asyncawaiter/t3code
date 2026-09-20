@@ -1,3 +1,4 @@
+import * as TaskPreparationReactor from "../src/orchestration/TaskPreparationReactor.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
 
@@ -402,6 +403,12 @@ export const makeOrchestrationIntegrationHarness = (
       ),
       Layer.provideMerge(
         Layer.succeed(ThreadSettlementReactor.ThreadSettlementReactor, {
+          start: () => Effect.void,
+          drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(TaskPreparationReactor.TaskPreparationReactor, {
           start: () => Effect.void,
           drain: Effect.void,
         }),

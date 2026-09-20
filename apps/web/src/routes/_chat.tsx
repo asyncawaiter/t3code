@@ -1,3 +1,4 @@
+import { WorkItemDialog } from "../components/tasks/WorkItemDialog";
 import { ChatCreationDialog } from "../components/ChatCreationDialog";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
@@ -143,6 +144,7 @@ function ChatRouteLayout() {
     <>
       <ChatRouteGlobalShortcuts />
       <ChatCreationDialog />
+      <WorkItemDialog />
       <Outlet />
     </>
   );

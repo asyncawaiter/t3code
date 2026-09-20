@@ -132,6 +132,29 @@ it("counts Default without mixing assigned, archived or other-profile chats", ()
   expect(profileSpaceCounts([organized], null, chats).get(OUTSIDE_SPACES)).toBe(2);
 });
 
+it("excludes settled chats from Space and Unsorted counts and counts them again when reopened", () => {
+  const settled = [
+    { ...thread("assigned", "2026-09-01"), settledOverride: "settled" as const },
+    { ...thread("loose"), settledOverride: "settled" as const },
+  ];
+  const active = thread("active");
+  expect(profileSpaceCounts([organized], "work", [...settled, active])).toEqual(
+    new Map([[OUTSIDE_SPACES, 1]]),
+  );
+  expect(profileSpaceCounts([organized], "work", settled).size).toBe(0);
+  expect(
+    profileSpaceCounts([organized], "work", [
+      ...settled.map((chat) => ({ ...chat, settledOverride: "active" as const })),
+      active,
+    ]),
+  ).toEqual(
+    new Map([
+      ["build", 1],
+      [OUTSIDE_SPACES, 2],
+    ]),
+  );
+});
+
 it("moves a whole project, removing old spaces and scoped pins but retaining its new siblings", () => {
   const target = {
     ...profile,

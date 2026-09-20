@@ -1,3 +1,9 @@
+import {
+  planAttachmentClaim,
+  parseThreadSegmentFromAttachmentId,
+  resolveAttachmentPath,
+} from "./attachmentStore.ts";
+import { mergeWorkItems, type WorkItem } from "@t3tools/contracts";
 /**
  * ServerSettings - Server-authoritative settings service.
  *
@@ -65,9 +71,17 @@ const applyProfilePatch = (
   patch: ServerSettingsPatch,
   baseProfiles?: ReadonlyArray<Profile>,
   expectedProfileSourceId?: EnvironmentId | null,
+  baseWorkItems?: readonly WorkItem[],
 ) =>
   Effect.try({
     try: () => {
+      if (patch.workItems && !baseWorkItems)
+        throw new Error("Task changes require the version you edited.");
+      if (patch.workItems)
+        patch = {
+          ...patch,
+          workItems: mergeWorkItems(current.workItems ?? [], baseWorkItems!, patch.workItems),
+        };
       if (
         expectedProfileSourceId !== undefined &&
         current.profileSyncSourceId !== expectedProfileSourceId &&
@@ -245,6 +259,7 @@ export class ServerSettingsService extends Context.Service<
       patch: ServerSettingsPatch,
       baseProfiles?: ReadonlyArray<Profile>,
       expectedProfileSourceId?: EnvironmentId | null,
+      baseWorkItems?: readonly WorkItem[],
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
     /** Stream of settings change events. */
@@ -283,11 +298,17 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
       start: Effect.void,
       ready: Effect.void,
       getSettings: Ref.get(currentSettingsRef).pipe(Effect.map(resolveTextGenerationProvider)),
-      updateSettings: (patch, baseProfiles, expectedProfileSourceId) =>
+      updateSettings: (patch, baseProfiles, expectedProfileSourceId, baseWorkItems) =>
         writes.withPermits(1)(
           Ref.get(currentSettingsRef).pipe(
             Effect.flatMap((currentSettings) =>
-              applyProfilePatch(currentSettings, patch, baseProfiles, expectedProfileSourceId),
+              applyProfilePatch(
+                currentSettings,
+                patch,
+                baseProfiles,
+                expectedProfileSourceId,
+                baseWorkItems,
+              ),
             ),
             Effect.flatMap(normalizeServerSettings),
             Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
@@ -451,7 +472,7 @@ function stripDefaultServerSettings(current: unknown, defaults: unknown): unknow
 }
 
 const make = Effect.gen(function* () {
-  const { settingsPath } = yield* ServerConfig.ServerConfig;
+  const { settingsPath, attachmentsDir } = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -887,16 +908,68 @@ const make = Effect.gen(function* () {
       Effect.flatMap(materializeProviderEnvironmentSecrets),
       Effect.map(resolveTextGenerationProvider),
     ),
-    updateSettings: (patch, baseProfiles, expectedProfileSourceId) =>
+    updateSettings: (patch, baseProfiles, expectedProfileSourceId, baseWorkItems) =>
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const patched = yield* applyProfilePatch(
+          let patched = yield* applyProfilePatch(
             current,
             patch,
             baseProfiles,
             expectedProfileSourceId,
+            baseWorkItems,
           );
+          if (patch.workItems) {
+            const workItems = yield* Effect.forEach(patched.workItems ?? [], (item) =>
+              Effect.gen(function* () {
+                if (
+                  !item.attachments?.some(
+                    (attachment) => parseThreadSegmentFromAttachmentId(attachment.id) === "pending",
+                  )
+                )
+                  return item;
+                const attachments = yield* Effect.forEach(item.attachments, (attachment) =>
+                  Effect.gen(function* () {
+                    if (parseThreadSegmentFromAttachmentId(attachment.id) !== "pending")
+                      return attachment;
+                    const claim = planAttachmentClaim({
+                      attachmentsDir,
+                      threadId: `work-item-${item.id}`,
+                      attachmentId: attachment.id,
+                    });
+                    if (!claim.ok)
+                      return yield* new ServerSettingsError({
+                        settingsPath,
+                        operation: "write-file",
+                        cause: claim.reason,
+                      });
+                    const saved = { ...attachment, id: claim.finalId };
+                    const info = yield* fs.stat(claim.currentPath);
+                    if (
+                      Number(info.size) !== attachment.sizeBytes ||
+                      resolveAttachmentPath({ attachmentsDir, attachment: saved }) !==
+                        claim.finalPath
+                    )
+                      return yield* new ServerSettingsError({
+                        settingsPath,
+                        operation: "write-file",
+                        cause: "Attachment metadata does not match the uploaded file.",
+                      });
+                    // Retain the pending copy for retries; task copies survive pending-upload expiry.
+                    yield* fs.copyFile(claim.currentPath, claim.finalPath);
+                    return saved;
+                  }),
+                );
+                return { ...item, attachments };
+              }),
+            ).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ServerSettingsError({ settingsPath, operation: "write-file", cause }),
+              ),
+            );
+            patched = { ...patched, workItems };
+          }
           const nextPersisted = yield* persistProviderEnvironmentSecrets(current, patched);
           const next = yield* normalizeServerSettings(nextPersisted);
           yield* writeSettingsAtomically(next);

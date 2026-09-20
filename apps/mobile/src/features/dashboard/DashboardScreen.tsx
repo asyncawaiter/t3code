@@ -1,3 +1,4 @@
+import { WorkItemsPanel } from "../tasks/WorkItemsPanel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState, Pressable, ScrollView, SectionList, TextInput, View } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -230,6 +231,9 @@ export function DashboardScreen() {
             </Pressable>
           ))}
         </ScrollView>
+      )}
+      {view === "active" && (
+        <WorkItemsPanel search={query} deviceFilter={device} projectFilter={project} />
       )}
       {archived.error && <Text className="px-3 text-sm text-foreground">{archived.error}</Text>}
     </View>

@@ -1,3 +1,4 @@
+import { spaceDeviceDefaults } from "@t3tools/contracts";
 import { OUTSIDE_SPACES } from "@t3tools/client-runtime/state/profiles";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { profileSelectionAtom, profileSourceAtom } from "../../state/profiles";
@@ -678,9 +679,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     const profile = appAtomRegistry
       .get(profileSourceAtom)
       .profiles.find((item) => item.id === organization.profileId);
-    const defaults = profile?.spaces?.find(
-      (item) => item.id === organization.spaceId,
-    )?.newChatDefaults;
+    const space = profile?.spaces?.find((item) => item.id === organization.spaceId);
+    const defaults = space ? spaceDeviceDefaults(space)[selectedProject.environmentId] : undefined;
     const key = `${organization.spaceId}:${selectedProjectDraftKey}`;
     if (
       !defaults ||

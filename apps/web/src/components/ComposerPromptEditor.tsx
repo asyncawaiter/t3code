@@ -32,6 +32,7 @@ import {
   KEY_BACKSPACE_COMMAND,
   BLUR_COMMAND,
   FOCUS_COMMAND,
+  $addUpdateTag,
   $getRoot,
   $getNodeByKey,
   HISTORY_MERGE_TAG,
@@ -1769,7 +1770,11 @@ function ComposerPromptEditorInner({
         citationToOpen = $consumeComposerCitationCommentRequest(citationCommentRequestRef);
       },
       {
-        ...(isCiteInsertion ? { tag: [HISTORY_PUSH_TAG, SKIP_DOM_SELECTION_TAG] } : {}),
+        ...(isCiteInsertion
+          ? { tag: [HISTORY_PUSH_TAG, SKIP_DOM_SELECTION_TAG] }
+          : !isFocused
+            ? { tag: SKIP_DOM_SELECTION_TAG }
+            : {}),
         onUpdate: () => {
           if (citationToOpen) setOpenCitationComment(citationToOpen);
         },
@@ -2093,6 +2098,7 @@ export function ComposerPromptEditor({
         ComposerTerminalContextNode,
       ],
       editorState: () => {
+        $addUpdateTag(SKIP_DOM_SELECTION_TAG);
         $setComposerEditorPrompt(
           initialValueRef.current,
           initialTerminalContextsRef.current,

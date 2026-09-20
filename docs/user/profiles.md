@@ -111,13 +111,15 @@ configured device name, with the server name on hover. Settled stays separated f
 preceding chats by an inactive gap, so clicking just below a chat does not toggle the shelf.
 
 Spaces organize threads within a profile. Click **New space** beside the Spaces heading,
-enter a name, and press Enter. Each tile shows its chat count. **Unsorted** is always the
+enter a name, and press Enter. Each tile counts active chats, excluding settled and archived chats.
+Reopening a settled chat adds it back to the count. **Unsorted** is always the
 first tile in individual profiles and contains chats without a Space assignment.
 Unsorted cannot be renamed or deleted. On web and desktop, **All** shows chats across
 profiles without Space tiles or an All chats button. Its Recent / Device / Space controls
 sit below the profile switcher. Space groups include the owning profile name; unassigned
 chats appear in an Unsorted group. Space shortcuts apply only within individual profiles.
-Select a named tile to show its chats. Click it again to return to Unsorted. Switching to
+Select a named tile to show its chats and open its space overview. Clicking the selected
+tile keeps that space open; use Unsorted to view unassigned chats. Switching to
 a profile restores its last selected Space on web and desktop, or Unsorted on the first visit.
 Creating a Space does not select it or hide unassigned chats.
 Selecting a Space with only settled chats opens its Settled section automatically. You can
@@ -159,7 +161,8 @@ If the dragged chat is selected, all selected chats move together. They must bel
 to the target Space's profile. Drop on Unsorted or the selected profile strip to remove
 the Space assignment. Within the chat list, drag rows to reorder them or move them
 between Pinned, Active, and Settled.
-The **Pin** submenu offers one scope at a time: **Global** appears across profiles and
+Hover a chat or focus its pin button to open **Pin options** directly. The menu is also available
+from the chat context menu. It offers one scope at a time: **Global** appears across profiles and
 spaces, **Profile** stays in the Pinned section below the owning profile's Space tiles, and **Space** stays in the
 chat's assigned space. Only that space is offered. Pinning never moves a chat.
 Chats outside spaces can use Global or Profile. Removing a space assignment returns
@@ -263,3 +266,74 @@ Open **Dashboard** from the profile menu to see tasks by state and filter by dev
 project, provider, profile, or space. Pull requests are browsed per device, with
 project and involvement filters. Open an associated chat or review the PR on its
 hosting service. Files, diffs, and agent approvals remain available inside chats.
+
+### Space overview
+
+Selecting a space tile or its keyboard shortcut opens the same space in the main panel.
+Chat navigation stays in the sidebar. Select the tile again to return to the overview;
+Browser Back and Forward restore its profile and space selection.
+
+The overview uses **folder** for a working directory on a particular device. Each associated
+folder, including those with settled chats, has an expandable inspection panel:
+
+- **Instructions:** rendered Markdown and source views for AGENTS.md and supported provider
+  instruction files. Parent, folder-root, and subfolder sources remain separate. These are
+  discovered files, not a claim about which instructions a particular provider loaded.
+  Viewing them does not inject anything into chat context. Refresh rereads the selected file;
+  Scan discovers added or removed files. Scan coverage lists exclusions and partial results.
+- **Checkouts:** the folder checkout and worktrees used by this space. Agent activity includes
+  conversations elsewhere that share the same device and checkout path. Shared-checkout notices
+  identify potential overlap, not proven file conflicts. Path aliases may not be recognized.
+- **Unfinished work:** live Git status, changed-file and upstream commit counts, expandable
+  diffs, and linked PR checks when the host supplies them. No upstream and unavailable checks
+  are shown explicitly. Inspecting work does not commit, push, or modify it.
+
+Offline devices and unavailable folders remain visible. Folder panels load when expanded.
+**New chat** starts with this space selected and a folder associated with it. The folder picker
+lists all of the space's folders with their paths and devices. Changing spaces resets the folder;
+an empty space asks you to choose one. **Browse** lets you choose or create another folder.
+The space tile's plus button offers the same folder choices.
+
+**Open in Finder** opens a folder on the device that owns it. Windows uses Explorer; other systems
+use their available file manager. The action is disabled while that device is offline.
+
+Devices running an older T3 server can show indexed instruction files. Scan coverage explains
+when parent or ignored files are unavailable; update T3 on that device for complete discovery.
+**Unsorted** and **All chats** use the same overview.
+
+### Space branches
+
+On web and desktop, **Branches** opens the selected space's Git graph. Choose a folder to read
+its branches from the device that owns it. The folder selector includes its path and device;
+identically named branches on different devices are never combined. Each overview folder also
+has a **Branches** shortcut. **Overview** returns to instructions and checkout details.
+
+Branch labels sit alongside commit history, with thin colored tracks and collapsed stretches
+of older commits. Inactive merged branches are hidden initially; **Show merged** reveals them.
+Branches with open checkouts or active chats remain visible. Search finds branches, commits,
+paths, and associated chats, including collapsed history and hidden merged branches. The arrows
+beside the search move between matches.
+
+Select a branch for its checkout paths and related chats. Chats outside the selected space are
+marked, and opening one reveals its own profile and space. Several branches at the same commit
+share a row; the **+number** control reveals the additional branches. Commit selection opens its
+changes and author details. A merge commit is compared with its first parent. Inspection does
+not check out a branch or modify files.
+
+The graph loads only while open, starting with 2,000 commits. **Load older commits** extends the
+view up to 20,000. **Refresh** rereads local Git; returning to the window and staying active in
+this view also refresh it periodically. It does not fetch remote repositories. Offline devices,
+non-Git folders, and older servers show an explanation instead of substituting another device.
+
+
+Each Space can keep a different new-chat folder for each device. Click its **+** to
+see connected devices and their saved folders. Devices without a default stay visible
+as compact **Choose folder** rows. Expand a row to pick an existing folder, browse any
+path on that device, or create a folder inline. **Save** keeps the shortcut without
+opening a chat; **Save & open** does both. Model and workspace defaults apply only to
+that device. **Reset** clears only that device's shortcut. Saved offline devices remain
+visible, and the existing single-device shortcut is retained automatically.
+
+Per-device shortcuts sync through the shared profile device. Update that device to a
+build supporting per-device defaults; otherwise changes remain saved locally with a
+sync error rather than being sent to a server that would drop them.

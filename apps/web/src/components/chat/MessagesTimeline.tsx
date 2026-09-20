@@ -1,3 +1,4 @@
+import { chatReadingPositions } from "./ChatPaneContext";
 import { CompactionOutputViewer } from "./CompactionOutputViewer";
 import { PencilIcon } from "lucide-react";
 import {
@@ -430,6 +431,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   loadEarlier = null,
   messageScrollTarget = null,
 }: MessagesTimelineProps) {
+  const [savedReading] = useState(() => chatReadingPositions.get(routeThreadKey));
+  const restoringReading = useRef(!!savedReading && !savedReading.atEnd);
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
   const expandCitedTurn = useCallback((turnId: TurnId) => {
@@ -693,6 +696,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     const isAtEnd = resolveTimelineIsAtEnd(state);
+    if (state && !restoringReading.current) {
+      chatReadingPositions.set(routeThreadKey, { offset: state.scroll, atEnd: isAtEnd ?? true });
+      if (chatReadingPositions.size > 200)
+        chatReadingPositions.delete(chatReadingPositions.keys().next().value!);
+    }
     if (isAtEnd !== undefined && !citationPositioning) {
       onIsAtEndChange(isAtEnd);
     }
@@ -732,6 +740,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       current === nextCurrentIndex ? current : nextCurrentIndex,
     );
   }, [
+    routeThreadKey,
     citationPositioning,
     listRef,
     minimapItems,
@@ -896,11 +905,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             getItemType={getItemType}
             renderItem={renderItem}
             estimatedItemSize={90}
-            initialScrollAtEnd={citationRequest === null}
+            initialScrollAtEnd={citationRequest === null && (!savedReading || savedReading.atEnd)}
             // Legend needs a data refresh to mount new pins without a scroll event.
             {...(readyCitationRequest ? { dataVersion: readyCitationRequest.key } : {})}
             {...(citationAlwaysRender ? { alwaysRender: citationAlwaysRender } : {})}
-            onLoad={onCitationListLoad}
+            onLoad={() => {
+              onCitationListLoad();
+              if (restoringReading.current && savedReading && !citationRequest) {
+                onManualNavigation?.();
+                void listRef.current?.scrollToOffset({
+                  offset: savedReading.offset,
+                  animated: false,
+                });
+              }
+              restoringReading.current = false;
+            }}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
             maintainScrollAtEnd={

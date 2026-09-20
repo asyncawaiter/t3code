@@ -12,6 +12,7 @@ import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 
 export interface McpCredentialRequest {
+  readonly browserAccess?: boolean;
   readonly threadId: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
 }
@@ -128,7 +129,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         threadId: ThreadId.make(request.threadId),
         providerSessionId,
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
-        capabilities: new Set(["preview"]),
+        capabilities: new Set(request.browserAccess === false ? ["tasks"] : ["preview", "tasks"]),
         issuedAt,
       };
       yield* SynchronizedRef.update(state, ({ records }) => {

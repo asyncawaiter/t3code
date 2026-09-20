@@ -1,0 +1,369 @@
+import { TaskShelf } from "../components/tasks/TaskShelf";
+import { SpaceMonitor } from "../components/spaces/SpaceMonitor";
+import { openWorkItem } from "../workItems";
+import { ALL_PROFILE } from "@t3tools/contracts";
+import { createFileRoute } from "@tanstack/react-router";
+import { lazy, Suspense, useEffect, useRef } from "react";
+import { GitBranchIcon, LayoutListIcon, PlusIcon } from "lucide-react";
+import { ALL_PROFILE_ID } from "@t3tools/contracts";
+import { spaceOverviewThreads } from "../components/sidebar/Spaces.logic";
+import { usePrimarySettings } from "../hooks/useSettings";
+import { useProjects, useThreadShells } from "../state/entities";
+import { selectSidebarSpace, useUiStateStore } from "../uiStateStore";
+import { OUTSIDE_SPACES, spaceProjectKeys } from "../components/sidebar/Spaces.logic";
+import { SidebarInset } from "../components/ui/sidebar";
+import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { checkoutPath } from "../components/spaces/SpaceFolder.logic";
+import { SpaceFolder } from "../components/spaces/SpaceFolder";
+import { Button } from "../components/ui/button";
+import { openChatCreation } from "../chatCreationStore";
+import { isElectron } from "../env";
+import { useEnvironments } from "../state/environments";
+import { ProjectFavicon } from "../components/ProjectFavicon";
+const ChatColumns = lazy(() => import("../components/spaces/ChatColumns"));
+const SpaceBranches = lazy(() => import("../components/spaces/SpaceBranches"));
+
+export const Route = createFileRoute("/_chat/spaces/$profileId")({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): {
+    space: string | undefined;
+    unsorted: boolean;
+    view?: "branches" | "columns" | "monitor" | undefined;
+    folder?: string | undefined;
+    focus?: string | undefined;
+  } => ({
+    space: typeof search.space === "string" ? search.space : undefined,
+    unsorted: search.unsorted === true,
+    view:
+      search.view === "branches" || search.view === "columns" || search.view === "monitor"
+        ? search.view
+        : undefined,
+    focus: typeof search.focus === "string" ? search.focus : undefined,
+    folder: typeof search.folder === "string" ? search.folder : undefined,
+  }),
+  component: SpaceOverview,
+});
+
+function SpaceOverview() {
+  const { profileId } = Route.useParams();
+  const { space: spaceId, unsorted, view, folder: folderKey, focus } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const spaceGesture = useRef({ delta: 0, at: 0, switched: 0 });
+  const { environments } = useEnvironments();
+  const profiles = usePrimarySettings((settings) => settings.profiles);
+  const profile =
+    profileId === ALL_PROFILE_ID ? ALL_PROFILE : profiles.find((item) => item.id === profileId);
+  const space = profile?.spaces?.find((item) => item.id === spaceId);
+  const filter = unsorted ? OUTSIDE_SPACES : (spaceId ?? null);
+  const threads = useThreadShells();
+  const projects = useProjects();
+  useEffect(() => {
+    useUiStateStore.getState().setActiveProfileId(profileId === ALL_PROFILE_ID ? null : profileId);
+    useUiStateStore.setState((state) => selectSidebarSpace(state, profileId, filter));
+  }, [profileId, filter]);
+
+  const missing = !profile || (!!spaceId && !space);
+  const chats =
+    profileId === ALL_PROFILE_ID
+      ? threads.filter(
+          (thread) =>
+            !thread.archivedAt &&
+            (!unsorted ||
+              !profiles.some((owner) =>
+                owner.projectKeys.includes(`${thread.environmentId}:${thread.projectId}`),
+              )),
+        )
+      : spaceOverviewThreads(profiles, profileId, filter, threads);
+  const projectKeys = new Set(
+    space
+      ? spaceProjectKeys(space)
+      : chats.map((chat) => `${chat.environmentId}:${chat.projectId}`),
+  );
+  const associatedProjects = projects.filter((project) =>
+    projectKeys.has(`${project.environmentId}:${project.id}`),
+  );
+  const spaceProjects = [
+    ...new Map(
+      associatedProjects.map((folder) => [
+        `${folder.environmentId}:${checkoutPath(folder.workspaceRoot)}`,
+        folder,
+      ]),
+    ).values(),
+  ];
+  const selectedFolder =
+    spaceProjects.find((folder) => `${folder.environmentId}:${folder.id}` === folderKey) ??
+    spaceProjects[0];
+  const openView = (nextView: "branches" | "columns" | "monitor" | undefined, key = folderKey) =>
+    void navigate({
+      search: { space: spaceId, unsorted, view: nextView, folder: key },
+      replace: true,
+    });
+  const missingFolders = [...projectKeys].filter(
+    (key) => !associatedProjects.some((folder) => `${folder.environmentId}:${folder.id}` === key),
+  );
+  const title = missing
+    ? "Space unavailable"
+    : unsorted
+      ? "Unsorted"
+      : (space?.name ?? "All chats");
+
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background">
+      <WorkspacePageHeader electron={isElectron} className="border-b border-border/60">
+        <span className="text-sm text-muted-foreground">{profile?.name ?? "Spaces"}</span>
+        <span className="text-muted-foreground/40">/</span>
+        <span className="truncate text-sm font-medium">{title}</span>
+      </WorkspacePageHeader>
+      <main
+        className={`flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6 ${view === "branches" || view === "columns" || view === "monitor" ? "overflow-hidden" : "overflow-y-auto"}`}
+      >
+        <div
+          className={`mx-auto flex w-full flex-col gap-3 ${view === "branches" || view === "columns" || view === "monitor" ? "min-h-0 flex-1" : "max-w-5xl"}`}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="break-words text-xl font-semibold tracking-tight">{title}</h1>
+              {(missing || unsorted) && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {missing
+                    ? "This space may have been removed. Choose another space in the sidebar."
+                    : "Chats that have not been assigned to a space."}
+                </p>
+              )}
+            </div>
+            {!missing && (
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openWorkItem({ profileId, spaceId: spaceId ?? null })}
+                >
+                  Capture task
+                </Button>
+                <Button size="sm" onClick={() => openChatCreation()}>
+                  <PlusIcon className="size-4" />
+                  New chat
+                </Button>
+              </div>
+            )}
+          </div>
+          {!missing && (
+            <div className="flex flex-wrap items-center gap-3">
+              <nav
+                aria-label="Space view"
+                className="flex shrink-0 gap-1 rounded-md bg-muted/50 p-0.5"
+              >
+                <Button
+                  size="sm"
+                  variant={!view ? "secondary" : "ghost"}
+                  aria-pressed={!view}
+                  onClick={() => openView(undefined)}
+                >
+                  <LayoutListIcon className="size-3.5" />
+                  Overview
+                </Button>
+                <Button
+                  size="sm"
+                  variant={view === "branches" ? "secondary" : "ghost"}
+                  aria-pressed={view === "branches"}
+                  onClick={() => openView("branches")}
+                >
+                  <GitBranchIcon className="size-3.5" />
+                  Branches
+                </Button>
+                <Button
+                  size="sm"
+                  variant={view === "columns" ? "secondary" : "ghost"}
+                  aria-pressed={view === "columns"}
+                  onClick={() => openView("columns")}
+                >
+                  Chat columns
+                </Button>
+                <Button
+                  size="sm"
+                  variant={view === "monitor" ? "secondary" : "ghost"}
+                  aria-pressed={view === "monitor"}
+                  onClick={() => openView("monitor")}
+                >
+                  Monitor Spaces
+                </Button>
+              </nav>
+              {view === "branches" && selectedFolder && (
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <ProjectFavicon project={selectedFolder} className="size-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <select
+                      aria-label="Folder and device"
+                      value={`${selectedFolder.environmentId}:${selectedFolder.id}`}
+                      onChange={(event) => openView("branches", event.target.value)}
+                      className="max-w-full rounded border-0 bg-transparent text-xs font-medium focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      {spaceProjects.map((folder) => (
+                        <option
+                          key={`${folder.environmentId}:${folder.id}`}
+                          value={`${folder.environmentId}:${folder.id}`}
+                        >
+                          {folder.title} ·{" "}
+                          {environments.find(
+                            (device) => device.environmentId === folder.environmentId,
+                          )?.label ?? "Device unavailable"}{" "}
+                          · {folder.workspaceRoot}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {!missing && (view === "columns" || view === "monitor") && (
+            <nav
+              aria-label="Switch Space"
+              className="flex shrink-0 gap-1 overflow-x-auto"
+              aria-description="Scroll here to switch Spaces, or focus a Space and use arrow keys"
+              onWheel={(event) => {
+                if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || event.ctrlKey) return;
+                const now = performance.now(),
+                  gesture = spaceGesture.current;
+                if (now - gesture.switched < 600) return;
+                if (now - gesture.at > 180 || Math.sign(event.deltaY) !== Math.sign(gesture.delta))
+                  gesture.delta = 0;
+                gesture.at = now;
+                gesture.delta += event.deltaY;
+                if (Math.abs(gesture.delta) < 90) return;
+                const buttons = Array.from(event.currentTarget.querySelectorAll("button"));
+                const index = buttons.findIndex(
+                  (button) => button.getAttribute("aria-pressed") === "true",
+                );
+                const next = buttons[index + (gesture.delta > 0 ? 1 : -1)];
+                gesture.delta = 0;
+                gesture.switched = now;
+                next?.click();
+              }}
+              onKeyDown={(event) => {
+                if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key))
+                  return;
+                const buttons = Array.from(event.currentTarget.querySelectorAll("button"));
+                const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                const next =
+                  buttons[
+                    (index +
+                      (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) +
+                      buttons.length) %
+                      buttons.length
+                  ];
+                if (next) {
+                  event.preventDefault();
+                  next.focus();
+                  next.click();
+                }
+              }}
+            >
+              {(profileId === ALL_PROFILE_ID ? profiles : profile ? [profile] : []).flatMap(
+                (owner) =>
+                  (owner.spaces ?? []).map((item) => (
+                    <Button
+                      key={`${owner.id}:${item.id}`}
+                      size="xs"
+                      variant={
+                        item.id === spaceId && owner.id === profileId ? "secondary" : "ghost"
+                      }
+                      aria-pressed={item.id === spaceId && owner.id === profileId}
+                      onClick={() =>
+                        void navigate({
+                          params: { profileId: owner.id },
+                          search: { space: item.id, unsorted: false, view: "columns" },
+                        })
+                      }
+                    >
+                      {owner.id !== profileId ? `${owner.name} / ` : ""}
+                      {item.name}
+                    </Button>
+                  )),
+              )}
+            </nav>
+          )}
+          {!missing && view === "columns" ? (
+            <Suspense fallback={<p>Loading chats...</p>}>
+              <ChatColumns
+                key={`${profileId}:${filter}`}
+                scope={`${profileId}:${filter}`}
+                chats={chats}
+                focus={focus}
+              />
+            </Suspense>
+          ) : !missing && view === "monitor" ? (
+            <SpaceMonitor
+              includeUnassigned={profileId === ALL_PROFILE_ID}
+              profiles={profileId === ALL_PROFILE_ID ? profiles : profile ? [profile] : []}
+              threads={threads}
+              onOpen={(ownerId, id, root, focusedChat) =>
+                void navigate({
+                  params: { profileId: ownerId },
+                  search: {
+                    space: id ?? undefined,
+                    unsorted: root,
+                    view: "columns",
+                    focus: focusedChat,
+                  },
+                })
+              }
+            />
+          ) : !missing && view === "branches" && selectedFolder ? (
+            <Suspense
+              fallback={<p className="text-xs text-muted-foreground">Loading branches...</p>}
+            >
+              <SpaceBranches
+                key={`${selectedFolder.environmentId}:${selectedFolder.id}`}
+                folder={selectedFolder}
+                projects={projects}
+                allChats={threads}
+                spaceChats={chats}
+              />
+            </Suspense>
+          ) : (
+            !missing && (
+              <div className="space-y-3">
+                <TaskShelf
+                  profileId={profileId}
+                  spaceId={spaceId ?? (unsorted ? null : undefined)}
+                />
+                {spaceProjects.length ? (
+                  spaceProjects.map((folder, index) => (
+                    <SpaceFolder
+                      key={`${folder.environmentId}:${folder.id}`}
+                      initiallyOpen={index === 0}
+                      folder={folder}
+                      onOpenBranches={() =>
+                        openView("branches", `${folder.environmentId}:${folder.id}`)
+                      }
+                      spaceChats={chats}
+                      allChats={threads}
+                      projects={projects}
+                    />
+                  ))
+                ) : missingFolders.length ? null : (
+                  <p className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                    No folders are associated with this space yet. Choose a folder when starting a
+                    chat.
+                  </p>
+                )}
+                {missingFolders.map((key) => (
+                  <p
+                    key={key}
+                    className="rounded-xl border border-border p-5 text-sm text-muted-foreground"
+                  >
+                    An associated folder is unavailable. Reconnect its device to restore its
+                    details.
+                    <span className="mt-1 block break-all font-mono text-xs">{key}</span>
+                  </p>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+      </main>
+    </SidebarInset>
+  );
+}

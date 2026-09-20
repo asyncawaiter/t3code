@@ -127,3 +127,19 @@ it.effect("does not keep credentials of other threads alive", () =>
     expect(yield* registry.resolve(token)).toBeUndefined();
   }),
 );
+
+it.effect("task access does not grant browser access", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry(() => 1000);
+    const issued = yield* registry.issue({
+      threadId: ThreadId.make("task-only"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      browserAccess: false,
+    });
+    const scope = yield* registry.resolve(
+      issued.config.authorizationHeader.replace(/^Bearer\s+/, ""),
+    );
+    expect(scope?.capabilities.has("tasks")).toBe(true);
+    expect(scope?.capabilities.has("preview")).toBe(false);
+  }),
+);

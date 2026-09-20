@@ -31,6 +31,7 @@ import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { readProjectGraph } from "./projectGraph.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -2271,6 +2272,72 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (
     input: ReviewDiffPreviewInput,
   ) {
+    const hashDiff = (diff: string) =>
+      crypto.digest("SHA-256", new TextEncoder().encode(diff)).pipe(
+        Effect.map(Encoding.encodeHex),
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.getReviewDiffPreview.hash",
+              command: "crypto.digest SHA-256",
+              cwd: input.cwd,
+              detail: "Failed to hash review diff.",
+              cause,
+            }),
+        ),
+      );
+    if (input.commit !== undefined) {
+      if (!/^[a-f0-9]{40,64}$/.test(input.commit)) {
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.getReviewDiffPreview.commit",
+          cwd: input.cwd,
+          command: "git show",
+          detail: "Expected a full Git commit hash.",
+        });
+      }
+      const patch = yield* executeGit(
+        "GitVcsDriver.getReviewDiffPreview.commit",
+        input.cwd,
+        [
+          "show",
+          "--format=",
+          "--patch",
+          "--root",
+          "--first-parent",
+          "--diff-merges=first-parent",
+          "--no-color",
+          "--no-ext-diff",
+          "--no-textconv",
+          ...PATCH_RENDER_PREFIX_ARGS,
+          ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+          input.commit,
+          "--",
+        ],
+        { maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES, appendTruncationMarker: true },
+      );
+      const parent = yield* executeGit(
+        "GitVcsDriver.getReviewDiffPreview.commitParent",
+        input.cwd,
+        ["rev-parse", "--verify", `${input.commit}^`],
+        { allowNonZeroExit: true },
+      );
+      return {
+        cwd: input.cwd,
+        generatedAt: yield* DateTime.now,
+        sources: [
+          {
+            id: `commit:${input.commit}`,
+            kind: "branch-range" as const,
+            title: `Commit ${input.commit.slice(0, 7)}`,
+            baseRef: parent.exitCode === 0 ? parent.stdout.trim() : null,
+            headRef: input.commit,
+            diff: patch.stdout,
+            diffHash: yield* hashDiff(patch.stdout),
+            truncated: patch.stdoutTruncated,
+          },
+        ],
+      };
+    }
     const details = yield* statusDetailsLocal(input.cwd);
     if (!details.isRepo) {
       return {
@@ -2355,20 +2422,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           )
         : null;
     const baseDiff = baseResult?.stdout ?? "";
-    const hashDiff = (diff: string) =>
-      crypto.digest("SHA-256", new TextEncoder().encode(diff)).pipe(
-        Effect.map(Encoding.encodeHex),
-        Effect.mapError(
-          (cause) =>
-            new GitCommandError({
-              operation: "GitVcsDriver.getReviewDiffPreview.hash",
-              command: "crypto.digest SHA-256",
-              cwd: input.cwd,
-              detail: "Failed to hash review diff.",
-              cause,
-            }),
-        ),
-      );
     const [dirtyDiffHash, baseDiffHash] = yield* Effect.all([
       hashDiff(dirtyDiff),
       hashDiff(baseDiff),
@@ -2863,6 +2916,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         hasPrimaryRemote: snapshot.hasPrimaryRemote,
         nextCursor: refs.nextCursor,
         totalCount: refs.totalCount,
+        ...(input.includeGraph
+          ? { graph: yield* readProjectGraph(input.cwd, execute, input.graphCommitLimit) }
+          : {}),
       };
     },
   );

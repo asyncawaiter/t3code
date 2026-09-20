@@ -300,3 +300,17 @@ export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileEr
     } as any);
   }
 }
+
+export const ProjectInstructionsResult = Schema.Struct({
+  files: Schema.Array(
+    Schema.Struct({ path: Schema.String, scope: Schema.Literals(["parent", "root", "subfolder"]) }),
+  ),
+  truncated: Schema.Boolean,
+  warnings: Schema.Array(Schema.String),
+  excludedDirectories: Schema.Array(Schema.String),
+});
+export type ProjectInstructionsResult = typeof ProjectInstructionsResult.Type;
+export class ProjectInstructionsError extends Schema.TaggedError<ProjectInstructionsError>()(
+  "ProjectInstructionsError",
+  { message: Schema.String },
+) {}

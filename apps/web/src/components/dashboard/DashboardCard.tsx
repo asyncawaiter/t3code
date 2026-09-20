@@ -1,3 +1,4 @@
+import { openWorkItem, type LocatedWorkItem } from "../../workItems";
 import { useWorkflowState } from "../../workflowState";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useLinkedThreadPullRequest } from "../ThreadStatusIndicators";
@@ -51,6 +52,7 @@ function dashboardTimeLabel(entry: DashboardBoardEntry, nowMs: number): string {
 
 export const DashboardCard = memo(function DashboardCard({
   entry,
+  task,
   onOpen,
   unread,
   now,
@@ -62,6 +64,7 @@ export const DashboardCard = memo(function DashboardCard({
   deviceLabel,
   connected,
 }: {
+  task?: LocatedWorkItem | undefined;
   onOpen: () => void;
   readonly unread: boolean;
   readonly entry: DashboardBoardEntry;
@@ -186,7 +189,7 @@ export const DashboardCard = memo(function DashboardCard({
           <span aria-label="Unread" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
         ) : null}
         <div className="line-clamp-2 min-w-0 text-sm font-medium leading-5 text-foreground">
-          {shell.title}
+          {task?.item.title ?? shell.title}
         </div>
       </div>
       <div className="flex min-w-0 flex-col gap-2">
@@ -239,6 +242,25 @@ export const DashboardCard = memo(function DashboardCard({
             <span className="min-w-0 truncate">{shell.planProgress.step}</span>
           ) : null}
         </div>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={(event) => {
+            event.stopPropagation();
+            openWorkItem(
+              task ?? {
+                environmentId,
+                projectId: shell.projectId,
+                source: { environmentId, threadId },
+              },
+            );
+          }}
+        >
+          {task ? "Task details" : "Park follow-up"}
+        </Button>
+        {task && <span className="capitalize text-muted-foreground">{task.item.status}</span>}
       </div>
       <dl className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs">
         <dt className="text-[11px] text-muted-foreground">Space</dt>

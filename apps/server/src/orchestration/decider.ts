@@ -1102,6 +1102,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (
+        command.ifThreadUnchangedSince !== undefined &&
+        (targetThread.updatedAt !== command.ifThreadUnchangedSince ||
+          targetThread.session?.status === "running" ||
+          targetThread.session?.status === "starting" ||
+          targetThread.latestTurn?.state === "running")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The chat changed or is busy. Retry preparation when it is idle.",
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({

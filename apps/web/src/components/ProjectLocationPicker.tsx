@@ -1,3 +1,4 @@
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import { useEffect, useState } from "react";
 import {
@@ -30,16 +31,21 @@ export function ProjectLocationPicker({
   onChange,
   disabled = false,
   initialEnvironmentId,
+  fixedEnvironmentId,
+  suggestedProjects,
 }: {
   value: ChatLocation | null;
+  suggestedProjects?: ReadonlyArray<EnvironmentProject> | undefined;
   initialEnvironmentId?: EnvironmentId | undefined;
+  fixedEnvironmentId?: EnvironmentId | undefined;
   onChange: (value: ChatLocation | null) => void;
   disabled?: boolean;
 }) {
   const { environments } = useEnvironments();
   const projects = useProjects();
   const [deviceId, setDeviceId] = useState(
-    value?.environmentId ??
+    fixedEnvironmentId ??
+      value?.environmentId ??
       initialEnvironmentId ??
       environments.find((env) => env.connection.phase === "connected")?.environmentId ??
       null,
@@ -47,7 +53,12 @@ export function ProjectLocationPicker({
   const [browsing, setBrowsing] = useState(!value);
   const [query, setQuery] = useState("");
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
-  const chosenId = value?.environmentId ?? deviceId;
+  const chosenId = fixedEnvironmentId ?? value?.environmentId ?? deviceId;
+  const suggestedSelection = suggestedProjects?.find(
+    (project) =>
+      project.environmentId === value?.environmentId &&
+      project.workspaceRoot === value.workspaceRoot,
+  );
   const environment = environments.find((env) => env.environmentId === chosenId);
   const connected = environment?.connection.phase === "connected";
   const platform = environment?.serverConfig?.environment.platform.os ?? "";
@@ -64,7 +75,7 @@ export function ProjectLocationPicker({
     folder.data?.entries ?? [],
     path.filterQuery,
   ).visibleEntries;
-  const recent = projects.filter(
+  const recent = (suggestedProjects ?? projects).filter(
     (project) =>
       project.environmentId === chosenId &&
       `${project.title} ${project.workspaceRoot}`.toLowerCase().includes(query.toLowerCase()),
@@ -152,42 +163,113 @@ export function ProjectLocationPicker({
   };
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-background/50">
-      <div className="space-y-1.5 border-b border-border/60 p-3">
-        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <MonitorIcon className="size-3.5" />
-          <span>Device</span>
+      {!fixedEnvironmentId && (
+        <div className="space-y-1.5 border-b border-border/60 p-3">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <MonitorIcon className="size-3.5" />
+            <span>Device</span>
+          </div>
+          <Select
+            value={chosenId}
+            onValueChange={(id) => {
+              const env = environments.find((item) => item.environmentId === id);
+              if (!env) return;
+              setDeviceId(env.environmentId);
+              setNewFolderName(null);
+              onChange(null);
+              setQuery("");
+              setBrowsing(true);
+            }}
+            disabled={disabled}
+          >
+            <SelectTrigger className="w-full min-w-0" aria-label="Device">
+              <SelectValue>{environment?.label ?? "Choose device"}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {environments.map((env) => (
+                <SelectItem
+                  key={env.environmentId}
+                  value={env.environmentId}
+                  disabled={env.connection.phase !== "connected"}
+                >
+                  {env.label}
+                  {env.connection.phase !== "connected" ? " (offline)" : ""}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
         </div>
-        <Select
-          value={chosenId}
-          onValueChange={(id) => {
-            const env = environments.find((item) => item.environmentId === id);
-            if (!env) return;
-            setDeviceId(env.environmentId);
-            setNewFolderName(null);
-            onChange(null);
-            setQuery("");
-            setBrowsing(true);
-          }}
-          disabled={disabled}
-        >
-          <SelectTrigger className="w-full min-w-0" aria-label="Device">
-            <SelectValue>{environment?.label ?? "Choose device"}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            {environments.map((env) => (
-              <SelectItem
-                key={env.environmentId}
-                value={env.environmentId}
-                disabled={env.connection.phase !== "connected"}
-              >
-                {env.label}
-                {env.connection.phase !== "connected" ? " (offline)" : ""}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
-      {value && !browsing ? (
+      )}
+      {suggestedProjects &&
+      suggestedProjects.length > 0 &&
+      !browsing &&
+      (!value || suggestedSelection) ? (
+        <div className="flex items-center gap-2 p-3">
+          <FolderOpenIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <Select
+            value={
+              suggestedSelection
+                ? `${suggestedSelection.environmentId}:${suggestedSelection.id}`
+                : null
+            }
+            onValueChange={(id) => {
+              const project = suggestedProjects.find(
+                (item) => `${item.environmentId}:${item.id}` === id,
+              );
+              if (!project) return;
+              setDeviceId(project.environmentId);
+              onChange({
+                environmentId: project.environmentId,
+                workspaceRoot: project.workspaceRoot,
+              });
+            }}
+            disabled={disabled}
+          >
+            <SelectTrigger className="min-w-0 flex-1" aria-label="Folder in this space">
+              <SelectValue>
+                <span className="truncate font-mono text-xs">
+                  {value?.workspaceRoot ?? "Choose folder"}
+                </span>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {suggestedProjects.map((project) => {
+                const device = environments.find(
+                  (env) => env.environmentId === project.environmentId,
+                );
+                return (
+                  <SelectItem
+                    key={`${project.environmentId}:${project.id}`}
+                    value={`${project.environmentId}:${project.id}`}
+                    disabled={device?.connection.phase !== "connected"}
+                  >
+                    <span className="grid min-w-0 gap-0.5">
+                      <span>
+                        {project.title}{" "}
+                        <span className="text-muted-foreground">
+                          · {device?.label ?? "Device unavailable"}
+                        </span>
+                      </span>
+                      <span className="truncate font-mono text-[11px] text-muted-foreground">
+                        {project.workspaceRoot}
+                      </span>
+                    </span>
+                  </SelectItem>
+                );
+              })}
+            </SelectPopup>
+          </Select>
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            disabled={disabled}
+            onClick={() => browse("")}
+          >
+            Browse
+          </Button>
+        </div>
+      ) : value && !browsing ? (
         <button
           type="button"
           disabled={disabled}

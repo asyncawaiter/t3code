@@ -20,6 +20,7 @@ import {
 } from "./model.ts";
 import { ModelSelection, ProjectScript } from "./orchestration.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
+import { WorkItems } from "./workItem.ts";
 import { Profile } from "./profile.ts";
 import {
   DEFAULT_PREVIEW_APPEARANCE,
@@ -979,6 +980,7 @@ export const ServerSettings = Schema.Struct({
    * that source instead of copying this array between environments.
    * The active profile remains a client-local choice.
    */
+  workItems: Schema.optionalKey(WorkItems),
   profiles: Schema.Array(Profile).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /** The environment holding the shared profile collection. Local copies are retained for recovery. */
   profileSyncSourceId: Schema.NullOr(EnvironmentId).pipe(
@@ -1255,6 +1257,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   profiles: Schema.optionalKey(Schema.Array(Profile)),
+  workItems: Schema.optionalKey(WorkItems),
   profileSyncSourceId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({

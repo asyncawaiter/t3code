@@ -14,8 +14,15 @@ import {
   MoreHorizontalIcon,
   InboxIcon,
   Layers3Icon,
+  MessageSquareIcon,
+  SquarePenIcon,
 } from "lucide-react";
-import { type Profile, type ProfileSpace, ALL_PROFILE_ID } from "@t3tools/contracts";
+import {
+  type Profile,
+  type ProfileSpace,
+  ALL_PROFILE_ID,
+  spaceDeviceDefaults,
+} from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
@@ -220,7 +227,7 @@ export function DefaultSpaceTile({
     <li
       ref={setNodeRef}
       className={cn(
-        "relative h-19 min-w-0 list-none rounded-xl",
+        "relative h-20 min-w-0 list-none rounded-xl",
         isOver && "ring-2 ring-sidebar-foreground/50",
       )}
       data-thread-selection-safe
@@ -228,26 +235,35 @@ export function DefaultSpaceTile({
       <button
         type="button"
         aria-label="Open Unsorted chats, not assigned to a space"
+        aria-description={`${count} active ${count === 1 ? "chat" : "chats"}${shortcut ? `, ${shortcut}` : ""}`}
         aria-pressed={selected}
         onClick={onSelect}
         className={cn(
-          "flex h-full w-full flex-col items-start rounded-xl px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
+          "grid h-full w-full grid-rows-[1rem_minmax(0,1fr)_1rem] gap-1 rounded-xl px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
           selected
             ? "bg-[color-mix(in_srgb,var(--sidebar-row-active)_85%,transparent)] text-sidebar-foreground ring-1 ring-inset ring-sidebar-border"
             : "bg-sidebar-foreground/5 text-sidebar-foreground hover:bg-sidebar-foreground/10",
         )}
       >
-        <span className="mb-0.5 flex w-full items-center gap-1.5">
+        <span className="flex items-center gap-1.5">
           <InboxIcon aria-hidden className="size-4" />
         </span>
-        <span className="line-clamp-2 w-full break-words text-xs font-medium leading-3.5">
+        <span className="line-clamp-2 self-center break-words text-[13px] font-semibold leading-3.5 tracking-[-0.01em]">
           Unsorted
         </span>
-        <span className="mt-auto flex w-full min-w-0 items-center gap-1 pr-5 text-[10px] opacity-75">
-          <span className="truncate">
-            {count} {count === 1 ? "chat" : "chats"}
-          </span>
-          {shortcut && <span className="ml-auto shrink-0 text-[9px] opacity-75">{shortcut}</span>}
+        <span className="flex min-w-0 items-center gap-1.5 pr-5 text-[10px] tabular-nums text-sidebar-muted-foreground">
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex items-center gap-1" />}>
+              <MessageSquareIcon aria-hidden className="size-3 shrink-0" />
+              {count}
+            </TooltipTrigger>
+            <TooltipPopup>
+              {count} active {count === 1 ? "chat" : "chats"}
+            </TooltipPopup>
+          </Tooltip>
+          {shortcut && (
+            <kbd className="ml-auto shrink-0 font-sans text-[9px] opacity-60">{shortcut}</kbd>
+          )}
         </span>
       </button>
       <Button
@@ -349,7 +365,7 @@ export function SpaceTile({
     >
       <div
         className={cn(
-          "group/space relative h-19 overflow-hidden rounded-xl transition-colors",
+          "group/space relative h-20 overflow-hidden rounded-xl transition-colors",
           selected
             ? "bg-[color-mix(in_srgb,var(--sidebar-row-active)_85%,transparent)] text-sidebar-foreground ring-1 ring-inset ring-sidebar-border"
             : "bg-sidebar-foreground/5 text-sidebar-foreground hover:bg-sidebar-foreground/10",
@@ -390,7 +406,7 @@ export function SpaceTile({
                     ref={setActivatorNodeRef}
                     {...listeners}
                     type="button"
-                    className="flex h-full w-full touch-none select-none flex-col items-start gap-0.5 px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+                    className="grid h-full w-full touch-none select-none grid-rows-[1rem_minmax(0,1fr)_1rem] gap-1 px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
                     aria-label={`Open space ${space.name}`}
                     aria-pressed={selected}
                     onClick={() => {
@@ -398,7 +414,7 @@ export function SpaceTile({
                       onSelect();
                     }}
                     aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"
-                    aria-description="Drag to reorder, or hold Alt and use arrow keys."
+                    aria-description={`${count} active chats${draftCount ? `, ${draftCount} drafts` : ""}${attention ? ", needs attention" : ""}${shortcut ? `, ${shortcut}` : ""}. Drag to reorder, or hold Alt and use arrow keys.`}
                     onKeyDown={(event) => {
                       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
                       const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 }[
@@ -412,10 +428,7 @@ export function SpaceTile({
                   />
                 }
               >
-                <span
-                  className="mb-0.5 flex h-4 w-full items-center gap-0.5 pr-5"
-                  aria-hidden="true"
-                >
+                <span className="flex h-4 min-w-0 items-center gap-1 pr-5" aria-hidden="true">
                   {projects.length === 0 && <Layers3Icon className="size-3.5" />}
                   {projects
                     .slice(0, 3)
@@ -432,28 +445,32 @@ export function SpaceTile({
                     </span>
                   )}
                 </span>
-                <span className="flex w-full min-w-0 shrink-0 items-center gap-1.5 text-inherit">
-                  <span className="line-clamp-2 w-full break-words text-xs font-medium leading-3.5">
+                <span className="min-w-0 self-center text-inherit">
+                  <span className="line-clamp-2 break-words text-[13px] font-semibold leading-3.5 tracking-[-0.01em]">
                     {space.name}
                   </span>
                 </span>
-                <span className="mt-auto flex w-full min-w-0 items-center gap-1 pr-5 text-[10px] text-inherit opacity-75">
-                  {attention ? (
-                    <span
-                      aria-label="Needs attention"
-                      className="size-1.5 rounded-full bg-amber-500"
-                    />
-                  ) : null}
-                  <span className="truncate">
-                    {count > 0 || draftCount === 0
-                      ? `${count} ${count === 1 ? "thread" : "threads"}`
-                      : ""}
-                    {count > 0 && draftCount > 0 ? " · " : ""}
-                    {draftCount > 0 ? `${draftCount} ${draftCount === 1 ? "draft" : "drafts"}` : ""}
+                <span className="flex min-w-0 items-center gap-1 pr-5 text-[10px] tabular-nums text-sidebar-muted-foreground">
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-0.5",
+                      attention && "text-amber-600 dark:text-amber-400",
+                    )}
+                  >
+                    <MessageSquareIcon aria-hidden className="size-3 shrink-0" />
+                    {count}
                   </span>
+                  {draftCount > 0 && (
+                    <span className="inline-flex items-center gap-0.5">
+                      <SquarePenIcon aria-hidden className="size-3 shrink-0" />
+                      {draftCount}
+                    </span>
+                  )}
                   {attention ? <span className="sr-only">Needs you</span> : null}
                   {shortcut && (
-                    <span className="ml-auto shrink-0 text-[9px] opacity-75">{shortcut}</span>
+                    <kbd className="ml-auto shrink-0 font-sans text-[9px] opacity-60">
+                      {shortcut}
+                    </kbd>
                   )}
                 </span>
               </PreviewCardTrigger>
@@ -468,7 +485,7 @@ export function SpaceTile({
                     <div className="break-words text-xs font-semibold leading-4">{space.name}</div>
                     <div className="mt-0.5 text-[10px] leading-3.5 text-muted-foreground">
                       {projects.length} {projects.length === 1 ? "project" : "projects"} · {count}{" "}
-                      {count === 1 ? "chat" : "chats"}
+                      active {count === 1 ? "chat" : "chats"}
                       {draftCount > 0 &&
                         ` · ${draftCount} ${draftCount === 1 ? "draft" : "drafts"}`}
                     </div>
@@ -499,13 +516,16 @@ export function SpaceTile({
                           </div>
                           <div className="break-words text-[10px] leading-3.5 text-muted-foreground">
                             {device}
-                            {key === space.newChatDefaults?.projectKey && " · New chats"}
+                            {Object.values(spaceDeviceDefaults(space)).some(
+                              (defaults) => defaults.projectKey === key,
+                            ) && " · New chats"}
                           </div>
                           <div className="mt-0.5 break-all text-[10px] leading-3.5 text-muted-foreground/80">
                             {project?.workspaceRoot ??
-                              (key === space.newChatDefaults?.projectKey
-                                ? space.newChatDefaults.workspaceRoot
-                                : "Project details unavailable on this device")}
+                              Object.values(spaceDeviceDefaults(space)).find(
+                                (defaults) => defaults.projectKey === key,
+                              )?.workspaceRoot ??
+                              "Project details unavailable on this device"}
                           </div>
                         </div>
                       </li>
@@ -523,7 +543,7 @@ export function SpaceTile({
               space={space}
               selected={selected}
               writeBlockReason={writeBlockReason}
-              onChange={onChange}
+
               onLaunch={onLaunch}
               open={launchOpen}
               onOpenChange={setLaunchOpen}

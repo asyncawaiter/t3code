@@ -1,3 +1,4 @@
+import { TaskToolkitRegistrationLive } from "./toolkits/tasks.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -226,4 +227,6 @@ const McpTransportLive = McpServer.layerHttp({
   protocols: [McpProtocol.v2025_06_18],
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = PreviewToolkitRegistrationLive.pipe(Layer.provideMerge(McpTransportLive));
+export const layer = Layer.merge(PreviewToolkitRegistrationLive, TaskToolkitRegistrationLive).pipe(
+  Layer.provideMerge(McpTransportLive),
+);

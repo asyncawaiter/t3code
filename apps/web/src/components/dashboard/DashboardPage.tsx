@@ -1,3 +1,5 @@
+import { TaskShelf } from "../tasks/TaskShelf";
+import { openWorkItem, useWorkItems } from "../../workItems";
 import { DashboardSavedViews, type DashboardView } from "./DashboardSavedViews";
 import { useWorkflowState } from "../../workflowState";
 import { buildReviewDashboard } from "./DashboardPage.logic";
@@ -93,6 +95,7 @@ function useNow(): string {
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const workItems = useWorkItems();
   const now = useNow();
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   const providers = useMemo(
@@ -517,6 +520,11 @@ export function DashboardPage() {
       <DashboardCard
         key={`${entry.shell.environmentId}:${entry.shell.id}`}
         entry={entry}
+        task={workItems.find(
+          (task) =>
+            task.environmentId === entry.shell.environmentId &&
+            task.item.threadId === entry.shell.id,
+        )}
         onOpen={() =>
           useWorkflowState.setState({
             triageProfileId: activeProfile.id,
@@ -566,6 +574,22 @@ export function DashboardPage() {
             </WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
           <div className="no-drag ml-auto flex min-w-0 flex-wrap items-center gap-2">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() =>
+                void navigate({
+                  to: "/spaces/$profileId",
+                  params: { profileId: activeProfile.id },
+                  search: { space: undefined, unsorted: false, view: "monitor" },
+                })
+              }
+            >
+              Monitor Spaces
+            </Button>
+            <Button size="xs" variant="outline" onClick={() => openWorkItem()}>
+              Capture task
+            </Button>
             <Input
               size="compact"
               type="search"
@@ -1106,6 +1130,35 @@ export function DashboardPage() {
             aria-label="Task board"
             ref={boardRef}
           >
+            <TaskShelf
+              profileId={
+                rawProfiles.find((owner) =>
+                  (owner.spaces ?? []).some(
+                    (space) => `${owner.id}:${space.id}` === effectiveSpaceFilter,
+                  ),
+                )?.id ?? activeProfile.id
+              }
+              environmentId={effectiveEnvironmentFilter}
+              projectKey={effectiveProjectFilter}
+              search={search}
+              spaceId={
+                effectiveSpaceFilter === "all"
+                  ? undefined
+                  : effectiveSpaceFilter === "root"
+                    ? null
+                    : rawProfiles
+                        .flatMap((owner) =>
+                          (owner.spaces ?? []).map((space) => ({
+                            key: `${owner.id}:${space.id}`,
+                            id: space.id,
+                          })),
+                        )
+                        .find((space) => space.key === effectiveSpaceFilter)?.id
+              }
+              visibleThreadKeys={allEntries.map(
+                (entry) => `${entry.shell.environmentId}:${entry.shell.id}`,
+              )}
+            />
             {groupBy === "state" ? (
               visibleLanes.map((lane) => {
                 const entries = filteredBoard.lanes[lane];

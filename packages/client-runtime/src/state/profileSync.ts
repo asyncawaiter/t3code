@@ -85,7 +85,7 @@ export function saveSharedProfiles(
 
 export const OUTSIDE_SPACES = "\0outside-spaces";
 
-/** Counts every chat in the profile, independently of the selected Space or project filter. */
+/** Counts active chats in the profile, independently of the selected Space or project filter. */
 export function profileSpaceCounts(
   profiles: ReadonlyArray<Profile>,
   profileId: string | null,
@@ -94,6 +94,7 @@ export function profileSpaceCounts(
     id: string;
     projectId: string;
     archivedAt?: string | null;
+    settledOverride?: "active" | "settled" | null;
   }>,
 ) {
   const profile = profiles.find((entry) => entry.id === profileId);
@@ -102,7 +103,12 @@ export function profileSpaceCounts(
   const counts = new Map<string, number>();
   for (const thread of threads) {
     const projectKey = `${thread.environmentId}:${thread.projectId}`;
-    if (thread.archivedAt || (projects && !projects.has(projectKey))) continue;
+    if (
+      thread.archivedAt ||
+      thread.settledOverride === "settled" ||
+      (projects && !projects.has(projectKey))
+    )
+      continue;
     const placement = spaces.get(`${thread.environmentId}:${thread.id}`);
     const spaceId = placement?.projectKey === projectKey ? placement.space.id : OUTSIDE_SPACES;
     counts.set(spaceId, (counts.get(spaceId) ?? 0) + 1);

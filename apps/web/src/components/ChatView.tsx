@@ -1,3 +1,8 @@
+import { useContext } from "react";
+import { ChatPaneContext, chatReadingPositions } from "./chat/ChatPaneContext";
+import { ChatTaskBar } from "./tasks/ChatTaskBar";
+import { uploadTaskFile, taskAttachmentUrl } from "./tasks/taskAttachments";
+import { openWorkItem } from "../workItems";
 import { DashboardReviewBar } from "./dashboard/DashboardReviewBar";
 import { inheritForkPlacement } from "@t3tools/client-runtime/state/profiles";
 import { useSaveProfiles } from "../hooks/useProfileSync";
@@ -1391,6 +1396,9 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
 }
 
 export default function ChatView(props: ChatViewProps) {
+  const pane = useContext(ChatPaneContext);
+  const paneActive = useRef(pane.active);
+  paneActive.current = pane.active;
   const {
     environmentId,
     threadId,
@@ -1998,12 +2006,13 @@ export default function ChatView(props: ChatViewProps) {
   // timestamp backwards).
   useEffect(() => {
     const completedAt = serverThread?.latestTurn?.completedAt;
-    if (!serverThread?.id || !completedAt) return;
+    if (!pane.active || !serverThread?.id || !completedAt) return;
     markThreadVisited(
       scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
       completedAt,
     );
   }, [
+    pane.active,
     markThreadVisited,
     serverThread?.environmentId,
     serverThread?.id,
@@ -2013,7 +2022,7 @@ export default function ChatView(props: ChatViewProps) {
     setMountedTerminalThreadKeys((currentThreadIds) => {
       const nextThreadIds = reconcileMountedTerminalThreadIds({
         currentThreadIds,
-        openThreadIds: existingOpenTerminalThreadKeys,
+        openThreadIds: pane.column ? [] : existingOpenTerminalThreadKeys,
         activeThreadId: activeThreadKey,
         activeThreadTerminalOpen: activeTerminalDrawerPresence.present,
         maxHiddenThreadCount: MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -2023,7 +2032,12 @@ export default function ChatView(props: ChatViewProps) {
         ? currentThreadIds
         : nextThreadIds;
     });
-  }, [activeTerminalDrawerPresence.present, activeThreadKey, existingOpenTerminalThreadKeys]);
+  }, [
+    pane.column,
+    activeTerminalDrawerPresence.present,
+    activeThreadKey,
+    existingOpenTerminalThreadKeys,
+  ]);
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProjectRef = useMemo(
     () =>
@@ -3626,7 +3640,7 @@ export default function ChatView(props: ChatViewProps) {
     buildRunningThreadTurnInterruptInput(activeThread, phase) !== null;
 
   const focusComposer = useCallback(() => {
-    composerRef.current?.focusAtEnd();
+    if (paneActive.current) composerRef.current?.focusAtEnd();
   }, [composerRef]);
   useEffect(() => subscribeSnapShotComposerFocus(focusComposer), [focusComposer]);
   const scheduleComposerFocus = useCallback(() => {
@@ -4674,7 +4688,7 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(
     () =>
       subscribePreviewAction((action) => {
-        if (action === "toggle-panel") togglePreviewPanel();
+        if (paneActive.current && action === "toggle-panel") togglePreviewPanel();
       }),
     [togglePreviewPanel],
   );
@@ -4973,6 +4987,7 @@ export default function ChatView(props: ChatViewProps) {
         // the end on the next stream chunk. Clicking message text can leave
         // DOM focus on body, so these keys must also be heard at document.
         const handleKeyDown = (event: KeyboardEvent) => {
+          if (!paneActive.current) return;
           if (
             !(event.target instanceof Node) ||
             (!scrollNode.contains(event.target) &&
@@ -5179,11 +5194,12 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     setPullRequestDialogState(null);
-    isAtEndRef.current = true;
+    const reading = chatReadingPositions.get(routeThreadKey);
+    isAtEndRef.current = !reading || reading.atEnd;
     timelineScrollIntentRef.current = null;
-    timelineScrollModeRef.current = "following-end";
+    timelineScrollModeRef.current = reading && !reading.atEnd ? "free-scrolling" : "following-end";
     liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
-    setTimelineLiveFollowEnabled(true);
+    setTimelineLiveFollowEnabled(!reading || reading.atEnd);
     pendingTimelineAnchorRef.current = null;
     positionedTimelineAnchorRef.current = null;
     settledTimelineAnchorRef.current = null;
@@ -5191,7 +5207,7 @@ export default function ChatView(props: ChatViewProps) {
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
     // activeThreadRef resets transitively with the active thread.
-  }, [activeThread?.id]);
+  }, [activeThread?.id, routeThreadKey]);
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
@@ -5199,14 +5215,14 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id]);
 
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen) return;
+    if (pane.column || !activeThread?.id || terminalUiState.terminalOpen) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, terminalUiState.terminalOpen]);
+  }, [pane.column, activeThread?.id, focusComposer, terminalUiState.terminalOpen]);
 
   // Tabbing back into the app lands focus wherever it last was, often the right panel or the
   // body. Put it in the composer unless something that takes typing already holds it. The
@@ -6095,6 +6111,7 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
+      if (!paneActive.current) return;
       if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
         event.stopPropagation();
         return;
@@ -6351,6 +6368,7 @@ export default function ChatView(props: ChatViewProps) {
   // Route it to the composer like a typed key, which also expands it.
   useEffect(() => {
     const handler = (event: ClipboardEvent) => {
+      if (!paneActive.current) return;
       if (!activeThreadId || isCommandPaletteOpen()) return;
       if (getTerminalFocusOwner() !== null) return;
       if (composerRef.current?.isModelPickerOpen()) return;
@@ -8286,6 +8304,7 @@ export default function ChatView(props: ChatViewProps) {
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
+        <ChatTaskBar environmentId={environmentId} threadId={threadId} />
         {/* Top bar */}
         <WorkspacePageHeader
           data-chat-header
@@ -8300,6 +8319,57 @@ export default function ChatView(props: ChatViewProps) {
             />
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
+          <button
+            type="button"
+            aria-label="Park a task from this chat"
+            className="shrink-0 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+            onClick={async () => {
+              try {
+                const selected = window.getSelection()?.toString();
+                const draft = useComposerDraftStore
+                  .getState()
+                  .getComposerDraft({ environmentId, threadId });
+                const attachments: import("@t3tools/contracts").ChatAttachment[] = [];
+                if (!selected && draft)
+                  for (const attachment of [...draft.images, ...draft.files]) {
+                    let file = attachment.file;
+                    if (
+                      !file &&
+                      "uploadedAttachmentId" in attachment &&
+                      attachment.uploadedAttachmentId
+                    ) {
+                      const url = await taskAttachmentUrl(environmentId, {
+                        ...attachment,
+                        id: attachment.uploadedAttachmentId,
+                      });
+                      const response = await fetch(url);
+                      if (!response.ok)
+                        throw new Error(`Could not copy ${attachment.name}. Reattach it first.`);
+                      file = new File([await response.blob()], attachment.name, {
+                        type: attachment.mimeType,
+                      });
+                    }
+                    if (!file)
+                      throw new Error(`Reattach ${attachment.name} before capturing this task.`);
+                    attachments.push(await uploadTaskFile(environmentId, file));
+                  }
+                openWorkItem({
+                  environmentId,
+                  projectId: activeThread.projectId,
+                  source: { environmentId, threadId, messageId: activeThread.messages.at(-1)?.id },
+                  notes: selected || draft?.prompt || "",
+                  attachments,
+                });
+              } catch (cause) {
+                toastManager.add({
+                  type: "error",
+                  title: cause instanceof Error ? cause.message : "Could not capture the task.",
+                });
+              }
+            }}
+          >
+            + Task
+          </button>
           <ChatHeader
             {...(!supportsPullRequests || activeProjectRepository === null
               ? {}
@@ -8381,7 +8451,7 @@ export default function ChatView(props: ChatViewProps) {
                 onCiteAssistantText={citeAssistantText}
                 agentPanelModel={agentPanelModel}
                 onOpenAgents={addAgentsSurface}
-                key={activeThread.id}
+                key={routeThreadKey}
                 isWorking={isWorking}
                 isPreparingWorktree={isPreparingWorktree}
                 isCompacting={isCompacting}

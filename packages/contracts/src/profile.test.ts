@@ -4,6 +4,9 @@ import * as Schema from "effect/Schema";
 
 import {
   indexProfilePins,
+  spaceDeviceDefaults,
+  withSpaceDeviceDefaults,
+  ProfileSpace,
   mergeProfileEdits,
   moveThreadsToSpace,
   ALL_PROFILE,
@@ -15,6 +18,8 @@ import {
   resolveProfiles,
   type Profile as ProfileType,
 } from "./profile.ts";
+
+const decodeSpace = Schema.decodeUnknownSync(ProfileSpace);
 
 const work: ProfileType = {
   id: "work",
@@ -202,5 +207,66 @@ describe("mergeProfileEdits", () => {
         spaces: p.spaces.map((s) => ({ ...s, threads: s.id === id ? [thread] : [] })),
       }));
     expect(() => mergeProfileEdits(assign("one"), base, assign("two"))).toThrow("another space");
+  });
+});
+
+describe("per-device Space defaults", () => {
+  const a = {
+    projectKey: "a:repo",
+    deviceLabel: "Godel",
+    workspaceRoot: "/work/a",
+    envMode: "worktree" as const,
+  };
+  const b = {
+    projectKey: "b:repo",
+    deviceLabel: "Poly",
+    workspaceRoot: "/work/b",
+    modelSelection: { instanceId: "codex", model: "astra" },
+  };
+  const legacy = decodeSpace({
+    id: "build",
+    name: "Build",
+    threads: [],
+    newChatDefaults: a,
+  });
+  const second = decodeSpace({
+    ...legacy,
+    newChatDefaults: b,
+  }).newChatDefaults!;
+  it("keeps the existing shortcut when a second device is configured and round-trips both", () => {
+    const updated = withSpaceDeviceDefaults(legacy, "b", second);
+    const saved = decodeSpace(JSON.parse(JSON.stringify(updated)));
+    expect(spaceDeviceDefaults(saved)).toEqual({ a, b });
+    expect(saved.newChatDefaults).toBeUndefined();
+  });
+  it("resets only the requested device, including a legacy shortcut", () => {
+    const updated = withSpaceDeviceDefaults(legacy, "b", second);
+    expect(spaceDeviceDefaults(withSpaceDeviceDefaults(updated, "a", undefined))).toEqual({ b });
+    expect(spaceDeviceDefaults(withSpaceDeviceDefaults(legacy, "a", undefined))).toEqual({});
+  });
+  it("does not use a different device's shortcut when no default is set", () => {
+    expect(spaceDeviceDefaults(legacy).b).toBeUndefined();
+  });
+  it("rejects a folder assigned to the wrong device", () => {
+    expect(() => withSpaceDeviceDefaults(legacy, "b", a)).toThrow("belong to this device");
+    expect(() => decodeSpace({ ...legacy, newChatDefaultsByDevice: { b: a } })).toThrow();
+  });
+  it("merges simultaneous edits to different devices without losing either", () => {
+    const profiles = (space: ProfileSpace) => [{ ...work, spaces: [space] }];
+    const current = withSpaceDeviceDefaults(legacy, "a", { ...a, workspaceRoot: "/work/new-a" });
+    const edited = withSpaceDeviceDefaults(legacy, "b", second);
+    const merged = mergeProfileEdits(profiles(current), profiles(legacy), profiles(edited));
+    expect(spaceDeviceDefaults(merged[0]!.spaces![0]!)).toEqual({
+      a: { ...a, workspaceRoot: "/work/new-a" },
+      b,
+    });
+  });
+  it("rejects competing edits to the same device", () => {
+    const profiles = (path: string) => [
+      { ...work, spaces: [withSpaceDeviceDefaults(legacy, "a", { ...a, workspaceRoot: path })] },
+    ];
+    expect(() =>
+      mergeProfileEdits(profiles("/one"), [{ ...work, spaces: [legacy] }], profiles("/two")),
+    ).toThrow("another device");
   });
 });

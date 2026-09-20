@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import { Profile, moveThreadsToSpace, spaceForThread } from "@t3tools/contracts";
 import { moveProjectToProfile } from "../settings/ProjectSettingsPanel.logic";
-import { spaceProjectKeys } from "./Spaces.logic";
+import { spaceProjectKeys, spaceOverviewThreads } from "./Spaces.logic";
 
 const profile: Profile = {
   id: "work",
@@ -44,6 +44,19 @@ describe("Spaces", () => {
       }),
     ).toEqual([first.projectKey]);
     expect(spaceProjectKeys({ id: "empty", name: "Empty", threads: [] })).toEqual([]);
+  });
+  it("includes default folders from every device even before a chat exists", () => {
+    expect(
+      spaceProjectKeys({
+        id: "build",
+        name: "Build",
+        threads: [],
+        newChatDefaultsByDevice: {
+          a: { projectKey: "a:repo", deviceLabel: "A", workspaceRoot: "/a" },
+          b: { projectKey: "b:repo", deviceLabel: "B", workspaceRoot: "/b" },
+        },
+      }),
+    ).toEqual(["a:repo", "b:repo"]);
   });
   it("keeps same-named threads on different devices independent", () => {
     const moved = moveThreadsToSpace(
@@ -147,4 +160,26 @@ describe("sidebar space scope", () => {
     expect(commonSpaceProfile(profiles, [first.projectKey, "elsewhere:repo"])).toBeUndefined();
     expect(commonSpaceProfile(profiles, [])).toBeUndefined();
   });
+});
+
+it("space overview scopes by device and space, ignores foreign global pins, and sorts recent first", () => {
+  const assigned = moveThreadsToSpace(profile, [first, second], "build");
+  const thread = {
+    id: "thread",
+    projectId: "repo",
+    environmentId: "device-a",
+    archivedAt: null,
+    updatedAt: "2026-09-01",
+    pinnedAt: "2026-09-01",
+  };
+  const recent = { ...thread, environmentId: "device-b", updatedAt: "2026-09-02" };
+  const outside = { ...thread, id: "outside" };
+  const otherDevice = { ...thread, environmentId: "device-c" };
+  const archived = { ...thread, archivedAt: "2026-09-03" };
+  const threads = [thread, outside, otherDevice, recent, archived];
+  expect(spaceOverviewThreads([assigned], "work", "build", threads)).toEqual([recent, thread]);
+  expect(spaceOverviewThreads([assigned], "work", OUTSIDE_SPACES, threads)).toEqual([outside]);
+  expect(spaceOverviewThreads([assigned], "work", "ideas", threads)).toEqual([]);
+  expect(spaceOverviewThreads([assigned], "work", "removed", threads)).toEqual([]);
+  expect(spaceOverviewThreads([assigned], "removed", null, threads)).toEqual([]);
 });

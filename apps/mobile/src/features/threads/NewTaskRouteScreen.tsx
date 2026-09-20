@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { NewTaskOrganization } from "./NewTaskOrganization";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import {
@@ -25,6 +26,7 @@ import { useNewTaskFlow } from "./new-task-flow-provider";
 import { getProjectScopeSelectionTarget } from "./new-task-project-selection";
 
 type NewTaskRouteParams = {
+  readonly environmentId?: EnvironmentId;
   readonly incomingShareId?: string | string[];
 };
 
@@ -85,7 +87,15 @@ function deriveProjectEmptyState(catalogState: WorkspaceState): {
 
 export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRouteParams | undefined>) {
   const projects = useProjects();
-  const { projectScopes, selectedEnvironmentId, setProject } = useNewTaskFlow();
+  const { projectScopes, selectedEnvironmentId, setProject, selectEnvironment } = useNewTaskFlow();
+  const initialDeviceApplied = useRef<EnvironmentId | null>(null);
+  useEffect(() => {
+    const id = route.params?.environmentId;
+    if (id && initialDeviceApplied.current !== id) {
+      initialDeviceApplied.current = id;
+      selectEnvironment(id);
+    }
+  }, [route.params?.environmentId, selectEnvironment]);
   const { state: catalogState } = useWorkspaceState();
   const navigation = useNavigation();
   const isFocused = useIsFocused();

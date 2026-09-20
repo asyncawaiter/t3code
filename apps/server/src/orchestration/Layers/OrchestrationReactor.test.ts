@@ -1,3 +1,4 @@
+import * as TaskPreparationReactor from "../TaskPreparationReactor.ts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -85,6 +86,15 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(TaskPreparationReactor.TaskPreparationReactor, {
+            start: () => {
+              started.push("task-preparation-reactor");
+              return Effect.void;
+            },
+            drain: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
             publishThread: () => Effect.void,
             start: () => {
@@ -108,6 +118,7 @@ describe("OrchestrationReactor", () => {
       "thread-pull-request-reactor",
       "thread-settlement-reactor",
       "agent-awareness-relay",
+      "task-preparation-reactor",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

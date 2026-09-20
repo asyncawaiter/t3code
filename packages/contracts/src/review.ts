@@ -5,6 +5,8 @@ import { VcsError } from "./vcs.ts";
 
 export const ReviewDiffPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
+  /** Exact local Git commit, compared with its first parent (or the empty tree). */
+  commit: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40,64}$/))),
   baseRef: Schema.optional(TrimmedNonEmptyString),
   ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
 });

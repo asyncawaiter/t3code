@@ -1,3 +1,4 @@
+import { spaceDeviceDefaults } from "@t3tools/contracts";
 import { useWorkflowState } from "../workflowState";
 import { useWorkflowNavigation } from "../hooks/useWorkflowNavigation";
 import { groupSidebarChats, recentSidebarChats } from "./sidebar/chatGrouping";
@@ -1132,13 +1133,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onCancelRename: () => void;
   isRenaming: boolean;
   renamingTitle: string;
-  onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
+  onContextMenu: (
+    threadRef: ScopedThreadRef,
+    position: { x: number; y: number },
+    menu?: "pin",
+  ) => void;
   onOrganize: (threadRef: ScopedThreadRef) => void;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onSnooze: (threadRef: ScopedThreadRef, preset: SnoozePreset) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
-  onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
 }) {
   const {
@@ -1155,7 +1159,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     onThreadClick,
     onUnsettle,
     onUnsnooze,
-    onUnpin,
     openPullRequestsInRightPanel,
     renamingTitle,
     thread,
@@ -1433,14 +1436,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     },
     [onUnsnooze, threadRef],
   );
-  const handleUnpinClick = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onUnpin(threadRef);
-    },
-    [onUnpin, threadRef],
-  );
   const handleSnoozePreset = useCallback(
     (preset: SnoozePreset) => {
       onSnooze(threadRef, preset);
@@ -1651,31 +1646,41 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : null;
   const showPin =
     props.isPinned && (!sortable?.isDragging || (props.dragOverPinned && props.dropVerb === null));
-  const pinIndicator = showPin ? (
-    props.pinningSupported && !sortable?.isDragging ? (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label="Unpin thread"
-              onClick={handleUnpinClick}
-              className="inline-flex cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          }
-        >
-          <PinIcon aria-hidden className="size-3 shrink-0" />
-        </TooltipTrigger>
-        <TooltipPopup>Unpin thread</TooltipPopup>
-      </Tooltip>
-    ) : (
-      <PinIcon
-        aria-label="Pinned"
-        role="img"
-        className="size-3 shrink-0 text-muted-foreground/65"
-      />
-    )
-  ) : null;
+  const pinIndicator =
+    showPin || (props.pinningSupported && !sortable?.isDragging) ? (
+      props.pinningSupported && !sortable?.isDragging ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="Pin options"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  onContextMenu(threadRef, { x: rect.left, y: rect.bottom }, "pin");
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
+                className={cn(
+                  "inline-flex cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                  !showPin &&
+                    "pointer-events-none absolute w-0 overflow-hidden opacity-0 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:w-auto group-hover/sidebar-row:opacity-100 focus-visible:pointer-events-auto focus-visible:static focus-visible:w-auto focus-visible:opacity-100",
+                )}
+              />
+            }
+          >
+            <PinIcon aria-hidden className="size-3 shrink-0" />
+          </TooltipTrigger>
+          <TooltipPopup>Pin options</TooltipPopup>
+        </Tooltip>
+      ) : (
+        <PinIcon
+          aria-label="Pinned"
+          role="img"
+          className="size-3 shrink-0 text-muted-foreground/65"
+        />
+      )
+    ) : null;
 
   const locationLabels =
     props.spaceLabel || !props.hideEnvironment ? (
@@ -2313,7 +2318,34 @@ export default function Sidebar() {
   latestProfilesRef.current = rawProfiles;
   const resolvedProfiles = useMemo(() => resolveProfiles(rawProfiles), [rawProfiles]);
   const activeProfileId = useUiStateStore((store) => store.activeProfileId);
-  const setActiveProfileId = useUiStateStore((store) => store.setActiveProfileId);
+  const router = useRouter();
+  const setActiveProfileId = useCallback(
+    (id: string | null) => {
+      useUiStateStore.getState().setActiveProfileId(id);
+      if (!router.state.location.pathname.startsWith("/spaces/")) return;
+      if (id === null) {
+        void router.navigate({ to: "/dashboard" });
+        return;
+      }
+      const profile = resolvedProfiles.find((item) => item.id === id);
+      if (!profile) return;
+      const selection = useUiStateStore.getState().spaceSelection;
+      const filter = resolveSidebarSpaceFilter(
+        profile,
+        selection ? selection.filter : OUTSIDE_SPACES,
+      );
+      void router.navigate({
+        to: "/spaces/$profileId",
+        params: { profileId: id },
+        search: {
+          space: filter === OUTSIDE_SPACES ? undefined : (filter ?? undefined),
+          unsorted: filter === OUTSIDE_SPACES,
+          ...(router.state.location.search.view === "columns" ? { view: "columns" as const } : {}),
+        },
+      });
+    },
+    [router, resolvedProfiles],
+  );
   const activeProfile = useMemo(
     () => findProfile(resolvedProfiles, activeProfileId) ?? ALL_PROFILE,
     [resolvedProfiles, activeProfileId],
@@ -2421,8 +2453,17 @@ export default function Sidebar() {
   const setSelectedSpaceId = useCallback(
     (filter: string | null) => {
       useUiStateStore.setState((state) => selectSidebarSpace(state, activeProfile.id, filter));
+      void router.navigate({
+        to: "/spaces/$profileId",
+        params: { profileId: activeProfile.id },
+        search: {
+          space: filter === OUTSIDE_SPACES ? undefined : (filter ?? undefined),
+          unsorted: filter === OUTSIDE_SPACES,
+          ...(router.state.location.search.view === "columns" ? { view: "columns" as const } : {}),
+        },
+      });
     },
-    [activeProfile.id],
+    [activeProfile.id, router],
   );
   const [allChatsGrouping, setAllChatsGrouping] = useLocalStorage(
     "t3.sidebar.allChatsGrouping",
@@ -2479,7 +2520,6 @@ export default function Sidebar() {
       : undefined;
   };
 
-  const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
@@ -4645,13 +4685,17 @@ export default function Sidebar() {
   );
 
   const handleThreadContextMenu = useCallback(
-    (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
+    (threadRef: ScopedThreadRef, position: { x: number; y: number }, menu?: "pin") => {
       void (async () => {
         const api = readLocalApi();
         if (!api) return;
         const threadKey = scopedThreadKey(threadRef);
         const selectionState = useThreadSelectionStore.getState();
-        if (selectionState.hasSelection() && selectionState.selectedThreadKeys.has(threadKey)) {
+        if (
+          !menu &&
+          selectionState.hasSelection() &&
+          selectionState.selectedThreadKeys.has(threadKey)
+        ) {
           await handleMultiSelectContextMenu(position);
           return;
         }
@@ -4681,35 +4725,39 @@ export default function Sidebar() {
 
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+        const pinMenu = getPinMenu(threadRef);
+        if (menu === "pin" && (!supportsPinning || pinMenu.disabled)) return;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            [
-              ...buildThreadActionMenuItems({
-                pinMenu: getPinMenu(threadRef),
-                branch: thread.branch ?? null,
-                isPinned,
-                isSettled,
-                isSnoozed,
-                canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-                isRegeneratingTitle,
-                isRunning:
-                  thread.session?.status === "running" && thread.session.activeTurnId != null,
-                supports: {
-                  settlement: supportsSettlement,
-                  snooze: supportsSnooze,
-                  pinning: supportsPinning,
-                  titleRegeneration: supportsTitleRegeneration,
-                },
-                snoozePresets,
-              }),
-              { id: "move-space", label: "Move to space...", disabled: !primarySettingsLoaded },
-              {
-                id: "move-project-profile",
-                label: "Move project to profile",
-                icon: "tags",
-                disabled: !primarySettingsLoaded || rawProfiles.length === 0,
-              },
-            ],
+            menu === "pin"
+              ? [...(pinMenu.children ?? [])]
+              : [
+                  ...buildThreadActionMenuItems({
+                    pinMenu: getPinMenu(threadRef),
+                    branch: thread.branch ?? null,
+                    isPinned,
+                    isSettled,
+                    isSnoozed,
+                    canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+                    isRegeneratingTitle,
+                    isRunning:
+                      thread.session?.status === "running" && thread.session.activeTurnId != null,
+                    supports: {
+                      settlement: supportsSettlement,
+                      snooze: supportsSnooze,
+                      pinning: supportsPinning,
+                      titleRegeneration: supportsTitleRegeneration,
+                    },
+                    snoozePresets,
+                  }),
+                  { id: "move-space", label: "Move to space...", disabled: !primarySettingsLoaded },
+                  {
+                    id: "move-project-profile",
+                    label: "Move project to profile",
+                    icon: "tags",
+                    disabled: !primarySettingsLoaded || rawProfiles.length === 0,
+                  },
+                ],
             position,
           ),
         );
@@ -5100,7 +5148,7 @@ export default function Sidebar() {
     if (resolvedProfiles.length <= 1) return;
     const ui = useUiStateStore.getState();
     const nextId = nextProfileId(resolvedProfiles, ui.activeProfileId ?? ALL_PROFILE_ID, direction);
-    ui.setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
+    setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
   });
   useEffect(() => {
     const node = sidebarSwipeRef.current;
@@ -5765,7 +5813,6 @@ export default function Sidebar() {
                             onUnsettle={attemptUnsettle}
                             onSnooze={attemptSnooze}
                             onUnsnooze={attemptUnsnooze}
-                            onUnpin={attemptUnpin}
                             onAcknowledgeWoke={acknowledgeWoke}
                           />
                         );
@@ -5907,9 +5954,9 @@ export default function Sidebar() {
                                           "Unavailable project",
                                         device:
                                           environmentLabelById.get(key.split(":")[0]!) ??
-                                          (key === space.newChatDefaults?.projectKey
-                                            ? space.newChatDefaults.deviceLabel
-                                            : null) ??
+                                          Object.values(spaceDeviceDefaults(space)).find(
+                                            (defaults) => defaults.projectKey === key,
+                                          )?.deviceLabel ??
                                           "Unavailable device",
                                       }))}
                                       count={spaceCounts.get(space.id) ?? 0}
@@ -5923,13 +5970,7 @@ export default function Sidebar() {
                                           ),
                                       )}
                                       selected={selectedSpace?.id === space.id}
-                                      onSelect={() =>
-                                        setSelectedSpaceId(
-                                          selectedSpace?.id === space.id
-                                            ? OUTSIDE_SPACES
-                                            : space.id,
-                                        )
-                                      }
+                                      onSelect={() => setSelectedSpaceId(space.id)}
                                       onChange={changeSpaces}
                                       onLaunch={async (projectRef, defaults) => {
                                         const opened = await handleNewThreadRef.current(

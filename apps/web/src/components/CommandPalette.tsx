@@ -1,4 +1,5 @@
-"use client";
+import { openWorkItem } from "../workItems";
+("use client");
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useWorkflowState } from "../workflowState";
 import { useWorkflowNavigation } from "../hooks/useWorkflowNavigation";
@@ -1706,6 +1707,16 @@ function OpenCommandPaletteDialog(props: {
         if (ref && pathname !== `/${ref.environmentId}/${ref.threadId}` && openWorkflowThread(key))
           break;
       }
+    },
+  });
+  actionItems.push({
+    kind: "action",
+    value: "action:capture-task",
+    searchTerms: ["task", "note", "capture", "park", "later"],
+    title: "Capture a task",
+    icon: <LayoutDashboardIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      openWorkItem();
     },
   });
   actionItems.push({

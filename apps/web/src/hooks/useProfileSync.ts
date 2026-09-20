@@ -114,6 +114,16 @@ export function useSyncProfileEdits() {
           return result.value;
         },
         save: async (id, profiles, baseProfiles) => {
+          if (
+            profiles.some((profile) =>
+              profile.spaces?.some((space) => space.newChatDefaultsByDevice !== undefined),
+            ) &&
+            appAtomRegistry.get(profileSourceAtom).config?.environment.capabilities
+              .spaceDeviceDefaults !== true
+          )
+            throw new Error(
+              "Update the shared profile device to sync per-device Space defaults. Your changes are saved locally.",
+            );
           const result = await persist({
             environmentId: id,
             input: { patch: { profiles, profileSyncSourceId: id }, baseProfiles },

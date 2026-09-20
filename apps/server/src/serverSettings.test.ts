@@ -1,3 +1,9 @@
+import {
+  createPendingAttachmentId,
+  resolveAttachmentPathById,
+  parseThreadSegmentFromAttachmentId,
+} from "./attachmentStore.ts";
+import type { WorkItem } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -146,6 +152,14 @@ it.layer(NodeServices.layer)("server settings", (it) => {
                   workspaceRoot: "/work/pod",
                   envMode: "worktree",
                   modelSelection: { instanceId: "claude", model: "claude-sonnet-4-6" },
+                },
+                newChatDefaultsByDevice: {
+                  b: {
+                    projectKey: "b:p",
+                    deviceLabel: "Poly",
+                    workspaceRoot: "/work/poly",
+                    envMode: "local",
+                  },
                 },
                 threads: [
                   { threadKey: "a:t", projectKey: "a:p" },
@@ -1371,3 +1385,63 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 });
+
+const standaloneTask: WorkItem = {
+  id: "task-phone-call",
+  title: "Request from a call",
+  notes: "Original context",
+  brief: "",
+  links: [],
+  status: "parked",
+  profileId: null,
+  spaceId: null,
+  projectId: null,
+  source: null,
+  threadId: null,
+  createdAt: "2026-09-20T00:00:00.000Z",
+  updatedAt: "2026-09-20T00:00:00.000Z",
+};
+it.effect("persists tasks and claims attachments beyond pending upload expiry", () =>
+  Effect.gen(function* () {
+    const settings = yield* ServerSettingsModule.ServerSettingsService;
+    const config = yield* ServerConfig.ServerConfig;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const id = createPendingAttachmentId(".txt");
+    yield* fs.makeDirectory(config.attachmentsDir, { recursive: true });
+    const pending = path.join(config.attachmentsDir, `${id}.txt`);
+    yield* fs.writeFileString(pending, "context");
+    const item = {
+      ...standaloneTask,
+      attachments: [
+        { type: "file" as const, id, name: "request.txt", mimeType: "text/plain", sizeBytes: 7 },
+      ],
+    };
+    const saved = yield* settings.updateSettings({ workItems: [item] }, undefined, undefined, []);
+    const attachment = saved.workItems![0]!.attachments![0]!;
+    assert.notEqual(attachment.id, id);
+    assert.notEqual(parseThreadSegmentFromAttachmentId(attachment.id), `task-${item.id}`);
+    yield* fs.remove(pending);
+    const retained = resolveAttachmentPathById({
+      attachmentsDir: config.attachmentsDir,
+      attachmentId: attachment.id,
+    });
+    assert.isNotNull(retained);
+    assert.equal(yield* fs.readFileString(retained!), "context");
+    const onDisk = yield* fs.readFileString(config.settingsPath);
+    assert.include(onDisk, attachment.id);
+    const base = saved.workItems![0]!;
+    yield* settings.updateSettings(
+      { workItems: [{ ...base, title: "Other device" }] },
+      undefined,
+      undefined,
+      [base],
+    );
+    const conflict = yield* settings
+      .updateSettings({ workItems: [{ ...base, title: "Stale edit" }] }, undefined, undefined, [
+        base,
+      ])
+      .pipe(Effect.result);
+    assert.equal(conflict._tag, "Failure");
+  }).pipe(Effect.provide(makeServerSettingsLayer().pipe(Layer.provideMerge(NodeServices.layer)))),
+);

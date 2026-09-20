@@ -1,3 +1,5 @@
+import { discoverInstructionFiles } from "./workspace/instructionFiles.ts";
+import { ProjectInstructionsError } from "@t3tools/contracts";
 import { getCompactionOutput } from "./provider/compactionOutput.ts";
 import { dispatchAndWaitForMessageEdit } from "./orchestration/awaitMessageEdit.ts";
 import {
@@ -2063,11 +2065,11 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
-        [WS_METHODS.serverUpdateSettings]: ({ patch, baseProfiles, expectedProfileSourceId }) =>
+        [WS_METHODS.serverUpdateSettings]: ({ patch, baseProfiles, expectedProfileSourceId, baseWorkItems }) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateSettings,
             serverSettings
-              .updateSettings(patch, baseProfiles, expectedProfileSourceId)
+              .updateSettings(patch, baseProfiles, expectedProfileSourceId, baseWorkItems)
               .pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
             {
               "rpc.aggregate": "server",
@@ -2378,6 +2380,18 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsInstructions]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsInstructions,
+            Effect.tryPromise({
+              try: () => discoverInstructionFiles(input.cwd),
+              catch: () =>
+                new ProjectInstructionsError({
+                  message: "Could not inspect instruction files in this folder.",
+                }),
+            }),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.projectsReadFile]: (input) =>
