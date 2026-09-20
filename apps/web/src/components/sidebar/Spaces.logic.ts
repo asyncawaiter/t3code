@@ -1,19 +1,7 @@
 import { profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
-import {
-  type Profile,
-  type ProfileSpace,
-  ALL_PROFILE_ID,
-  spaceDeviceDefaults,
-} from "@t3tools/contracts";
+import { type Profile, ALL_PROFILE_ID } from "@t3tools/contracts";
 
-export function spaceProjectKeys(space: ProfileSpace) {
-  return [
-    ...new Set([
-      ...space.threads.map((thread) => thread.projectKey),
-      ...Object.values(spaceDeviceDefaults(space)).map((defaults) => defaults.projectKey),
-    ]),
-  ];
-}
+export { spaceProjectKeys } from "@t3tools/client-runtime/state/profiles";
 
 // Control characters cannot occur in real space IDs.
 export const OUTSIDE_SPACES = "\0outside-spaces";

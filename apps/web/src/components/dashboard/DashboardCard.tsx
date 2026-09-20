@@ -258,7 +258,7 @@ export const DashboardCard = memo(function DashboardCard({
             );
           }}
         >
-          {task ? "Task details" : "Park follow-up"}
+          {task ? "Task details" : "Create task from this chat"}
         </Button>
         {task && <span className="capitalize text-muted-foreground">{task.item.status}</span>}
       </div>

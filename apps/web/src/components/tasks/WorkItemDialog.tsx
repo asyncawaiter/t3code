@@ -5,6 +5,7 @@ import * as Equal from "effect/Equal";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { uploadTaskFile, taskAttachmentUrl } from "./taskAttachments";
+import { taskFolders } from "@t3tools/client-runtime/state/profiles";
 import { randomUUID } from "../../lib/utils";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -46,6 +47,7 @@ import {
   useWorkItems,
   useSaveWorkItem,
   type WorkItemRequest,
+  workItemDraftKey,
 } from "../../workItems";
 import { useEnvironments } from "../../state/environments";
 import { useProjects, useThreadShells } from "../../state/entities";
@@ -84,9 +86,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
   const profiles = usePrimarySettings((settings) => settings.profiles);
   const ui = useUiStateStore();
   const configs = useAtomValue(environmentServerConfigsAtom);
-  const draftKey =
-    request.item?.id ??
-    (request.source ? `${request.source.environmentId}:${request.source.threadId}` : "new");
+  const draftKey = workItemDraftKey(request);
   const [draft, setDraft] = useLocalStorage(`t3.task-draft.${draftKey}`, null, Draft);
   const sourcePlacement = request.source
     ? indexProfileSpaces(profiles).get(`${request.source.environmentId}:${request.source.threadId}`)
@@ -112,7 +112,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
       draft?.task ??
       request.item ?? {
         id: randomUUID(),
-        title: "",
+        title: request.title ?? "",
         notes: request.notes ?? "",
         attachments: request.attachments ?? [],
         brief: "",
@@ -170,8 +170,10 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
   });
   const createWorktree = useAtomCommand(vcsEnvironment.createWorktree, { reportFailure: false });
   const profile = profiles.find((item) => item.id === task.profileId);
-  const folders = projects.filter((project) => project.environmentId === device);
-  const project = folders.find((folder) => folder.id === task.projectId);
+  const folders = taskFolders(projects, device, profile, task.spaceId);
+  const project = (task.threadId ? projects : folders).find(
+    (folder) => folder.environmentId === device && folder.id === task.projectId,
+  );
   const linked = threads.find(
     (thread) =>
       thread.environmentId === device && thread.id === (task.threadId ?? `task-${task.id}`),
@@ -186,6 +188,9 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
     if (!device) throw new Error("Choose a device to store this task.");
     const validated = decodeTask({
       ...next,
+      projectId: next.threadId
+        ? next.projectId
+        : (folders.find((folder) => folder.id === next.projectId)?.id ?? null),
       title: next.title.trim(),
       links: next.links.map((link) => link.trim()).filter(Boolean),
       updatedAt: new Date().toISOString(),
@@ -363,8 +368,15 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
       >
         <DialogHeader className="shrink-0 px-5 pb-4 pt-5">
           <DialogTitle className="font-sans text-base">
-            {base ? "Task details" : "Capture a task"}
+            {base ? "Task details" : task.source ? "Create task from this chat" : "New task"}
           </DialogTitle>
+          {!base && (
+            <p className="text-xs text-muted-foreground">
+              {task.source
+                ? "Saves a separate task with a link to the source chat. Nothing is added to that chat."
+                : "Save work for later. A chat is optional."}
+            </p>
+          )}
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
           <fieldset disabled={busy} className="min-w-0 space-y-4">
@@ -402,7 +414,11 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                   ariaLabel="Task profile"
                   value={task.profileId ?? ""}
                   onChange={(value) =>
-                    change({ profileId: value || null, spaceId: null, projectId: null })
+                    change({
+                      profileId: value || null,
+                      spaceId: null,
+                      projectId: task.threadId ? task.projectId : null,
+                    })
                   }
                   options={[
                     { value: "", label: "Unassigned" },
@@ -414,7 +430,12 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                   ariaLabel="Task space"
                   value={task.spaceId ?? ""}
                   disabled={!profile}
-                  onChange={(value) => change({ spaceId: value || null })}
+                  onChange={(value) =>
+                    change({
+                      spaceId: value || null,
+                      projectId: task.threadId ? task.projectId : null,
+                    })
+                  }
                   options={[
                     { value: "", label: "Unsorted" },
                     ...(profile?.spaces ?? []).map((space) => ({
@@ -444,12 +465,12 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                 <TaskSelect
                   label="Folder"
                   ariaLabel="Task folder"
-                  value={task.projectId ?? ""}
+                  value={project?.id ?? ""}
                   disabled={!!task.threadId}
                   onChange={(value) => change({ projectId: value ? ProjectId.make(value) : null })}
                   options={[
                     { value: "", label: "Choose later" },
-                    ...folders.map((folder) => ({
+                    ...(task.threadId && project ? [project] : folders).map((folder) => ({
                       value: folder.id,
                       label: folder.title,
                       detail: folder.workspaceRoot,
@@ -636,7 +657,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                         : task.preparation.error}
                   </p>
                 )}
-                {task.projectId && (
+                {project && (
                   <TaskSelect
                     label={task.threadId ? "Linked chat" : "Link an existing chat"}
                     ariaLabel={task.threadId ? "Linked chat" : "Link existing chat"}
@@ -663,7 +684,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                     disabled={!task.title.trim() || !project || !connected}
                     onClick={() => void run(openChat)}
                   >
-                    {task.threadId ? "Open chat" : "Save & prepare chat"}
+                    {task.threadId ? "Open chat" : "Save & create new chat"}
                   </Button>
                   <span className="text-[11px] text-muted-foreground">
                     {project

@@ -75,7 +75,7 @@ it.layer(NodeServices.layer)("thread history import", (it) => {
     }),
   );
 
-  it.effect("settles imported messages at the latest absolute timestamp", () =>
+  it.effect("imports messages without settling the chat", () =>
     Effect.gen(function* () {
       const createdAt = "2026-08-24T10:30:00.000+02:00";
       const threadId = ThreadId.make("import:codex:session-1");
@@ -137,15 +137,6 @@ it.layer(NodeServices.layer)("thread history import", (it) => {
           type: "thread.message-sent",
           metadata: { historyImport: true },
           payload: { role: "assistant", text: "Fixed", turnId: null, streaming: false },
-        },
-        {
-          type: "thread.settled",
-          metadata: { historyImport: true },
-          occurredAt: "2026-08-24T09:00:00.000Z",
-          payload: {
-            settledAt: "2026-08-24T09:00:00.000Z",
-            updatedAt: "2026-08-24T09:00:00.000Z",
-          },
         },
       ]);
 

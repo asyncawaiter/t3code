@@ -10,6 +10,9 @@ const WorkflowData = Schema.Struct({
   kept: Schema.Record(Schema.String, Schema.String),
   triageQueue: Schema.Array(Schema.String),
   triageProfileId: Schema.optional(Schema.String),
+  triageSpaceId: Schema.optional(Schema.String),
+  triageUnsorted: Schema.optional(Schema.Boolean),
+  triageScoped: Schema.optional(Schema.Boolean),
   dashboardScroll: Schema.Finite,
 });
 type WorkflowData = typeof WorkflowData.Type;

@@ -26,7 +26,7 @@ describe("OrchestrationReactor", () => {
     runtime = null;
   });
 
-  it("starts every orchestration reactor", async () => {
+  it("starts work reactors without automatic settlement", async () => {
     const started: string[] = [];
 
     runtime = ManagedRuntime.make(
@@ -116,7 +116,6 @@ describe("OrchestrationReactor", () => {
       "checkpoint-reactor",
       "thread-deletion-reactor",
       "thread-pull-request-reactor",
-      "thread-settlement-reactor",
       "agent-awareness-relay",
       "task-preparation-reactor",
     ]);

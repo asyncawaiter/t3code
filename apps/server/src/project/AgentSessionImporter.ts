@@ -91,7 +91,7 @@ function hasImportBlockingActivity(
     thread.linkedPullRequest != null ||
     thread.unsettledAt != null ||
     (importedHistoryPresent
-      ? thread.settledOverride !== "settled"
+      ? thread.settledOverride === "active"
       : thread.settledOverride !== null || thread.settledAt !== null)
   );
 }

@@ -26,6 +26,7 @@ import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
 import { useLiveRefresh } from "../../hooks/useLiveRefresh";
 import { ProjectFavicon } from "../ProjectFavicon";
 import ChatMarkdown from "../ChatMarkdown";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { PullRequestChecksPopover } from "../pullRequest/PullRequestChecksPopover";
 import { pullRequestChecksState } from "../pullRequest/pullRequestPresentation";
@@ -36,10 +37,8 @@ export function SpaceFolder({
   spaceChats,
   allChats,
   projects,
-  initiallyOpen = false,
   onOpenBranches,
 }: {
-  initiallyOpen?: boolean;
   onOpenBranches?: () => void;
   folder: EnvironmentProject;
   spaceChats: ReadonlyArray<EnvironmentThreadShell>;
@@ -49,11 +48,10 @@ export function SpaceFolder({
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, { reportFailure: false });
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(initiallyOpen);
   const device = useEnvironment(folder.environmentId);
   const connected = device?.connection.phase === "connected";
   const instructions = useEnvironmentQuery(
-    connected && expanded
+    connected
       ? projectEnvironment.instructions({
           environmentId: folder.environmentId,
           input: { cwd: folder.workspaceRoot },
@@ -62,11 +60,7 @@ export function SpaceFolder({
   );
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const files = instructions.data?.files ?? [];
-  const selected =
-    files.find((file) => file.path === selectedPath) ??
-    files.find((file) => file.scope === "root" && /[/\\]AGENTS.md$/.test(file.path)) ??
-    files.find((file) => file.scope === "root") ??
-    files[0];
+  const selected = files.find((file) => file.path === selectedPath);
   const checkouts = folderCheckouts(folder, spaceChats, allChats, projects);
 
   return (
@@ -74,59 +68,74 @@ export function SpaceFolder({
       className="overflow-hidden rounded-xl border border-border/70 bg-card/20"
       aria-label={`Folder ${folder.title}`}
     >
-      <header className="flex flex-wrap items-start gap-3 border-b border-border/60 px-4 py-3">
-        <ProjectFavicon project={folder} className="mt-0.5 size-6" />
+      <header className="flex flex-wrap items-center gap-3 border-b border-border/60 px-4 py-3">
+        <ProjectFavicon project={folder} className="size-5 shrink-0" />
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold">{folder.title}</h2>
-          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-            {folder.workspaceRoot}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <h2 className="text-sm font-semibold">{folder.title}</h2>
+          <Tooltip>
+            <TooltipTrigger
+              render={<p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" />}
+            >
+              {folder.workspaceRoot}
+            </TooltipTrigger>
+            <TooltipPopup className="max-w-xl break-all">{folder.workspaceRoot}</TooltipPopup>
+          </Tooltip>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             {device?.label ?? "Device unavailable"} ·{" "}
             {connected ? "Connected" : "Offline, live folder data unavailable"}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {onOpenBranches && (
-            <Button size="sm" variant="ghost" onClick={onOpenBranches}>
-              <GitBranchIcon className="size-3.5" />
-              Branches
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+
+                    aria-label={`Branches in ${folder.title}`}
+                    onClick={onOpenBranches}
+                  />
+                }
+              >
+                <GitBranchIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup>{"Branches"}</TooltipPopup>
+            </Tooltip>
           )}
           {device?.serverConfig?.availableEditors.includes("file-manager") && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!connected || opening}
-              title={`Open on ${device.label}`}
-              onClick={async () => {
-                setOpening(true);
-                setOpenError(null);
-                try {
-                  const result = await openInEditor({
-                    environmentId: folder.environmentId,
-                    input: { cwd: folder.workspaceRoot, editor: "file-manager" },
-                  });
-                  if (result._tag === "Failure")
-                    setOpenError(formatEnvironmentQueryError(result.cause));
-                } finally {
-                  setOpening(false);
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={!connected || opening}
+
+                    aria-label={`Open ${folder.title} in file manager on ${device.label}`}
+                    onClick={async () => {
+                      setOpening(true);
+                      setOpenError(null);
+                      try {
+                        const result = await openInEditor({
+                          environmentId: folder.environmentId,
+                          input: { cwd: folder.workspaceRoot, editor: "file-manager" },
+                        });
+                        if (result._tag === "Failure")
+                          setOpenError(formatEnvironmentQueryError(result.cause));
+                      } finally {
+                        setOpening(false);
+                      }
+                    }}
+                  />
                 }
-              }}
-            >
-              <FolderOpenIcon className="size-3.5" />
-              Open in{" "}
-              {editorLabelForPlatform("file-manager", device.serverConfig.environment.platform.os)}
-            </Button>
+              >
+                <FolderOpenIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup>{`Open in ${editorLabelForPlatform("file-manager", device.serverConfig.environment.platform.os)} on ${device.label}`}</TooltipPopup>
+            </Tooltip>
           )}
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-expanded={expanded}
-            onClick={() => setExpanded(!expanded)}
-          >
-            {expanded ? "Collapse" : "Inspect folder"}
-          </Button>
         </div>
       </header>
       {openError && (
@@ -134,110 +143,118 @@ export function SpaceFolder({
           {openError}
         </p>
       )}
-      {expanded &&
-        (connected ? (
-          <>
-            <div className="space-y-3 border-b border-border/60 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="flex items-center gap-2 text-sm font-medium">
-                  <FileTextIcon className="size-4" />
-                  Instructions
-                </h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={instructions.isPending}
-                  onClick={instructions.refresh}
-                >
-                  <RefreshCwIcon className="size-3.5" />
-                  Scan
-                </Button>
-              </div>
-              {instructions.error && (
-                <p role="alert" className="text-xs text-destructive">
-                  Instruction discovery unavailable: {instructions.error}
-                </p>
-              )}
-              {!instructions.data && !instructions.error && (
-                <p className="text-xs text-muted-foreground">Looking for instruction files…</p>
-              )}
-              {instructions.data && (
-                <>
-                  {files.length ? (
-                    <>
-                      <label className="block text-xs text-muted-foreground">
-                        Instruction source
-                        <select
-                          aria-label={`Instruction source in ${folder.title}`}
-                          value={selected?.path}
-                          onChange={(event) => setSelectedPath(event.target.value)}
-                          className="mt-1 block w-full rounded-md border border-input bg-background p-2 text-xs text-foreground"
+      {connected ? (
+        <>
+          <div className="space-y-3 border-b border-border/60 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="flex items-center gap-2 text-sm font-medium">
+                <FileTextIcon className="size-4" /> Instructions
+                <span className="text-xs font-normal text-muted-foreground">
+                  {instructions.data ? `${files.length} files` : ""}
+                </span>
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={instructions.isPending}
+                onClick={instructions.refresh}
+              >
+                <RefreshCwIcon className="size-3.5" />
+                Scan
+              </Button>
+            </div>
+            {instructions.error && (
+              <p role="alert" className="text-xs text-destructive">
+                Instruction discovery unavailable: {instructions.error}
+              </p>
+            )}
+            {!instructions.data && !instructions.error && (
+              <p className="text-xs text-muted-foreground">Looking for instruction files…</p>
+            )}
+            {instructions.data && (
+              <>
+                {files.length ? (
+                  <>
+                    <div aria-label={`Instruction files in ${folder.title}`} className="space-y-1">
+                      {files.map((file) => (
+                        <button
+                          key={file.path}
+                          onClick={() =>
+                            setSelectedPath(selectedPath === file.path ? null : file.path)
+                          }
+                          aria-expanded={selectedPath === file.path}
+                          className={`flex w-full items-start gap-3 rounded-md px-3 py-2 text-left hover:bg-accent/40 ${selectedPath === file.path ? "bg-accent/40" : ""}`}
                         >
-                          {files.map((file) => (
-                            <option key={file.path} value={file.path}>
-                              {file.scope === "parent"
-                                ? "Parent"
-                                : file.scope === "root"
-                                  ? "Folder root"
-                                  : "Subfolder"}{" "}
-                              · {file.path}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {selected && (
-                        <InstructionFile
-                          key={selected.path}
-                          environmentId={folder.environmentId}
-                          cwd={folder.workspaceRoot}
-                          path={selected.path}
-                          scope={selected.scope}
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      No AGENTS.md or other supported instruction files found.
-                    </p>
-                  )}
-                  <details className="text-xs text-muted-foreground">
-                    <summary className="cursor-pointer">
-                      Scan coverage
-                      {instructions.data.truncated || instructions.data.warnings.length
-                        ? " (incomplete)"
-                        : ""}
-                    </summary>
-                    <p className="mt-2">
-                      AGENTS.md, AGENTS.override.md, CLAUDE.md, GEMINI.md, .cursorrules, and
-                      .cursor/rules or .claude/rules Markdown files. Directory symlinks are not
-                      followed. Excluded directories:{" "}
-                      {instructions.data.excludedDirectories.length
-                        ? instructions.data.excludedDirectories.join(", ")
-                        : "Device file-index exclusions"}
-                      .
-                    </p>
-                    {instructions.data.truncated && (
-                      <p>Scan limit reached. More files may exist.</p>
+                          <FileTextIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-medium">
+                              {file.path.split(/[/\\]/).at(-1)}
+                            </span>
+                            <span className="block break-all font-mono text-[10px] text-muted-foreground">
+                              {file.path}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {file.scope === "parent"
+                              ? "Parent"
+                              : file.scope === "root"
+                                ? "Folder"
+                                : "Subfolder"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    {selected && (
+                      <InstructionFile
+                        key={selected.path}
+                        environmentId={folder.environmentId}
+                        cwd={folder.workspaceRoot}
+                        path={selected.path}
+                        scope={selected.scope}
+                      />
                     )}
-                    {instructions.data.warnings.map((warning) => (
-                      <p key={warning}>{warning}</p>
-                    ))}
-                  </details>
-                </>
-              )}
-            </div>
-            <div className="space-y-4 p-5">
-              <h3 className="text-sm font-medium">Checkouts and unfinished work</h3>
-              {checkouts.map((checkout) => (
-                <Checkout key={checkout.path} environmentId={folder.environmentId} {...checkout} />
-              ))}
-            </div>
-          </>
-        ) : (
-          <p className="p-5 text-sm text-muted-foreground">
-            Reconnect this device to read its instructions, agent activity, and Git state.
-          </p>
-        ))}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No AGENTS.md or other supported instruction files found.
+                  </p>
+                )}
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer">
+                    Scan coverage
+                    {instructions.data.truncated || instructions.data.warnings.length
+                      ? " (incomplete)"
+                      : ""}
+                  </summary>
+                  <p className="mt-2">
+                    AGENTS.md, AGENTS.override.md, CLAUDE.md, GEMINI.md, .cursorrules, and
+                    .cursor/rules or .claude/rules Markdown files. Directory symlinks are not
+                    followed. Excluded directories:{" "}
+                    {instructions.data.excludedDirectories.length
+                      ? instructions.data.excludedDirectories.join(", ")
+                      : "Device file-index exclusions"}
+                    .
+                  </p>
+                  {instructions.data.truncated && <p>Scan limit reached. More files may exist.</p>}
+                  {instructions.data.warnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                </details>
+              </>
+            )}
+          </div>
+          <div className="space-y-4 p-5">
+            <h3 className="text-sm font-medium">Checkouts and unfinished work</h3>
+            {checkouts.map((checkout) => (
+              <Checkout key={checkout.path} environmentId={folder.environmentId} {...checkout} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="p-5 text-sm text-muted-foreground">
+          Reconnect this device to read its instructions, agent activity, and Git state.
+        </p>
+      )}
     </section>
   );
 }
@@ -314,7 +331,7 @@ function InstructionFile({
   );
 }
 
-function Checkout({
+export function Checkout({
   environmentId,
   path,
   isWorktree,
@@ -351,6 +368,7 @@ function Checkout({
       ),
     ).values(),
   ];
+
   return (
     <div className="space-y-3 rounded-lg border border-border/60 p-4">
       <div className="flex items-center justify-between gap-2">

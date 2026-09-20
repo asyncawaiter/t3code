@@ -1,4 +1,3 @@
-import { useUiStateStore } from "../../uiStateStore";
 import { useNavigate } from "@tanstack/react-router";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { buildReviewDashboard, flattenBoardEntries } from "./DashboardPage.logic";
@@ -58,14 +57,16 @@ export function DashboardReviewBar({
           size="micro"
           variant="ghost-muted"
           onClick={() => {
-            void navigate({ to: "/dashboard" }).then(() => {
-              if (workflow.triageProfileId)
-                useUiStateStore
-                  .getState()
-                  .setActiveProfileId(
-                    workflow.triageProfileId === "all" ? null : workflow.triageProfileId,
-                  );
-            });
+            void (workflow.triageScoped
+              ? navigate({
+                  to: "/spaces/$profileId",
+                  params: { profileId: workflow.triageProfileId ?? "all" },
+                  search: {
+                    space: workflow.triageSpaceId,
+                    unsorted: workflow.triageUnsorted ?? false,
+                  },
+                })
+              : navigate({ to: "/dashboard" }));
           }}
         >
           Back to dashboard

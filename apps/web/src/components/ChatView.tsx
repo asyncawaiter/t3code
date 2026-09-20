@@ -226,6 +226,7 @@ import {
   Minimize2Icon,
   PaperclipIcon,
   WifiOffIcon,
+  ListPlusIcon,
 } from "lucide-react";
 import { cn, randomHex } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -8308,6 +8309,7 @@ export default function ChatView(props: ChatViewProps) {
         {/* Top bar */}
         <WorkspacePageHeader
           data-chat-header
+          workspaceViews={reserveTitleBarControlInset}
           electron={isElectron}
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
           className="relative bg-background"
@@ -8319,57 +8321,75 @@ export default function ChatView(props: ChatViewProps) {
             />
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
-          <button
-            type="button"
-            aria-label="Park a task from this chat"
-            className="shrink-0 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
-            onClick={async () => {
-              try {
-                const selected = window.getSelection()?.toString();
-                const draft = useComposerDraftStore
-                  .getState()
-                  .getComposerDraft({ environmentId, threadId });
-                const attachments: import("@t3tools/contracts").ChatAttachment[] = [];
-                if (!selected && draft)
-                  for (const attachment of [...draft.images, ...draft.files]) {
-                    let file = attachment.file;
-                    if (
-                      !file &&
-                      "uploadedAttachmentId" in attachment &&
-                      attachment.uploadedAttachmentId
-                    ) {
-                      const url = await taskAttachmentUrl(environmentId, {
-                        ...attachment,
-                        id: attachment.uploadedAttachmentId,
-                      });
-                      const response = await fetch(url);
-                      if (!response.ok)
-                        throw new Error(`Could not copy ${attachment.name}. Reattach it first.`);
-                      file = new File([await response.blob()], attachment.name, {
-                        type: attachment.mimeType,
-                      });
-                    }
-                    if (!file)
-                      throw new Error(`Reattach ${attachment.name} before capturing this task.`);
-                    attachments.push(await uploadTaskFile(environmentId, file));
-                  }
-                openWorkItem({
-                  environmentId,
-                  projectId: activeThread.projectId,
-                  source: { environmentId, threadId, messageId: activeThread.messages.at(-1)?.id },
-                  notes: selected || draft?.prompt || "",
-                  attachments,
-                });
-              } catch (cause) {
-                toastManager.add({
-                  type: "error",
-                  title: cause instanceof Error ? cause.message : "Could not capture the task.",
-                });
-              }
-            }}
-          >
-            + Task
-          </button>
+          {reserveTitleBarControlInset && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Create task from this chat"
+                    className="shrink-0 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                    onClick={async () => {
+                      try {
+                        const selected = window.getSelection()?.toString();
+                        const draft = useComposerDraftStore
+                          .getState()
+                          .getComposerDraft({ environmentId, threadId });
+                        const attachments: import("@t3tools/contracts").ChatAttachment[] = [];
+                        if (!selected && draft)
+                          for (const attachment of [...draft.images, ...draft.files]) {
+                            let file = attachment.file;
+                            if (
+                              !file &&
+                              "uploadedAttachmentId" in attachment &&
+                              attachment.uploadedAttachmentId
+                            ) {
+                              const url = await taskAttachmentUrl(environmentId, {
+                                ...attachment,
+                                id: attachment.uploadedAttachmentId,
+                              });
+                              const response = await fetch(url);
+                              if (!response.ok)
+                                throw new Error(
+                                  `Could not copy ${attachment.name}. Reattach it first.`,
+                                );
+                              file = new File([await response.blob()], attachment.name, {
+                                type: attachment.mimeType,
+                              });
+                            }
+                            if (!file)
+                              throw new Error(
+                                `Reattach ${attachment.name} before capturing this task.`,
+                              );
+                            attachments.push(await uploadTaskFile(environmentId, file));
+                          }
+                        openWorkItem({
+                          environmentId,
+                          projectId: activeThread.projectId,
+                          source: {
+                            environmentId,
+                            threadId,
+                            messageId: activeThread.messages.at(-1)?.id,
+                          },
+                          notes: selected || draft?.prompt || "",
+                          attachments,
+                        });
+                      } catch (cause) {
+                        toastManager.add({
+                          type: "error",
+                          title:
+                            cause instanceof Error ? cause.message : "Could not capture the task.",
+                        });
+                      }
+                    }}
+                  />
+                }
+              >
+                <ListPlusIcon className="size-4" />
+              </TooltipTrigger>
+              <TooltipPopup>Create task from this chat</TooltipPopup>
+            </Tooltip>
+          )}
           <ChatHeader
             {...(!supportsPullRequests || activeProjectRepository === null
               ? {}
@@ -8400,7 +8420,9 @@ export default function ChatView(props: ChatViewProps) {
           />
         </WorkspacePageHeader>
 
-        {serverThread ? <DashboardReviewBar thread={serverThread} /> : null}
+        {serverThread && reserveTitleBarControlInset ? (
+          <DashboardReviewBar thread={serverThread} />
+        ) : null}
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}

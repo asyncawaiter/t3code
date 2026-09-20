@@ -15,7 +15,7 @@ import {
 import { toastManager } from "../ui/toast";
 import { DashboardHistoryRow } from "./DashboardHistoryRow";
 import * as Schema from "effect/Schema";
-import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { useLocalStorage, setLocalStorageItem } from "../../hooks/useLocalStorage";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "../ui/button";
 import { useAtomValue } from "@effect/atom-react";
@@ -51,7 +51,10 @@ import { cn } from "~/lib/utils";
 import { isElectron } from "../../env";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
-import { useUiStateStore } from "../../uiStateStore";
+import { selectSidebarSpace, useUiStateStore } from "../../uiStateStore";
+import { WorkspaceViews } from "../spaces/WorkspaceViews";
+import { OUTSIDE_SPACES, spaceProjectKeys } from "../sidebar/Spaces.logic";
+import { openChatCreation } from "../../chatCreationStore";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import {
   filterDashboardGit,
@@ -93,7 +96,20 @@ function useNow(): string {
   return now;
 }
 
-export function DashboardPage() {
+export function DashboardPage({
+  scope,
+}: {
+  scope?: { profileId: string; spaceId?: string | undefined; unsorted: boolean };
+}) {
+  const storageScope = scope
+    ? `t3.dashboard.${scope.profileId}:${scope.spaceId ?? scope.unsorted}`
+    : "t3.dashboard.global";
+  const globalProfileId = useUiStateStore((state) => state.activeProfileId);
+  const setGlobalProfileId = useUiStateStore((state) => state.setActiveProfileId);
+  useEffect(() => {
+    if (!scope) setGlobalProfileId(null);
+  }, [scope, setGlobalProfileId]);
+  const [globalSpace, setGlobalSpace] = useState("all");
   const navigate = useNavigate();
   const workItems = useWorkItems();
   const now = useNow();
@@ -109,7 +125,7 @@ export function DashboardPage() {
   const liveShells = useThreadShells();
   const { unsnoozeThread, unsettleThread, unarchiveThread } = useThreadActions();
   const [visibility, setVisibility] = useLocalStorage(
-    "t3.dashboard.visibility",
+    `${storageScope}.visibility`,
     "active",
     DashboardVisibilitySchema,
   );
@@ -136,13 +152,35 @@ export function DashboardPage() {
 
   const rawProfiles = usePrimarySettings((s) => s.profiles);
   const resolvedProfiles = useMemo(() => resolveProfiles(rawProfiles), [rawProfiles]);
-  const activeProfileId = useUiStateStore((store) => store.activeProfileId);
-  const setActiveProfileId = useUiStateStore((store) => store.setActiveProfileId);
+  const activeProfileId = scope?.profileId ?? globalProfileId;
+  function setScope(profileId: string | null, spaceKey: string) {
+    const owner = rawProfiles.find((profile) =>
+      profile.spaces?.some((space) => `${profile.id}:${space.id}` === spaceKey),
+    );
+    if (!scope) {
+      setGlobalProfileId(owner?.id ?? profileId);
+      setGlobalSpace(spaceKey);
+      return;
+    }
+    const space = owner?.spaces?.find((space) => `${owner.id}:${space.id}` === spaceKey);
+    void navigate({
+      to: "/spaces/$profileId",
+      params: { profileId: owner?.id ?? profileId ?? ALL_PROFILE_ID },
+      search: { space: space?.id, unsorted: spaceKey === "root" },
+    });
+  }
+  const setSpaceFilter = (space: string) => setScope(activeProfileId, space);
   const activeProfile = useMemo(
     () => findProfile(resolvedProfiles, activeProfileId) ?? ALL_PROFILE,
     [resolvedProfiles, activeProfileId],
   );
-  const [spaceFilter, setSpaceFilter] = useLocalStorage("t3.dashboard.space", "all", Schema.String);
+  const spaceFilter = scope
+    ? scope.unsorted
+      ? "root"
+      : scope.spaceId
+        ? `${scope.profileId}:${scope.spaceId}`
+        : "all"
+    : globalSpace;
   const spaceOptions = (
     activeProfile.id === ALL_PROFILE_ID ? rawProfiles : [activeProfile]
   ).flatMap((profile) =>
@@ -155,6 +193,26 @@ export function DashboardPage() {
     spaceFilter === "root" || spaceOptions.some((space) => space.key === spaceFilter)
       ? spaceFilter
       : "all";
+  const selectedSpaceOwner = rawProfiles.find((owner) =>
+    owner.spaces?.some((space) => `${owner.id}:${space.id}` === effectiveSpaceFilter),
+  );
+  const selectedSpace = selectedSpaceOwner?.spaces?.find(
+    (space) => `${selectedSpaceOwner.id}:${space.id}` === effectiveSpaceFilter,
+  );
+  useEffect(() => {
+    const profileId = selectedSpaceOwner?.id ?? activeProfile.id;
+    if (scope)
+      useUiStateStore
+        .getState()
+        .setActiveProfileId(profileId === ALL_PROFILE_ID ? null : profileId);
+    useUiStateStore.setState((state) =>
+      selectSidebarSpace(
+        state,
+        profileId,
+        selectedSpace?.id ?? (effectiveSpaceFilter === "root" ? OUTSIDE_SPACES : null),
+      ),
+    );
+  }, [scope, activeProfile.id, selectedSpaceOwner?.id, selectedSpace?.id, effectiveSpaceFilter]);
   const spaceIndex = useMemo(() => indexProfileSpaces(rawProfiles), [rawProfiles]);
   const shellSpace = useCallback(
     (shell: { id: string; projectId: string; environmentId: string }) => {
@@ -253,29 +311,38 @@ export function DashboardPage() {
     [allShells, visibleProjectKeys, effectiveSpaceFilter, spaceIndex],
   );
 
-  const [search, setSearch] = useLocalStorage("t3.dashboard.search", "", Schema.String);
+  const [search, setSearch] = useLocalStorage(`${storageScope}.search`, "", Schema.String);
   const [projectFilter, setProjectFilter] = useLocalStorage(
-    "t3.dashboard.projectFilter",
+    `${storageScope}.projectFilter`,
     "all",
     Schema.String,
   );
   const [showRecent, setShowRecent] = useLocalStorage(
-    "t3.dashboard.showRecent",
+    `${storageScope}.showRecent`,
     false,
     Schema.Boolean,
   );
   const [environmentFilter, setEnvironmentFilter] = useLocalStorage(
-    "t3.dashboard.device",
+    `${storageScope}.device`,
     null,
     DashboardDeviceSchema,
   );
   const [providerFilter, setProviderFilter] = useLocalStorage(
-    "t3.dashboard.providerFilter",
+    `${storageScope}.providerFilter`,
     "all",
     Schema.String,
   );
+  const scopeProjects = useMemo(() => {
+    if (effectiveSpaceFilter === "all") return visibleProjects;
+    const keys = new Set(
+      selectedSpace
+        ? spaceProjectKeys(selectedSpace)
+        : scopedShells.map((shell) => `${shell.environmentId}:${shell.projectId}`),
+    );
+    return visibleProjects.filter((project) => keys.has(`${project.environmentId}:${project.id}`));
+  }, [effectiveSpaceFilter, visibleProjects, selectedSpace, scopedShells]);
   const profileEnvironments = environments.filter((environment) =>
-    visibleProjects.some((project) => project.environmentId === environment.environmentId),
+    scopeProjects.some((project) => project.environmentId === environment.environmentId),
   );
   const effectiveEnvironmentFilter = profileEnvironments.some(
     (environment) => environment.environmentId === environmentFilter,
@@ -293,14 +360,7 @@ export function DashboardPage() {
   } = useMemo(
     () =>
       deriveDashboardScope(
-        effectiveSpaceFilter === "all"
-          ? visibleProjects
-          : visibleProjects.filter((project) =>
-              scopedShells.some(
-                (shell) =>
-                  shell.environmentId === project.environmentId && shell.projectId === project.id,
-              ),
-            ),
+        scopeProjects,
         scopedShells,
         providers,
         effectiveEnvironmentFilter,
@@ -309,9 +369,8 @@ export function DashboardPage() {
         search,
       ),
     [
-      visibleProjects,
+      scopeProjects,
       scopedShells,
-      effectiveSpaceFilter,
       providers,
       effectiveEnvironmentFilter,
       providerFilter,
@@ -320,8 +379,12 @@ export function DashboardPage() {
     ],
   );
   const selectedProvider = providerOptions.find(([key]) => key === effectiveProviderFilter)?.[1];
-  const [branchFilter, setBranchFilter] = useLocalStorage("t3.dashboard.branch", "", Schema.String);
-  const [prFilter, setPrFilter] = useLocalStorage("t3.dashboard.pr", "all", DashboardPrSchema);
+  const [branchFilter, setBranchFilter] = useLocalStorage(
+    `${storageScope}.branch`,
+    "",
+    Schema.String,
+  );
+  const [prFilter, setPrFilter] = useLocalStorage(`${storageScope}.pr`, "all", DashboardPrSchema);
   const gitShells = useMemo(
     () => filterDashboardGit(matchingShells, branchFilter, prFilter),
     [matchingShells, branchFilter, prFilter],
@@ -341,7 +404,7 @@ export function DashboardPage() {
   );
 
   const [groupBy, setGroupBy] = useLocalStorage(
-    "t3.dashboard.group",
+    `${storageScope}.group`,
     "state",
     DashboardGroupSchema,
   );
@@ -461,8 +524,22 @@ export function DashboardPage() {
       });
       return;
     }
-    setActiveProfileId(profile.id === ALL_PROFILE_ID ? null : profile.id);
-    setSpaceFilter(view.space);
+    if (scope) {
+      const targetSpace = rawProfiles
+        .flatMap((owner) => (owner.spaces ?? []).map((space) => ({ owner, space })))
+        .find(({ owner, space }) => `${owner.id}:${space.id}` === view.space);
+      const key = `t3.dashboard.${targetSpace?.owner.id ?? profile.id}:${targetSpace?.space.id ?? view.space === "root"}`;
+      setLocalStorageItem(`${key}.projectFilter`, view.project, Schema.String);
+      setLocalStorageItem(`${key}.device`, device ?? null, DashboardDeviceSchema);
+      setLocalStorageItem(`${key}.providerFilter`, view.provider, Schema.String);
+      setLocalStorageItem(`${key}.search`, view.search, Schema.String);
+      setLocalStorageItem(`${key}.branch`, view.branch, Schema.String);
+      setLocalStorageItem(`${key}.pr`, view.pr, DashboardPrSchema);
+      setLocalStorageItem(`${key}.visibility`, view.visibility, DashboardVisibilitySchema);
+      setLocalStorageItem(`${key}.group`, view.group, DashboardGroupSchema);
+      setLocalStorageItem(`${key}.showRecent`, view.recent, Schema.Boolean);
+    }
+    setScope(profile.id === ALL_PROFILE_ID ? null : profile.id, view.space);
     setProjectFilter(view.project);
     setEnvironmentFilter(device ?? null);
     setProviderFilter(view.provider);
@@ -528,6 +605,9 @@ export function DashboardPage() {
         onOpen={() =>
           useWorkflowState.setState({
             triageProfileId: activeProfile.id,
+            triageSpaceId: scope?.spaceId,
+            triageUnsorted: scope?.unsorted,
+            triageScoped: !!scope,
             triageQueue: allEntries
               .filter((item) => item.lane === "needs-you" || item.lane === "done")
               .map((item) => threadVisitedKey(item.shell)),
@@ -570,26 +650,40 @@ export function DashboardPage() {
         >
           <WorkspaceBreadcrumb ariaLabel="Dashboard">
             <WorkspaceBreadcrumbItem current>
-              <h1 className="truncate text-base font-semibold">Dashboard</h1>
+              <h1 className="truncate text-base font-semibold">
+                {scope
+                  ? (spaceOptions.find((space) => space.key === effectiveSpaceFilter)?.name ??
+                    (scope.unsorted ? "Unsorted" : activeProfile.name))
+                  : "Dashboard"}
+              </h1>
             </WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
           <div className="no-drag ml-auto flex min-w-0 flex-wrap items-center gap-2">
             <Button
               size="xs"
-              variant="ghost"
+              variant="outline"
               onClick={() =>
-                void navigate({
-                  to: "/spaces/$profileId",
-                  params: { profileId: activeProfile.id },
-                  search: { space: undefined, unsorted: false, view: "monitor" },
+                openWorkItem({
+                  profileId:
+                    selectedSpaceOwner?.id ??
+                    (activeProfile.id === ALL_PROFILE_ID ? null : activeProfile.id),
+                  spaceId: selectedSpace?.id ?? null,
+                  ...(effectiveEnvironmentFilter
+                    ? { environmentId: effectiveEnvironmentFilter }
+                    : {}),
+                  ...(projectByKey.get(effectiveProjectFilter)
+                    ? { projectId: projectByKey.get(effectiveProjectFilter)!.id }
+                    : {}),
                 })
               }
             >
-              Monitor Spaces
+              New task
             </Button>
-            <Button size="xs" variant="outline" onClick={() => openWorkItem()}>
-              Capture task
-            </Button>
+            {scope && (
+              <Button size="xs" onClick={() => openChatCreation()}>
+                New chat
+              </Button>
+            )}
             <Input
               size="compact"
               type="search"
@@ -623,6 +717,13 @@ export function DashboardPage() {
             </Button>
           </div>
         </WorkspacePageHeader>
+        <WorkspaceViews
+          scope={{
+            profileId: selectedSpaceOwner?.id ?? activeProfile.id,
+            spaceId: selectedSpace?.id,
+            unsorted: effectiveSpaceFilter === "root",
+          }}
+        />
         <div
           className="shrink-0 space-y-3 border-b border-border/60 px-4 pb-3 pt-1"
           aria-label="Dashboard controls"
@@ -637,8 +738,7 @@ export function DashboardPage() {
                     value={activeProfile.id}
                     onValueChange={(value) => {
                       if (value !== null) {
-                        setActiveProfileId(value);
-                        setSpaceFilter("all");
+                        setScope(value, "all");
                         setEnvironmentFilter(null);
                         setProviderFilter("all");
                         setProjectFilter("all");

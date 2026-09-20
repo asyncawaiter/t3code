@@ -10,12 +10,21 @@ import { appAtomRegistry } from "./rpc/atomRegistry";
 export type LocatedWorkItem = { environmentId: EnvironmentId; item: WorkItem };
 export type WorkItemRequest = Partial<LocatedWorkItem> & {
   source?: WorkItem["source"];
+  title?: string;
   notes?: string;
   attachments?: WorkItem["attachments"];
   profileId?: string | null;
   spaceId?: string | null;
   projectId?: WorkItem["projectId"];
 };
+export function workItemDraftKey(request: WorkItemRequest) {
+  if (request.item) return request.item.id;
+  if (request.source) return `${request.source.environmentId}:${request.source.threadId}`;
+  return request.profileId !== undefined
+    ? JSON.stringify(["space", request.profileId, request.spaceId ?? null])
+    : "new";
+}
+
 export const useWorkItemEditor = create<{ request: WorkItemRequest | null }>(() => ({
   request: null,
 }));

@@ -45,7 +45,9 @@ export function TaskShelf({
     >
       <span className="line-clamp-2 text-sm font-medium">{task.item.title}</span>
       <span className="line-clamp-2 text-xs text-muted-foreground">
-        {task.item.brief || task.item.notes || "Add context when you have it."}
+        {task.item.preparation?.state === "failed"
+          ? "Brief preparation failed. Open to retry."
+          : task.item.brief || task.item.notes || "Add context when you have it."}
       </span>
       <span className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
         <span className="capitalize">
@@ -70,7 +72,7 @@ export function TaskShelf({
       </div>
       {!eligible.some(({ item }) => item.status !== "done") && (
         <p className="text-xs text-muted-foreground">
-          Capture work from a conversation, a call, or a thought. A chat can come later.
+          Use New task to save work from a message, a call, or a thought.
         </p>
       )}
       {eligible.some(({ item }) => item.status === "done") && (

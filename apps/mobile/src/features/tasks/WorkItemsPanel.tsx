@@ -1,4 +1,4 @@
-import { OUTSIDE_SPACES } from "@t3tools/client-runtime/state/profiles";
+import { OUTSIDE_SPACES, taskFolders } from "@t3tools/client-runtime/state/profiles";
 import * as Equal from "effect/Equal";
 import { useEffect, useState } from "react";
 import {
@@ -187,6 +187,9 @@ export function WorkItemsPanel({
       throw new Error("Update this device to support saved tasks.");
     const next = decodeTask({
       ...item,
+      projectId: item.threadId
+        ? item.projectId
+        : (folders.find((folder) => folder.id === item.projectId)?.id ?? null),
       title: item.title.trim(),
       links: item.links.map((link) => link.trim()).filter(Boolean),
       updatedAt: new Date().toISOString(),
@@ -394,6 +397,7 @@ export function WorkItemsPanel({
   }
   const item = draft?.item;
   const profile = profiles.find((owner) => owner.id === item?.profileId);
+  const folders = taskFolders(projects, draft?.device ?? null, profile, item?.spaceId ?? null);
   const button = (title: string, action: () => void, disabled = false) => (
     <Pressable
       accessibilityRole="button"
@@ -477,10 +481,23 @@ export function WorkItemsPanel({
               />
               {button(`Profile: ${profile?.name ?? "Unassigned"}`, () =>
                 chooseAction("Profile", [
-                  { title: "Unassigned", action: () => change({ profileId: null, spaceId: null }) },
+                  {
+                    title: "Unassigned",
+                    action: () =>
+                      change({
+                        profileId: null,
+                        spaceId: null,
+                        projectId: item.threadId ? item.projectId : null,
+                      }),
+                  },
                   ...profiles.map((owner) => ({
                     title: owner.name,
-                    action: () => change({ profileId: owner.id, spaceId: null }),
+                    action: () =>
+                      change({
+                        profileId: owner.id,
+                        spaceId: null,
+                        projectId: item.threadId ? item.projectId : null,
+                      }),
                   })),
                 ]),
               )}
@@ -488,10 +505,18 @@ export function WorkItemsPanel({
                 `Space: ${profile?.spaces?.find((space) => space.id === item.spaceId)?.name ?? "Unsorted"}`,
                 () =>
                   chooseAction("Space", [
-                    { title: "Unsorted", action: () => change({ spaceId: null }) },
+                    {
+                      title: "Unsorted",
+                      action: () =>
+                        change({ spaceId: null, projectId: item.threadId ? item.projectId : null }),
+                    },
                     ...(profile?.spaces ?? []).map((space) => ({
                       title: space.name,
-                      action: () => change({ spaceId: space.id }),
+                      action: () =>
+                        change({
+                          spaceId: space.id,
+                          projectId: item.threadId ? item.projectId : null,
+                        }),
                     })),
                   ]),
               )}
@@ -517,17 +542,15 @@ export function WorkItemsPanel({
                 !!draft?.base,
               )}
               {button(
-                `Folder: ${projects.find((folder) => folder.id === item.projectId && folder.environmentId === draft?.device)?.title ?? "Choose later"}`,
+                `Folder: ${(item.threadId ? projects : folders).find((folder) => folder.environmentId === draft?.device && folder.id === item.projectId)?.title ?? "Choose later"}`,
                 () =>
-                  chooseAction(
-                    "Folder",
-                    projects
-                      .filter((folder) => folder.environmentId === draft?.device)
-                      .map((folder) => ({
-                        title: `${folder.title} · ${folder.workspaceRoot}`,
-                        action: () => change({ projectId: folder.id }),
-                      })),
-                  ),
+                  chooseAction("Folder", [
+                    { title: "Choose later", action: () => change({ projectId: null }) },
+                    ...folders.map((folder) => ({
+                      title: `${folder.title} · ${folder.workspaceRoot}`,
+                      action: () => change({ projectId: folder.id }),
+                    })),
+                  ]),
                 !!item.threadId,
               )}
               <TextInput

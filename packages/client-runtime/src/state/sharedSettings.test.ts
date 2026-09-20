@@ -24,6 +24,12 @@ describe("supportsSharedSettingsSync", () => {
     expect(
       supportsSharedSettingsSync({
         connection: { phase: "connected" },
+        serverConfig: { environment: { capabilities: { threadAutoSettlement: false } } },
+      }),
+    ).toBe(true);
+    expect(
+      supportsSharedSettingsSync({
+        connection: { phase: "connected" },
         serverConfig: { environment: { capabilities: { threadAutoSettlement: true } } },
       }),
     ).toBe(true);

@@ -98,7 +98,8 @@ export function pickSharedServerSettings(
 
 /**
  * Whether an environment can participate in shared-settings sync right now.
- * Auto-settlement establishes baseline support; newer preferences are filtered separately.
+ * Presence of the settlement capability identifies the protocol generation, even
+ * when a fork disables settlement. Newer preferences are filtered separately.
  */
 export function supportsSharedSettingsSync(environment: {
   readonly connection: { readonly phase: EnvironmentConnectionPhase };
@@ -110,7 +111,7 @@ export function supportsSharedSettingsSync(environment: {
 }): boolean {
   return (
     environment.connection.phase === "connected" &&
-    environment.serverConfig?.environment.capabilities.threadAutoSettlement === true
+    environment.serverConfig?.environment.capabilities.threadAutoSettlement !== undefined
   );
 }
 

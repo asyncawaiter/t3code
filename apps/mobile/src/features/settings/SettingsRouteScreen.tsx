@@ -572,7 +572,11 @@ function AutoSettleSettingsRows() {
 
   const [daysDraft, setDaysDraft] = useState<string | null>(null);
 
-  if (reference === null || referenceSettings === null) {
+  if (
+    reference === null ||
+    referenceSettings === null ||
+    reference.serverConfig?.environment.capabilities.threadAutoSettlement !== true
+  ) {
     return null;
   }
 

@@ -1,5 +1,7 @@
 import {
   ALL_PROFILE_ID,
+  type ProfileSpace,
+  spaceDeviceDefaults,
   indexProfilePins,
   indexProfileSpaces,
   profileForProject,
@@ -327,5 +329,33 @@ export function inheritForkPlacement(
           space.id,
         )
       : profile,
+  );
+}
+
+export function spaceProjectKeys(space: ProfileSpace) {
+  return [
+    ...new Set([
+      ...space.threads.map((thread) => thread.projectKey),
+      ...Object.values(spaceDeviceDefaults(space)).map((defaults) => defaults.projectKey),
+    ]),
+  ];
+}
+
+export function taskFolders<T extends { environmentId: string; id: string }>(
+  projects: readonly T[],
+  device: string | null,
+  profile: Profile | undefined,
+  spaceId: string | null,
+): T[] {
+  const space = profile?.spaces?.find((item) => item.id === spaceId);
+  const keys = spaceId
+    ? new Set(space ? spaceProjectKeys(space) : [])
+    : profile
+      ? new Set(profile.projectKeys)
+      : null;
+  return projects.filter(
+    (project) =>
+      project.environmentId === device &&
+      (keys === null || keys.has(`${project.environmentId}:${project.id}`)),
   );
 }

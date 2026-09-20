@@ -5,14 +5,35 @@ import {
   ArrowRightIcon,
   Maximize2Icon,
   Minimize2Icon,
-  PinIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
   XIcon,
+  SearchIcon,
+  LayersIcon,
+  FolderIcon,
+  LaptopIcon,
+  Columns3Icon,
 } from "lucide-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useEnvironments } from "../../state/environments";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { ChatPaneContext } from "../chat/ChatPaneContext";
+import { useProjects } from "../../state/entities";
+import { usePrimarySettings } from "../../hooks/useSettings";
+import { indexProfileSpaces } from "@t3tools/contracts";
+import { Popover, PopoverTrigger, PopoverPopup, PopoverTitle, PopoverClose } from "../ui/popover";
+import { Input } from "../ui/input";
+import {
+  Menu,
+  MenuTrigger,
+  MenuPopup,
+  MenuItem,
+  MenuCheckboxItem,
+  MenuSeparator,
+} from "../ui/menu";
+import { Checkbox } from "../ui/checkbox";
 import { openWorkItem } from "../../workItems";
 
 const ChatView = lazy(() => import("../ChatView"));
@@ -22,8 +43,30 @@ const Layout = Schema.Struct({
   kept: Schema.Array(Schema.String),
 });
 const EMPTY_LAYOUT = { order: [], kept: [], hidden: [] };
+export const columnWidth = (width: number) =>
+  Math.max(340, Math.min(1000, Number.isFinite(width) ? width : 420));
+const Widths = Schema.Record(Schema.String, Schema.Finite);
+const Added = Schema.Array(Schema.String);
+const NO_ADDED: string[] = [];
+const EMPTY_WIDTHS: Record<string, number> = {};
 const keyOf = (chat: Pick<EnvironmentThreadShell, "environmentId" | "id">) =>
   `${chat.environmentId}:${chat.id}`;
+
+export function boardChats<T extends Pick<EnvironmentThreadShell, "environmentId" | "id">>(
+  defaults: readonly T[],
+  available: readonly T[],
+  added: readonly string[],
+) {
+  const chosen = new Set(added);
+  return [
+    ...new Map(
+      [...defaults, ...available.filter((chat) => chosen.has(keyOf(chat)))].map((chat) => [
+        keyOf(chat),
+        chat,
+      ]),
+    ).values(),
+  ];
+}
 
 export function columnOrder<
   T extends Pick<
@@ -50,21 +93,68 @@ export default function ChatColumns({
   chats,
   scope,
   focus,
+  allChats = chats,
+  navigation,
 }: {
   chats: readonly EnvironmentThreadShell[];
+  allChats?: readonly EnvironmentThreadShell[];
   scope: string;
+  navigation?: React.ReactNode;
   focus?: string | undefined;
 }) {
   const [layout, setLayout] = useLocalStorage(`t3.chat-columns.${scope}`, EMPTY_LAYOUT, Layout);
-  const columns = useMemo(() => columnOrder(chats, layout), [chats, layout]);
+  const [added, setAdded] = useLocalStorage(`t3.chat-columns.added.${scope}`, NO_ADDED, Added);
+  const [widths, setWidths] = useLocalStorage(
+    `t3.chat-columns.widths.${scope}`,
+    EMPTY_WIDTHS,
+    Widths,
+  );
+  const candidates = useMemo(() => boardChats(chats, allChats, added), [chats, allChats, added]);
+  const columns = useMemo(() => columnOrder(candidates, layout), [candidates, layout]);
+  const [search, setSearch] = useState("");
+  const [includeSettled, setIncludeSettled] = useState(false);
+  const projects = useProjects();
+  const profiles = usePrimarySettings((settings) => settings.profiles);
+  const placements = useMemo(() => indexProfileSpaces(profiles), [profiles]);
+  const detailsFor = (chat: EnvironmentThreadShell) => {
+    const placement = placements.get(keyOf(chat));
+    const owner =
+      placement?.profile ??
+      profiles.find((profile) =>
+        profile.projectKeys.includes(`${chat.environmentId}:${chat.projectId}`),
+      );
+    const folder = projects.find(
+      (project) => project.environmentId === chat.environmentId && project.id === chat.projectId,
+    );
+    return {
+      profile: owner?.name ?? "Unassigned",
+      space: placement?.space.name ?? "Unsorted",
+      folder: folder?.title,
+      path: folder?.workspaceRoot,
+      device:
+        environments.find((env) => env.environmentId === chat.environmentId)?.label ??
+        "Offline device",
+    };
+  };
+  const contextFor = (chat: EnvironmentThreadShell) => {
+    const detail = detailsFor(chat);
+    return [
+      detail.profile,
+      detail.space,
+      detail.folder !== detail.space ? detail.folder : null,
+      detail.device,
+    ]
+      .filter(Boolean)
+      .join(" / ");
+  };
   useEffect(() => {
-    const added = chats
+    const added = candidates
       .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map(keyOf)
       .filter((key) => !layout.order.includes(key));
     if (added.length)
       setLayout((current) => ({ ...current, order: [...new Set([...current.order, ...added])] }));
-  }, [chats, layout.order, setLayout]);
+  }, [candidates, layout.order, setLayout]);
   const [focused, setFocused] = useState<string | null>(focus ?? null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const active = columns.some((chat) => keyOf(chat) === focused)
@@ -84,6 +174,21 @@ export default function ChatColumns({
     if (rail.current) rail.current.scrollLeft = expanded ? 0 : scroll.current;
   }, [expanded]);
   const appliedFocus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!focus || appliedFocus.current === focus) return;
+    const chat = candidates.find((chat) => keyOf(chat) === focus);
+    if (
+      chat &&
+      (layout.hidden.includes(focus) ||
+        (chat.settledOverride === "settled" && !layout.kept.includes(focus)))
+    ) {
+      setLayout((current) => ({
+        ...current,
+        hidden: current.hidden.filter((key) => key !== focus),
+        kept: [...new Set([...current.kept, focus])],
+      }));
+    }
+  }, [focus, candidates, layout, setLayout]);
   useLayoutEffect(() => {
     if (focus && focus !== appliedFocus.current && columns.length && rail.current) {
       const node = rail.current.querySelector(`[data-column-key="${CSS.escape(focus)}"]`);
@@ -108,47 +213,178 @@ export default function ChatColumns({
     [order[index], order[target]] = [order[target]!, order[index]!];
     setLayout({ ...layout, order });
   }
+  const selectedKeys = new Set(columns.map(keyOf));
+  const choices = allChats
+    .filter(
+      (chat) =>
+        !chat.archivedAt &&
+        (includeSettled || chat.settledOverride !== "settled" || selectedKeys.has(keyOf(chat))),
+    )
+    .map((chat) => ({ chat, detail: detailsFor(chat) }))
+    .filter(({ chat, detail }) =>
+      `${chat.title} ${Object.values(detail).join(" ")}`
+        .toLowerCase()
+        .includes(search.trim().toLowerCase()),
+    )
+    .toSorted(
+      ({ chat: a }, { chat: b }) =>
+        Number(a.settledOverride === "settled") - Number(b.settledOverride === "settled") ||
+        b.createdAt.localeCompare(a.createdAt),
+    );
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>{columns.length} chats · Scroll sideways to move between columns</span>
-        <details className="relative">
-          <summary className="cursor-pointer rounded-md border border-border px-2 py-1 text-foreground">
-            Choose chats
-          </summary>
-          <div className="absolute right-0 z-40 mt-1 max-h-72 w-72 space-y-2 overflow-y-auto rounded-lg border border-border bg-popover p-3 shadow-lg">
-            {chats
-              .filter((chat) => !chat.archivedAt)
-              .map((chat) => {
-                const key = keyOf(chat),
-                  visible = columns.some((col) => keyOf(col) === key);
-                return (
-                  <label key={key} className="flex items-start gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={visible}
-                      onChange={(e) =>
-                        setLayout({
-                          ...layout,
-                          hidden: e.target.checked
-                            ? layout.hidden.filter((id) => id !== key)
-                            : [...layout.hidden, key],
-                          kept:
-                            e.target.checked && chat.settledOverride === "settled"
-                              ? [...new Set([...layout.kept, key])]
-                              : layout.kept,
-                        })
-                      }
-                    />
-                    <span>
-                      {chat.title}
-                      {chat.settledOverride === "settled" ? " · Settled" : ""}
+      <div className="flex shrink-0 items-center gap-2 rounded-lg border border-border/70 bg-muted/25 p-1.5 text-xs text-muted-foreground">
+        {navigation && <div className="min-w-0 flex-1 overflow-hidden">{navigation}</div>}
+        <span className="flex shrink-0 items-center gap-1.5 border-l border-border/70 px-2">
+          <Columns3Icon aria-hidden className="size-3.5" />
+          {added.some(
+            (key) =>
+              columns.some((chat) => keyOf(chat) === key) &&
+              !chats.some((chat) => keyOf(chat) === key),
+          )
+            ? "Custom board"
+            : "Space board"}{" "}
+          <span className="rounded bg-background/70 px-1.5 py-0.5 text-[10px] tabular-nums text-foreground">
+            {columns.length}
+          </span>
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <Popover>
+            <PopoverTrigger render={<Button size="xs" variant="outline" />}>
+              <Columns3Icon className="size-3.5" />
+              Choose chats
+            </PopoverTrigger>
+            <PopoverPopup
+              align="end"
+              className="w-[min(26rem,calc(100vw-2rem))]"
+              viewportClassName="p-0 not-data-transitioning:overflow-hidden"
+            >
+              <div className="flex max-h-[min(32rem,var(--available-height))] flex-col">
+                <div className="shrink-0 space-y-3 border-b border-border/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <PopoverTitle className="text-sm font-semibold">Choose chats</PopoverTitle>
+                    <span aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
+                      {columns.length} on this board
                     </span>
+                  </div>
+                  <div className="relative">
+                    <SearchIcon
+                      aria-hidden
+                      className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-3.5 -translate-y-1/2 text-muted-foreground"
+                    />
+                    <Input
+                      size="compact"
+                      className="[&_input]:pl-8"
+                      aria-label="Find chats across Spaces"
+                      placeholder="Search chats, spaces or devices..."
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                    />
+                  </div>
+                  <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                    <Checkbox checked={includeSettled} onCheckedChange={setIncludeSettled} />
+                    Show settled chats
                   </label>
-                );
-              })}
-          </div>
-        </details>
+                </div>
+                <div
+                  className="flex min-h-0 flex-col gap-0.5 overflow-y-auto overscroll-contain p-1.5"
+                  aria-label="Available chats"
+                >
+                  {choices.map(({ chat, detail }) => {
+                    const key = keyOf(chat);
+                    const visible = selectedKeys.has(key);
+                    return (
+                      <label
+                        key={key}
+                        className={`flex cursor-pointer items-start gap-2.5 rounded-md px-2.5 py-2.5 hover:bg-accent/50 has-focus-visible:ring-2 has-focus-visible:ring-inset has-focus-visible:ring-ring ${visible ? "bg-primary/8" : ""}`}
+                      >
+                        <Checkbox
+                          className="mt-0.5"
+                          aria-label={chat.title}
+                          checked={visible}
+                          onCheckedChange={(checked) => {
+                            if (checked) setAdded((current) => [...new Set([...current, key])]);
+                            setLayout((current) => ({
+                              ...current,
+                              order: checked
+                                ? [...new Set([...current.order, key])]
+                                : current.order,
+                              hidden: checked
+                                ? current.hidden.filter((id) => id !== key)
+                                : [...new Set([...current.hidden, key])],
+                              kept:
+                                checked && chat.settledOverride === "settled"
+                                  ? [...new Set([...current.kept, key])]
+                                  : current.kept,
+                            }));
+                          }}
+                        />
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="flex items-start gap-2">
+                            <span className="line-clamp-2 flex-1 text-xs font-medium leading-4 text-foreground">
+                              {chat.title}
+                            </span>
+                            {chat.settledOverride === "settled" && (
+                              <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                                Settled
+                              </span>
+                            )}
+                          </span>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={<span tabIndex={0} className="block space-y-1" />}
+                            >
+                              <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
+                                <LayersIcon aria-hidden className="size-3 shrink-0" />
+                                <span className="truncate">
+                                  {detail.profile} / {detail.space}
+                                </span>
+                              </span>
+                              <span className="flex min-w-0 items-center gap-3 text-[10px] leading-4 text-muted-foreground/80">
+                                {detail.folder && detail.folder !== detail.space && (
+                                  <span className="flex min-w-0 flex-1 items-center gap-1">
+                                    <FolderIcon aria-hidden className="size-3 shrink-0" />
+                                    <span className="truncate">{detail.folder}</span>
+                                  </span>
+                                )}
+                                <span className="flex min-w-0 flex-1 items-center gap-1">
+                                  <LaptopIcon aria-hidden className="size-3 shrink-0" />
+                                  <span className="truncate">{detail.device}</span>
+                                </span>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipPopup className="max-w-xs text-xs">
+                              <p>
+                                {detail.profile} / {detail.space}
+                              </p>
+                              <p className="break-all">{detail.path ?? detail.folder}</p>
+                              <p>{detail.device}</p>
+                            </TooltipPopup>
+                          </Tooltip>
+                        </span>
+                      </label>
+                    );
+                  })}
+                  {!choices.length && (
+                    <p className="px-3 py-8 text-center text-xs text-muted-foreground">
+                      {search.trim()
+                        ? "No matching chats. Try another name or show settled chats."
+                        : "No chats available."}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/60 px-3 py-2">
+                  <Button size="xs" variant="ghost" onClick={() => setWidths({})}>
+                    Reset column widths
+                  </Button>
+                  <PopoverClose render={<Button size="xs" variant="secondary" />}>
+                    Done
+                  </PopoverClose>
+                </div>
+              </div>
+            </PopoverPopup>
+          </Popover>
+        </div>
       </div>
       <div
         ref={rail}
@@ -163,6 +399,11 @@ export default function ChatColumns({
             <Column
               key={key}
               chat={chat}
+              context={contextFor(chat)}
+              width={columnWidth(widths[key] ?? 420)}
+              onResize={(width) =>
+                setWidths((current) => ({ ...current, [key]: columnWidth(width) }))
+              }
               active={active === key}
               expanded={expanded === key}
               hidden={expanded !== null && expanded !== key}
@@ -176,40 +417,56 @@ export default function ChatColumns({
                 "Offline device"
               }
             >
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label={`Move ${chat.title} left`}
-                disabled={columns[0] === chat}
-                onClick={() => reorder(key, -1)}
-              >
-                <ArrowLeftIcon />
-              </Button>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label={`Move ${chat.title} right`}
-                disabled={columns.at(-1) === chat}
-                onClick={() => reorder(key, 1)}
-              >
-                <ArrowRightIcon />
-              </Button>
-              <Button
-                size="icon-xs"
-                variant={layout.kept.includes(key) ? "secondary" : "ghost"}
-                aria-label={`Keep ${chat.title} visible when settled`}
-                aria-pressed={layout.kept.includes(key)}
-                onClick={() =>
-                  setLayout({
-                    ...layout,
-                    kept: layout.kept.includes(key)
-                      ? layout.kept.filter((id) => id !== key)
-                      : [...layout.kept, key],
-                  })
-                }
-              >
-                <PinIcon />
-              </Button>
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Column options for ${chat.title}`}
+                    />
+                  }
+                >
+                  <MoreHorizontalIcon />
+                </MenuTrigger>
+                <MenuPopup align="end">
+                  <MenuItem
+                    onClick={() =>
+                      openWorkItem({
+                        environmentId: chat.environmentId,
+                        projectId: chat.projectId,
+                        source: { environmentId: chat.environmentId, threadId: chat.id },
+                      })
+                    }
+                  >
+                    <PlusIcon />
+                    Create task from this chat
+                  </MenuItem>
+                  <MenuSeparator />
+                  <MenuItem disabled={columns[0] === chat} onClick={() => reorder(key, -1)}>
+                    <ArrowLeftIcon />
+                    Move left
+                  </MenuItem>
+                  <MenuItem disabled={columns.at(-1) === chat} onClick={() => reorder(key, 1)}>
+                    <ArrowRightIcon />
+                    Move right
+                  </MenuItem>
+                  <MenuSeparator />
+                  <MenuCheckboxItem
+                    checked={layout.kept.includes(key)}
+                    onCheckedChange={(checked) =>
+                      setLayout((current) => ({
+                        ...current,
+                        kept: checked
+                          ? [...new Set([...current.kept, key])]
+                          : current.kept.filter((id) => id !== key),
+                      }))
+                    }
+                  >
+                    Keep on board when settled
+                  </MenuCheckboxItem>
+                </MenuPopup>
+              </Menu>
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -255,7 +512,13 @@ function Column({
   device,
   connected,
   children,
+  width,
+  onResize,
+  context,
 }: {
+  width: number;
+  onResize: (width: number) => void;
+  context: string;
   chat: EnvironmentThreadShell;
   active: boolean;
   expanded: boolean;
@@ -266,6 +529,7 @@ function Column({
   children: React.ReactNode;
 }) {
   const element = useRef<HTMLElement>(null);
+  const resize = useRef<{ x: number; width: number } | null>(null);
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     const node = element.current;
@@ -285,7 +549,8 @@ function Column({
       onPointerDownCapture={onFocus}
       onFocusCapture={onFocus}
       hidden={hidden}
-      className={`${hidden ? "hidden" : "flex"} min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl border ${active ? "border-primary/60 ring-1 ring-primary/20" : "border-border"} ${expanded ? "w-full" : "w-[min(100%,420px)] min-[1700px]:w-[calc((100%_-_1.5rem)/3)]"}`}
+      style={{ width: expanded ? "100%" : width }}
+      className={`${hidden ? "hidden" : "flex"} relative min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl border ${active ? "border-primary/60 ring-1 ring-primary/20" : "border-border"}`}
     >
       <header className="flex flex-col gap-1 border-b border-border/60 bg-muted/20 px-3 py-2">
         <div className="flex items-center gap-2">
@@ -298,35 +563,74 @@ function Column({
           <span className="text-[10px] text-muted-foreground">
             {!connected
               ? "Offline"
-              : chat.session?.status === "running"
-                ? "Running"
-                : chat.settledOverride === "settled"
-                  ? "Settled"
-                  : "Idle"}
+              : chat.hasPendingApprovals
+                ? "Approval needed"
+                : chat.hasPendingUserInput
+                  ? "Answer needed"
+                  : chat.session?.status === "running"
+                    ? "Running"
+                    : chat.settledOverride === "settled"
+                      ? "Settled"
+                      : "Idle"}
           </span>
         </div>
         <div className="flex items-center gap-0.5">
           <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">
-            {device}
+            <Tooltip>
+              <TooltipTrigger render={<span />}>{context}</TooltipTrigger>
+              <TooltipPopup>{context}</TooltipPopup>
+            </Tooltip>
           </span>
-          {!expanded && (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() =>
-                openWorkItem({
-                  environmentId: chat.environmentId,
-                  projectId: chat.projectId,
-                  source: { environmentId: chat.environmentId, threadId: chat.id },
-                })
-              }
-            >
-              + Task
-            </Button>
-          )}
           {children}
         </div>
       </header>
+      {!expanded && (
+        <div
+          role="separator"
+          tabIndex={0}
+          aria-orientation="vertical"
+          aria-label={`Resize ${chat.title}`}
+          aria-valuemin={340}
+          aria-valuemax={1000}
+          aria-valuenow={width}
+          className="absolute inset-y-0 right-0 z-30 w-1.5 cursor-col-resize touch-none hover:bg-primary/30 focus-visible:bg-primary/40"
+          onDoubleClick={() => onResize(420)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              onResize(width + (event.key === "ArrowRight" ? 20 : -20));
+            }
+            if (event.key === "Home") {
+              event.preventDefault();
+              onResize(340);
+            }
+            if (event.key === "End") {
+              event.preventDefault();
+              onResize(1000);
+            }
+          }}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            resize.current = { x: event.clientX, width };
+          }}
+          onPointerMove={(event) => {
+            if (resize.current && element.current)
+              element.current.style.width = `${columnWidth(resize.current.width + event.clientX - resize.current.x)}px`;
+          }}
+          onPointerUp={(event) => {
+            if (resize.current) {
+              const next = columnWidth(resize.current.width + event.clientX - resize.current.x);
+              resize.current = null;
+              onResize(next);
+            }
+          }}
+          onLostPointerCapture={() => {
+            if (resize.current && element.current) element.current.style.width = `${width}px`;
+            resize.current = null;
+          }}
+        />
+      )}
       <ChatPaneContext value={{ active: active && !hidden, column: !expanded }}>
         <div
           className={`flex min-h-0 flex-1 flex-col ${expanded ? "" : "[&_[data-chat-header]]:hidden"}`}

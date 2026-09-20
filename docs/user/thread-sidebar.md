@@ -37,7 +37,7 @@ before focusing it.
 
 Pin a thread from its menu to keep it above your active work.
 
-Pinning does not prevent automatic settlement. Settling a thread removes its pin.
+Settling a thread removes its pin.
 
 On web and desktop, drag a thread between sections to change its state. Drag a thread up into
 the pinned section to pin it at the spot you drop it; drag a pinned thread down into the active
@@ -79,22 +79,14 @@ their default order until the server is updated.
 
 Choose **Settle thread** from its menu to move finished work out of the active list
 without deleting the conversation. **Un-settle thread** restores it to active work
-and prevents automatic settlement until new activity resumes the usual rules.
+without deleting its history.
 Manually settling an idle thread dismisses unanswered async questions without
 sending an answer or restarting the agent.
 
-By default, environments settle inactive threads after three days and settle
-threads whose pull request merged. A closed pull request can also settle an idle
-thread. Work in progress, pending questions or approvals, and live background work
-prevent automatic settlement. An open pull request does not prevent inactivity
-settlement, but an old closed or merged pull request does not settle work you
-resumed after it closed.
-
-Change these rules in **Settings → General**. They continue to run when your apps
-are closed. Changes apply to connected environments that support shared settings;
-offline environments and older servers keep their previous values. If connected
-environments disagree, **Apply to all** copies your current settings to those named
-in the warning. Changing a rule does not reopen already settled threads.
+Settlement is manual. Inactivity and closed or merged pull requests do not settle
+chats, including when older settings enabled automatic settlement. Previously
+settled chats remain in Settled until you restore them. Each device hosting chats
+must run this version to use the manual-only behavior.
 
 ## Link a pull request
 

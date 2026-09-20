@@ -1713,7 +1713,7 @@ function OpenCommandPaletteDialog(props: {
     kind: "action",
     value: "action:capture-task",
     searchTerms: ["task", "note", "capture", "park", "later"],
-    title: "Capture a task",
+    title: "New task",
     icon: <LayoutDashboardIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       openWorkItem();

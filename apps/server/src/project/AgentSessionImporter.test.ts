@@ -623,7 +623,7 @@ it.layer(integrationLayer)("AgentSessionImporter integration", (it) => {
       expect(Option.getOrThrow(importedThread).messages.map((message) => message.text)).toEqual(
         integrationThread.messages.map((message) => message.text),
       );
-      expect(Option.getOrThrow(importedThread).settledOverride).toBe("settled");
+      expect(Option.getOrThrow(importedThread).settledOverride).toBeNull();
       expect(Option.getOrThrow(importedThread).updatedAt).toBe("2026-08-24T10:00:00.000Z");
       expect(Option.getOrThrow(binding)).toMatchObject({
         provider: "codex",
