@@ -10,17 +10,21 @@ import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
+import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
+import * as StorageCleanup from "../../storageCleanup.ts";
 
 export const makeOrchestrationReactor = Effect.gen(function* () {
   const providerRuntimeIngestion = yield* ProviderRuntimeIngestionService;
   const providerCommandReactor = yield* ProviderCommandReactor;
   const checkpointReactor = yield* CheckpointReactor;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
+  const pullRequestSyncReactor = yield* PullRequestSyncReactor.PullRequestSyncReactor;
   const threadPullRequestReactor = yield* ThreadPullRequestReactor.ThreadPullRequestReactor;
   const tasks = yield* TaskPreparationReactor;
   const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
+  const storageCleanup = yield* StorageCleanup.StorageCleanup;
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
     yield* providerRuntimeIngestion.start();
@@ -28,9 +32,10 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* checkpointReactor.start();
     yield* threadDeletionReactor.start();
     yield* threadPullRequestReactor.start();
-    // Settlement is manual in this fork, including when legacy settings enable automation.
+    yield* pullRequestSyncReactor.start();
     yield* agentAwarenessRelay.start();
     yield* tasks.start();
+    yield* storageCleanup.start();
   });
 
   return {

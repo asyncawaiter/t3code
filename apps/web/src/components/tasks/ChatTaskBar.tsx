@@ -77,7 +77,7 @@ export function ChatTaskBar({
                   file,
                   previewUrl: URL.createObjectURL(file),
                 });
-              else store.addFiles(target, [{ ...attachment, type: "file", id, file }]);
+              else store.addFiles(target, [{ name: attachment.name, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes, type: "file", id, file }]);
             }
             setError(null);
           } catch (cause) {

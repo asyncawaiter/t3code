@@ -38,6 +38,7 @@ import {
   invalidateVcsRefs,
   vcsRefsCacheStateAtom,
 } from "./vcsRefInvalidation.ts";
+import { executeAtomQuery } from "./runtime.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -81,6 +82,62 @@ const LIVE_REFS: VcsListRefsResult = {
     },
   ],
 };
+
+it.effect("finishes an imperative refs read without waiting for the connection stream to end", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const requests: VcsListRefsInput[] = [];
+      const client = {
+        [WS_METHODS.vcsListRefs]: (input: VcsListRefsInput) =>
+          Effect.sync(() => {
+            requests.push(input);
+            return LIVE_REFS;
+          }),
+      } as unknown as WsRpcProtocolClient;
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: yield* SubscriptionRef.make(CONNECTED_CONNECTION_STATE),
+        session: yield* SubscriptionRef.make(Option.some(session(client))),
+        prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      });
+      const run: EnvironmentRegistry.EnvironmentRegistry["Service"]["run"] = (_, effect) =>
+        Effect.provideService(effect, EnvironmentSupervisor.EnvironmentSupervisor, supervisor);
+      const followStream: EnvironmentRegistry.EnvironmentRegistry["Service"]["followStream"] = (
+        _,
+        stream,
+      ) => Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor);
+      const runtime = Atom.runtime(
+        Layer.merge(
+          Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, {
+            run,
+            followStream,
+          } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]),
+          Layer.succeed(Persistence.EnvironmentCacheStore, cacheWithRefs(Option.some(CACHED_REFS))),
+        ),
+      );
+      const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+        Effect.sync(() => registry.dispose()),
+      );
+      const input = { cwd: "/repo", includeGraph: true, graphCommitLimit: 1, refresh: true };
+      const result = yield* Effect.promise(() =>
+        executeAtomQuery(
+          registry,
+          createVcsEnvironmentAtoms(runtime).readRefs({
+            environmentId: TARGET.environmentId,
+            input,
+          }),
+          { refresh: true },
+        ),
+      );
+      expect(result).toMatchObject({ _tag: "Success", value: LIVE_REFS });
+      expect(requests).toEqual([input]);
+      expect((yield* SubscriptionRef.get(supervisor.state)).phase).toBe("connected");
+    }),
+  ),
+);
 
 function session(client: WsRpcProtocolClient): RpcSession {
   return {

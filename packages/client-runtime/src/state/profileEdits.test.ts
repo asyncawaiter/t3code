@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, type Profile } from "@t3tools/contracts";
-import { createProfileEditQueue, inheritForkPlacement } from "./profileSync";
+import { createProfileEditQueue, inheritForkPlacement } from "./profileSync.ts";
 
 const sourceId = EnvironmentId.make("godel");
 const base: ReadonlyArray<Profile> = [{ id: "work", name: "Work", color: "gray", projectKeys: [] }];

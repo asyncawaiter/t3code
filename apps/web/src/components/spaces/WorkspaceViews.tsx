@@ -1,9 +1,10 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { Columns3Icon, LayoutDashboardIcon, ActivityIcon, FolderOpenIcon } from "lucide-react";
+import { Columns3Icon, LayoutDashboardIcon, FolderOpenIcon } from "lucide-react";
 import { useUiStateStore } from "../../uiStateStore";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { OUTSIDE_SPACES } from "../sidebar/Spaces.logic";
 import { Button } from "../ui/button";
+import { workspaceView } from "./workspaceView";
 
 /** View navigation stays available while reading a chat, without changing its assignment. */
 export function WorkspaceViews({
@@ -37,7 +38,7 @@ export function WorkspaceViews({
   const profile = profiles.find((item) => item.id === profileId);
   const space = profile?.spaces?.find((item) => item.id === filter);
   const view = onSpace
-    ? (search.get("view") ?? "overview")
+    ? (workspaceView(search.get("view")) ?? "overview")
     : location.pathname === "/dashboard"
       ? "overview"
       : null;
@@ -48,9 +49,7 @@ export function WorkspaceViews({
       <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
         {profile?.name ?? "All"}
         <span className="px-1.5 text-muted-foreground/40">/</span>
-        {view === "monitor"
-          ? "All Spaces"
-          : `${space?.name ?? (filter === OUTSIDE_SPACES ? "Unsorted" : "All chats")}${view === "columns" ? " board" : ""}`}
+        {`${space?.name ?? (filter === OUTSIDE_SPACES ? "Unsorted" : "All chats")}${view === "columns" ? " board" : ""}`}
       </span>
       <nav aria-label="Workspace views" className="flex shrink-0 items-center gap-0.5">
         {(
@@ -58,39 +57,40 @@ export function WorkspaceViews({
             ["overview", "Dashboard", LayoutDashboardIcon],
             ["folders", "Folders", FolderOpenIcon],
             ["columns", "Columns", Columns3Icon],
-            ["monitor", "Monitor", ActivityIcon],
           ] as const
-        ).map(([key, label, Icon]) => (
-          <Button
-            key={key}
-            size="xs"
-            variant={
-              view === key || (key === "folders" && view === "branches") ? "secondary" : "ghost"
-            }
-            className={
-              view === key || (key === "folders" && view === "branches")
-                ? "bg-primary/10 text-primary ring-1 ring-primary/15"
-                : "text-muted-foreground"
-            }
-            aria-pressed={view === key || (key === "folders" && view === "branches")}
-            onClick={() =>
-              void (key === "overview" && !onSpace && profileId === "all" && !filter
-                ? navigate({ to: "/dashboard" })
-                : navigate({
-                    to: "/spaces/$profileId",
-                    params: { profileId },
-                    search: {
-                      space: filter && filter !== OUTSIDE_SPACES ? filter : undefined,
-                      unsorted: filter === OUTSIDE_SPACES,
-                      view: key === "overview" ? undefined : key,
-                    },
-                  }))
-            }
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </Button>
-        ))}
+        )
+          .filter(([key]) => key !== "overview" || location.pathname !== "/dashboard")
+          .map(([key, label, Icon]) => (
+            <Button
+              key={key}
+              size="xs"
+              variant={
+                view === key || (key === "folders" && view === "branches") ? "secondary" : "ghost"
+              }
+              className={
+                view === key || (key === "folders" && view === "branches")
+                  ? "bg-primary/10 text-primary ring-1 ring-primary/15"
+                  : "text-muted-foreground"
+              }
+              aria-pressed={view === key || (key === "folders" && view === "branches")}
+              onClick={() =>
+                void (key === "overview" && !onSpace && profileId === "all" && !filter
+                  ? navigate({ to: "/dashboard" })
+                  : navigate({
+                      to: "/spaces/$profileId",
+                      params: { profileId },
+                      search: {
+                        space: filter && filter !== OUTSIDE_SPACES ? filter : undefined,
+                        unsorted: filter === OUTSIDE_SPACES,
+                        view: key === "overview" ? undefined : key,
+                      },
+                    }))
+              }
+            >
+              <Icon className="size-3.5" />
+              {label}
+            </Button>
+          ))}
       </nav>
     </div>
   );

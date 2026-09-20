@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { resolveChatFocus } from "./chat-bookmark";
+import { resolveChatFocus } from "./chat-bookmark.ts";
 
 describe("chat bookmark focus", () => {
   it("keeps the bookmark fixed while alternating with the latest departure chat", () => {

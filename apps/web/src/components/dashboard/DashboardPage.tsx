@@ -15,7 +15,11 @@ import {
 import { toastManager } from "../ui/toast";
 import { DashboardHistoryRow } from "./DashboardHistoryRow";
 import * as Schema from "effect/Schema";
-import { useLocalStorage, setLocalStorageItem } from "../../hooks/useLocalStorage";
+import {
+  useLocalStorage,
+  getLocalStorageItem,
+  setLocalStorageItem,
+} from "../../hooks/useLocalStorage";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "../ui/button";
 import { useAtomValue } from "@effect/atom-react";
@@ -104,12 +108,20 @@ export function DashboardPage({
   const storageScope = scope
     ? `t3.dashboard.${scope.profileId}:${scope.spaceId ?? scope.unsorted}`
     : "t3.dashboard.global";
-  const globalProfileId = useUiStateStore((state) => state.activeProfileId);
+  const [globalProfileId, setDashboardProfileId] = useLocalStorage(
+    "t3.dashboard.global.profileFilter",
+    null,
+    Schema.NullOr(Schema.String),
+  );
+  const [globalSpace, setGlobalSpace] = useLocalStorage(
+    "t3.dashboard.global.spaceFilter",
+    "all",
+    Schema.String,
+  );
   const setGlobalProfileId = useUiStateStore((state) => state.setActiveProfileId);
   useEffect(() => {
-    if (!scope) setGlobalProfileId(null);
-  }, [scope, setGlobalProfileId]);
-  const [globalSpace, setGlobalSpace] = useState("all");
+    if (!scope) setGlobalProfileId(globalProfileId);
+  }, [scope, globalProfileId, setGlobalProfileId]);
   const navigate = useNavigate();
   const workItems = useWorkItems();
   const now = useNow();
@@ -134,12 +146,24 @@ export function DashboardPage({
     if (visibility !== "active") return;
     const node = boardRef.current;
     if (!node) return;
-    let position = useWorkflowState.getState().dashboardScroll;
+    const scrollKey = `${storageScope}.scroll`;
+    let position = 0;
+    try {
+      position = getLocalStorageItem(scrollKey, Schema.Finite) ?? 0;
+    } catch {
+      // A stale scroll preference must not prevent opening the dashboard.
+    }
     node.scrollTop = position;
     const track = () => {
       position = node.scrollTop;
     };
-    const save = () => useWorkflowState.setState({ dashboardScroll: position });
+    const save = () => {
+      try {
+        setLocalStorageItem(scrollKey, position, Schema.Finite);
+      } catch {
+        // Scrolling remains usable when browser storage is unavailable.
+      }
+    };
     node.addEventListener("scroll", track, { passive: true });
     window.addEventListener("pagehide", save);
     return () => {
@@ -147,7 +171,7 @@ export function DashboardPage({
       node.removeEventListener("scroll", track);
       window.removeEventListener("pagehide", save);
     };
-  }, [visibility]);
+  }, [visibility, storageScope]);
   const { environments } = useEnvironments();
 
   const rawProfiles = usePrimarySettings((s) => s.profiles);
@@ -158,7 +182,7 @@ export function DashboardPage({
       profile.spaces?.some((space) => `${profile.id}:${space.id}` === spaceKey),
     );
     if (!scope) {
-      setGlobalProfileId(owner?.id ?? profileId);
+      setDashboardProfileId(owner?.id ?? profileId);
       setGlobalSpace(spaceKey);
       return;
     }
@@ -500,7 +524,7 @@ export function DashboardPage({
     const device = view.device
       ? environments.find((item) => item.environmentId === view.device)?.environmentId
       : null;
-    const scope = deriveDashboardScope(
+    const savedScope = deriveDashboardScope(
       projects,
       shells,
       providers,
@@ -513,8 +537,8 @@ export function DashboardPage({
       !profile ||
       !spaceExists ||
       (view.device && !device) ||
-      scope.effectiveProjectFilter !== view.project ||
-      scope.effectiveProviderFilter !== view.provider
+      savedScope.effectiveProjectFilter !== view.project ||
+      savedScope.effectiveProviderFilter !== view.provider
     ) {
       toastManager.add({
         type: "error",
@@ -538,6 +562,11 @@ export function DashboardPage({
       setLocalStorageItem(`${key}.visibility`, view.visibility, DashboardVisibilitySchema);
       setLocalStorageItem(`${key}.group`, view.group, DashboardGroupSchema);
       setLocalStorageItem(`${key}.showRecent`, view.recent, Schema.Boolean);
+      setLocalStorageItem(`${key}.scroll`, 0, Schema.Finite);
+      if (key !== storageScope) {
+        setScope(profile.id === ALL_PROFILE_ID ? null : profile.id, view.space);
+        return;
+      }
     }
     setScope(profile.id === ALL_PROFILE_ID ? null : profile.id, view.space);
     setProjectFilter(view.project);
@@ -549,7 +578,6 @@ export function DashboardPage({
     setVisibility(view.visibility);
     setGroupBy(view.group);
     setShowRecent(view.recent);
-    useWorkflowState.setState({ dashboardScroll: 0 });
     if (boardRef.current) boardRef.current.scrollTop = 0;
   }
   function resetFilters() {

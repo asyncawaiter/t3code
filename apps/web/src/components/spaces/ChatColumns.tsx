@@ -611,6 +611,7 @@ function Column({
           }}
           onPointerDown={(event) => {
             event.preventDefault();
+            event.currentTarget.focus();
             event.currentTarget.setPointerCapture(event.pointerId);
             resize.current = { x: event.clientX, width };
           }}

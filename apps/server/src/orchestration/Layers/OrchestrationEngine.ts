@@ -93,40 +93,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
 
-  // A rewind spans provider/filesystem work outside the dispatch queue. Reserve
-  // the thread until its result (and optional replacement) has been committed.
-  const rewindingThreads = new Map<ThreadId, string>();
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
-
-  const updateRewindReservation = (event: OrchestrationEvent) => {
-    if (
-      event.type === "thread.checkpoint-revert-requested" &&
-      event.payload.edit &&
-      event.commandId
-    ) {
-      rewindingThreads.set(event.payload.threadId, event.commandId);
-    } else if (event.type === "thread.reverted" && !event.payload.resending) {
-      rewindingThreads.delete(event.payload.threadId);
-    } else if (
-      event.type === "thread.turn-start-requested" &&
-      event.commandId === `server:rewind-send:${rewindingThreads.get(event.payload.threadId)}`
-    ) {
-      rewindingThreads.delete(event.payload.threadId);
-    } else if (
-      event.type === "thread.activity-appended" &&
-      event.payload.activity.kind === "checkpoint.revert.failed"
-    ) {
-      const payload = event.payload.activity.payload;
-      if (
-        payload &&
-        typeof payload === "object" &&
-        "requestId" in payload &&
-        payload.requestId === rewindingThreads.get(event.payload.threadId)
-      )
-        rewindingThreads.delete(event.payload.threadId);
-    }
-  };
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
@@ -159,7 +127,6 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       commandReadModel = yield* projectEventsOntoReadModel(commandReadModel, persistedEvents);
 
       for (const persistedEvent of persistedEvents) {
-        updateRewindReservation(persistedEvent);
         yield* PubSub.publish(eventPubSub, persistedEvent);
       }
     });
@@ -204,38 +171,6 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
 
-        if ("threadId" in envelope.command) {
-          if (
-            envelope.command.type === "thread.checkpoint.revert" &&
-            envelope.command.edit &&
-            threadBackgroundLiveness.getThreadBackgroundLiveness(envelope.command.threadId)
-          ) {
-            return yield* new OrchestrationCommandInvariantError({
-              commandType: envelope.command.type,
-              detail: "Stop background work in this chat before editing its latest message.",
-            });
-          }
-          const reservation = rewindingThreads.get(envelope.command.threadId);
-          if (
-            reservation &&
-            [
-              "thread.turn.start",
-              "thread.checkpoint.revert",
-              "thread.archive",
-              "thread.delete",
-              "thread.meta.update",
-              "thread.runtime-mode.set",
-              "thread.interaction-mode.set",
-            ].includes(envelope.command.type) &&
-            envelope.command.commandId !== `server:rewind-send:${reservation}`
-          ) {
-            return yield* new OrchestrationCommandInvariantError({
-              commandType: envelope.command.type,
-              detail: "This chat is being rewound. Wait for the edit to finish.",
-            });
-          }
-        }
-
         if (
           envelope.command.type === "thread.auto-settle" &&
           (yield* eventStore.hasEventAfter({
@@ -275,6 +210,29 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             commandType: envelope.command.type,
             detail: `thread ${envelope.command.threadId} has live background work`,
           });
+        }
+
+        // New and moved projects do not carry a resolved identity in the event-derived
+        // command model. Legacy PR edits need it to identify the link they replace.
+        if (
+          envelope.command.type === "thread.meta.update" &&
+          envelope.command.linkedPullRequest !== undefined
+        ) {
+          const threadId = envelope.command.threadId;
+          const thread = commandReadModel.threads.find((thread) => thread.id === threadId);
+          if (thread !== undefined) {
+            const project = yield* projectionSnapshotQuery.getProjectShellById(thread.projectId);
+            if (Option.isSome(project)) {
+              commandReadModel = {
+                ...commandReadModel,
+                projects: commandReadModel.projects.map((entry) =>
+                  entry.id === thread.projectId
+                    ? { ...entry, repositoryIdentity: project.value.repositoryIdentity }
+                    : entry,
+                ),
+              };
+            }
+          }
         }
 
         // Command snapshots omit activities at startup and cap them while running.
@@ -366,7 +324,6 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           yield* cleanup;
         }
         for (const [index, event] of committedCommand.committedEvents.entries()) {
-          updateRewindReservation(event);
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {
             yield* Metric.update(

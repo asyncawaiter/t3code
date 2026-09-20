@@ -111,7 +111,6 @@ export interface ProviderServiceShape {
    */
   readonly assertConversationRollbackSupported: (
     threadId: ThreadId,
-    options?: { readonly forMessageEdit?: boolean },
   ) => Effect.Effect<void, ProviderServiceError>;
 
   /**

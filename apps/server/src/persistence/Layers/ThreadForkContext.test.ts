@@ -34,8 +34,13 @@ layer("ThreadForkContextRepository", (it) => {
         createdAt: "2026-01-01T00:00:00.000Z",
       });
 
+      yield* repo.markConsumed({
+        threadId: ThreadId.make("thread-child"),
+        consumedAt: "2026-01-01T00:00:01.000Z",
+      });
       const row = yield* repo.get({ threadId: ThreadId.make("thread-child") });
       assert.ok(Option.isSome(row));
+      assert.strictEqual(row.value.consumedAt, "2026-01-01T00:00:01.000Z");
       assert.strictEqual(Option.getOrThrow(row).sourceThreadId, "thread-source");
       assert.deepStrictEqual(Option.getOrThrow(row).entries, [
         { kind: "user", text: "hello" },

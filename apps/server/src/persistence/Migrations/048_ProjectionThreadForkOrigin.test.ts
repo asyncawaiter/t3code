@@ -6,7 +6,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 layer("048_ProjectionThreadForkOrigin", (it) => {
   it.effect("adds the nullable fork origin columns to thread projections", () =>

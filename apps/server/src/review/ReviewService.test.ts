@@ -32,7 +32,7 @@ function makeLayer(input: {
         yield* sql`INSERT INTO projection_threads VALUES ('folder', ${input.worktreeRoot}, NULL)`;
       }
     }),
-  ).pipe(Layer.provideMerge(NodeSqliteClient.layerMemory()));
+  ).pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })));
   return ReviewService.layer.pipe(
     Layer.provide(database),
     Layer.provide(

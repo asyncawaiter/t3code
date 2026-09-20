@@ -14,7 +14,6 @@ import {
   ALL_PROFILE,
   findProfile,
   isProjectInProfile,
-  DEFAULT_RUNTIME_MODE,
   type ScopedProjectRef,
   type ModelSelection,
   DEFAULT_SERVER_SETTINGS,
@@ -37,6 +36,7 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
 import { readProjects, readThreadShell, useProjects, useThread } from "../state/entities";
 import {
@@ -46,7 +46,7 @@ import {
   scopeNewThreadContext,
 } from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
-import { environmentServerConfigsAtom, primaryServerSettingsAtom } from "../state/server";
+import { primaryServerSettingsAtom, environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings, usePrimarySettings, useLegacySidebarEnabled } from "./useSettings";
@@ -72,7 +72,6 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
 
 function useCreateDraft() {
   const environmentServerConfigs = useAtomValue(environmentServerConfigsAtom);
-  const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const router = useRouter();
   const getCurrentRouteTarget = useCallback(() => {
@@ -118,8 +117,8 @@ function useCreateDraft() {
       const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
       const currentRouteTarget = getCurrentRouteTarget();
       // A new thread carries the user's working mode from the thread being
-      // viewed. The target project's configured model still wins; runtime and
-      // interaction modes carry independently. Branch, worktree, and env mode
+      // viewed. The target project's configured model still wins; interaction
+      // mode carries independently. Permissions, branch, worktree, and env mode
       // come from configured defaults unless the caller passes them explicitly.
       const carrySourceShell =
         currentRouteTarget?.kind === "server"
@@ -142,11 +141,6 @@ function useCreateDraft() {
         : null;
       const carryModelSelection =
         composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
-      const carryRuntimeMode =
-        carrySourceComposer?.runtimeMode ??
-        carrySourceShell?.runtimeMode ??
-        carrySourceDraft?.runtimeMode ??
-        null;
       const carryInteractionMode =
         carrySourceComposer?.interactionMode ??
         carrySourceShell?.interactionMode ??
@@ -157,11 +151,23 @@ function useCreateDraft() {
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       );
+      // The resolver applies project overrides and, until the server has
+      // folded them, the aggregate's own legacy fields.
+      const projectSettings = resolveProjectSettings(
+        targetServerSettings,
+        project?.id ?? null,
+        project,
+      );
+      const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
+      const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
+      const projectThreadEnvMode =
+        projectSettings.sources.defaultThreadEnvMode === "project"
+          ? projectSettings.settings.defaultThreadEnvMode
+          : undefined;
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
         options?.modelSelection ??
         resolveNewThreadModelSelectionOverride({
-          projectDefaultSelection:
-            project?.defaultModelSelection ?? targetServerSettings.defaultModelSelection ?? null,
+          projectDefaultSelection: projectDefaultModelSelection ?? null,
           carrySelection: options?.useProjectDefaults ? null : carryModelSelection,
           carrySourceDraftId:
             currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
@@ -171,16 +177,16 @@ function useCreateDraft() {
       // skipped entirely when a higher-priority source decides, and its
       // query atom caches per project after the first call.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-        const consultProjectFile = project !== undefined && project.defaultThreadEnvMode == null;
+        const consultProjectFile = project !== undefined && projectThreadEnvMode == null;
         return resolveDefaultThreadEnvMode({
-          projectSetting: project?.defaultThreadEnvMode,
+          projectSetting: projectThreadEnvMode,
           projectFile: consultProjectFile
             ? await readT3ProjectFileDefaultThreadEnvMode(
                 project.environmentId,
                 project.workspaceRoot,
               )
             : null,
-          globalDefault: targetServerSettings.defaultThreadEnvMode,
+          globalDefault: projectSettings.settings.defaultThreadEnvMode,
         });
       };
       const logicalProjectKey = project
@@ -278,14 +284,14 @@ function useCreateDraft() {
               envMode: defaultEnvMode,
               startFromOrigin: resolveNewDraftStartFromOrigin({
                 envMode: defaultEnvMode,
-                newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+                newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
               }),
             };
           }
           if (workspaceContext) {
             setDraftThreadContext(emptyStoredDraftThread.draftId, {
               ...workspaceContext,
-              ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
+              ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
           }
@@ -322,7 +328,7 @@ function useCreateDraft() {
             {
               threadId: emptyStoredDraftThread.threadId,
               ...workspaceContext,
-              ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
+              ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
           );
@@ -438,9 +444,9 @@ function useCreateDraft() {
             options?.startFromOrigin ??
             resolveNewDraftStartFromOrigin({
               envMode: initialEnvMode,
-              newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+              newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
             }),
-          runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
+          runtimeMode: defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
         });
         applyStickyState(draftId);
@@ -458,13 +464,7 @@ function useCreateDraft() {
         return { draftId, threadId };
       })();
     },
-    [
-      environmentServerConfigs,
-      getCurrentRouteTarget,
-      primaryServerSettings.newWorktreesStartFromOrigin,
-      projectGroupingSettings,
-      router,
-    ],
+    [environmentServerConfigs, getCurrentRouteTarget, projectGroupingSettings, router],
   );
 }
 

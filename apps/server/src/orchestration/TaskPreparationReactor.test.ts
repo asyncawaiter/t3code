@@ -58,6 +58,7 @@ const idle: OrchestrationThread = {
   messages: [],
   activities: [],
   checkpoints: [],
+    pullRequests: [],
   proposedPlans: [],
   session: null,
 };
@@ -72,6 +73,9 @@ it.effect("defers busy chats, honors cancellation, and dispatches preparation on
         getDescriptor: Effect.die("unused"),
       }),
       Effect.provideService(ProjectionSnapshotQuery, {
+        listActivitiesByKind: () => Effect.die("unused"),
+        getDeletedWorktreeThreads: () => Effect.die("unused"),
+        getProjectShells: () => Effect.die("unused"),
         getUserInputActivity: () => Effect.die("unused"),
         getCommandReadModel: () => Effect.die("unused"),
         getSnapshot: () => Effect.die("unused"),

@@ -10,7 +10,7 @@ import {
   type LimitPoolWindow,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
-import { TicketIcon } from "lucide-react";
+import { AlertTriangleIcon, TicketIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -21,6 +21,7 @@ import { getDriverOption } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Button } from "../ui/button";
+import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
   LimitWindows,
@@ -565,7 +566,7 @@ export function UsageLimitsPooled({
         <Toggle value="accounts">Accounts</Toggle>
         <Toggle value="pooled">Combined</Toggle>
       </ToggleGroup>
-      {pools.length === 0 ? (
+      {pools.length === 0 && notices.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No provider on the selected environments reports subscription limits.
         </p>
@@ -619,10 +620,13 @@ export function UsageLimitsPooled({
 function LimitNotices({ notices }: { readonly notices: readonly string[] }) {
   if (notices.length === 0) return null;
   return (
-    <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+    <Alert variant="warning" controlAlignment="first-line">
+      <AlertTriangleIcon />
       {notices.map((notice) => (
-        <li key={notice}>{notice}</li>
+        <AlertTitle key={notice} className="break-words">
+          {notice}
+        </AlertTitle>
       ))}
-    </ul>
+    </Alert>
   );
 }

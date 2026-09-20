@@ -272,16 +272,9 @@ export function createSidebarSortingStrategy(input: {
     }
     marker("settled-header");
     section("settled");
-    const result = items.map(() => hidden);
-    let top = rects[0].top;
-    for (const item of projected) {
+    const heights = projected.map((item) => {
       const index = indices.get(sidebarListItemId(item));
       const rect = index === undefined ? undefined : rects[index];
-      // Keep section and device spacing when projecting the reordered list.
-      const previousRect = index === undefined || index === 0 ? undefined : rects[index - 1];
-      top +=
-        rect && previousRect ? Math.max(0, rect.top - previousRect.bottom) : index === 0 ? 0 : 1;
-      if (index !== undefined && rect) result[index] = { ...stationary, y: top - rect.top };
       const fallback =
         item.kind === "device"
           ? 28 * scale
@@ -289,16 +282,59 @@ export function createSidebarSortingStrategy(input: {
             ? cardHeight
             : slimHeight;
       const moved = item.kind === "thread" && item.key === active.key;
-      const height =
-        item.kind === "marker" &&
+      return item.kind === "marker" &&
         (item.marker === "pinned-header" || item.marker === "pinned-divider")
-          ? Math.max(labelHeight, rect?.height ?? 0)
-          : item.kind === "marker" && item.marker.endsWith("placeholder")
-            ? slimHeight
-            : moved
-              ? fallback
-              : (rect?.height ?? fallback);
-      top += height;
+        ? Math.max(labelHeight, rect?.height ?? 0)
+        : item.kind === "marker" && item.marker.endsWith("placeholder")
+          ? slimHeight
+          : moved
+            ? fallback
+            : (rect?.height ?? fallback);
+    });
+    const firstShelf = items.findIndex(
+      (item) =>
+        item.kind === "marker" &&
+        (item.marker === "snoozed-header" || item.marker === "settled-header"),
+    );
+    const gaps = projected.map((item) => {
+      const index = indices.get(sidebarListItemId(item));
+      if (index === 0) return 0;
+      if (index === undefined) return 1;
+      // The shelf gap is allocated from remaining room below.
+      if (index === firstShelf) return 1;
+      const rect = rects[index];
+      const previous = rects[index - 1];
+      return rect && previous ? Math.max(0, rect.top - previous.bottom) : 1;
+    });
+    const shelfRect = rects[firstShelf];
+    const beforeShelf = rects[firstShelf - 1];
+    const lastRect = rects.at(-1);
+    // Consume the shelf's auto margin as drag labels and resized rows need
+    // room, keeping the combined shelves at their measured bottom.
+    let shelfSpace =
+      shelfRect && beforeShelf && lastRect && shelfRect.top > beforeShelf.bottom + 1
+        ? Math.max(
+            0,
+            lastRect.bottom -
+              rects[0].top -
+              heights.reduce((sum, height, index) => sum + height + gaps[index]!, 0),
+          )
+        : 0;
+    const result = items.map(() => hidden);
+    let top = rects[0].top;
+    for (const [projectedIndex, item] of projected.entries()) {
+      top += gaps[projectedIndex]!;
+      if (
+        item.kind === "marker" &&
+        (item.marker === "snoozed-header" || item.marker === "settled-header")
+      ) {
+        top += shelfSpace;
+        shelfSpace = 0;
+      }
+      const index = indices.get(sidebarListItemId(item));
+      const rect = index === undefined ? undefined : rects[index];
+      if (index !== undefined && rect) result[index] = { ...stationary, y: top - rect.top };
+      top += heights[projectedIndex]!;
     }
     result[activeIndex] = stationary;
     return result;

@@ -1,6 +1,6 @@
 import { DashboardPage } from "../components/dashboard/DashboardPage";
 import { WorkspaceViews } from "../components/spaces/WorkspaceViews";
-import { SpaceMonitor } from "../components/spaces/SpaceMonitor";
+import { workspaceView } from "../components/spaces/workspaceView";
 import { ALL_PROFILE } from "@t3tools/contracts";
 import { createFileRoute } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef } from "react";
@@ -29,19 +29,13 @@ export const Route = createFileRoute("/_chat/spaces/$profileId")({
   ): {
     space: string | undefined;
     unsorted: boolean;
-    view?: "branches" | "columns" | "monitor" | "folders" | undefined;
+    view?: "branches" | "columns" | "folders" | undefined;
     folder?: string | undefined;
     focus?: string | undefined;
   } => ({
     space: typeof search.space === "string" ? search.space : undefined,
     unsorted: search.unsorted === true,
-    view:
-      search.view === "branches" ||
-      search.view === "columns" ||
-      search.view === "monitor" ||
-      search.view === "folders"
-        ? search.view
-        : undefined,
+    view: workspaceView(search.view),
     focus: typeof search.focus === "string" ? search.focus : undefined,
     folder: typeof search.folder === "string" ? search.folder : undefined,
   }),
@@ -97,10 +91,7 @@ function SpaceOverview() {
   const selectedFolder =
     spaceProjects.find((folder) => `${folder.environmentId}:${folder.id}` === folderKey) ??
     spaceProjects[0];
-  const openView = (
-    nextView: "branches" | "columns" | "monitor" | "folders" | undefined,
-    key = folderKey,
-  ) =>
+  const openView = (nextView: "branches" | "columns" | "folders" | undefined, key = folderKey) =>
     void navigate({
       search: { space: spaceId, unsorted, view: nextView, folder: key },
       replace: true,
@@ -126,10 +117,10 @@ function SpaceOverview() {
         <WorkspaceViews embedded />
       </WorkspacePageHeader>
       <main
-        className={`flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6 ${view === "branches" || view === "columns" || view === "monitor" ? "overflow-hidden" : "overflow-y-auto"}`}
+        className={`flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6 ${view === "branches" || view === "columns" ? "overflow-hidden" : "overflow-y-auto"}`}
       >
         <div
-          className={`mx-auto flex w-full flex-col gap-3 ${view === "branches" || view === "columns" || view === "monitor" ? "min-h-0 flex-1" : "max-w-5xl"}`}
+          className={`mx-auto flex w-full flex-col gap-3 ${view === "branches" || view === "columns" ? "min-h-0 flex-1" : "max-w-5xl"}`}
         >
           {(missing || view === "folders" || view === "branches") && (
             <div className="flex items-start justify-between gap-4">
@@ -245,30 +236,36 @@ function SpaceOverview() {
                   >
                     {(profileId === ALL_PROFILE_ID ? profiles : profile ? [profile] : []).flatMap(
                       (owner) =>
-                        (owner.spaces ?? []).map((item) => (
-                          <Button
-                            key={`${owner.id}:${item.id}`}
-                            size="xs"
-                            variant={
-                              item.id === spaceId && owner.id === profileId ? "secondary" : "ghost"
-                            }
-                            className={
-                              item.id === spaceId && owner.id === profileId
-                                ? "shrink-0 bg-primary/10 text-primary ring-1 ring-inset ring-primary/15"
-                                : "shrink-0 text-muted-foreground"
-                            }
-                            aria-pressed={item.id === spaceId && owner.id === profileId}
-                            onClick={() =>
-                              void navigate({
-                                params: { profileId: owner.id },
-                                search: { space: item.id, unsorted: false, view: "columns" },
-                              })
-                            }
-                          >
-                            {owner.id !== profileId ? `${owner.name} / ` : ""}
-                            {item.name}
-                          </Button>
-                        )),
+                        [{ id: OUTSIDE_SPACES, name: "Unsorted" }, ...(owner.spaces ?? [])].map(
+                          (item) => (
+                            <Button
+                              key={`${owner.id}:${item.id}`}
+                              size="xs"
+                              variant={
+                                item.id === filter && owner.id === profileId ? "secondary" : "ghost"
+                              }
+                              className={
+                                item.id === filter && owner.id === profileId
+                                  ? "shrink-0 bg-primary/10 text-primary ring-1 ring-inset ring-primary/15"
+                                  : "shrink-0 text-muted-foreground"
+                              }
+                              aria-pressed={item.id === filter && owner.id === profileId}
+                              onClick={() =>
+                                void navigate({
+                                  params: { profileId: owner.id },
+                                  search: {
+                                    space: item.id === OUTSIDE_SPACES ? undefined : item.id,
+                                    unsorted: item.id === OUTSIDE_SPACES,
+                                    view: "columns",
+                                  },
+                                })
+                              }
+                            >
+                              {owner.id !== profileId ? `${owner.name} / ` : ""}
+                              {item.name}
+                            </Button>
+                          ),
+                        ),
                     )}
                   </nav>
                 }
@@ -277,23 +274,6 @@ function SpaceOverview() {
                 focus={focus}
               />
             </Suspense>
-          ) : !missing && view === "monitor" ? (
-            <SpaceMonitor
-              includeUnassigned={profileId === ALL_PROFILE_ID}
-              profiles={profileId === ALL_PROFILE_ID ? profiles : profile ? [profile] : []}
-              threads={threads}
-              onOpen={(ownerId, id, root, focusedChat) =>
-                void navigate({
-                  params: { profileId: ownerId },
-                  search: {
-                    space: id ?? undefined,
-                    unsorted: root,
-                    view: "columns",
-                    focus: focusedChat,
-                  },
-                })
-              }
-            />
           ) : !missing && view === "branches" && selectedFolder ? (
             <Suspense
               fallback={<p className="text-xs text-muted-foreground">Loading branches...</p>}

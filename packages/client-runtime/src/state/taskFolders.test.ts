@@ -1,6 +1,6 @@
 import { expect, it } from "vite-plus/test";
 import type { Profile } from "@t3tools/contracts";
-import { taskFolders } from "./profileSync";
+import { taskFolders } from "./profileSync.ts";
 
 const projects = [
   { environmentId: "poly", id: "pod" },

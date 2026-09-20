@@ -51,6 +51,7 @@ function makeThread(overrides: Partial<OrchestrationThread> = {}): Orchestration
     proposedPlans: [],
     activities: [],
     checkpoints: [],
+    pullRequests: [],
     session: null,
     ...overrides,
   };
@@ -298,4 +299,26 @@ it.layer(NodeServices.layer)("fork titles", (it) => {
       });
     }),
   );
+});
+
+it.layer(NodeServices.layer)("legacy edit compatibility", (it) => {
+  for (const type of ["thread.conversation.revert", "thread.checkpoint.revert"] as const) {
+    it.effect(`rejects legacy edit payloads for ${type} before changing history or files`, () =>
+      Effect.gen(function* () {
+        const error = yield* decideOrchestrationCommand({
+          readModel: makeReadModel(makeThread()),
+          command: {
+            type,
+            commandId: CommandId.make("legacy-edit"),
+            threadId: ThreadId.make("thread-source"),
+            turnCount: 0,
+            createdAt: NOW,
+            edit: { sourceMessageId: MessageId.make("msg-assistant-1"), restoreFiles: false },
+          },
+        }).pipe(Effect.flip);
+        expect(error._tag).toBe("OrchestrationCommandInvariantError");
+        expect(error.message).toContain("current rewind flow");
+      }),
+    );
+  }
 });

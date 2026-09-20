@@ -8,6 +8,7 @@ import * as Struct from "effect/Struct";
 
 import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 import {
+  ConsumeThreadForkContextInput,
   DeleteThreadForkContextBySourceThreadIdInput,
   DeleteThreadForkContextInput,
   GetThreadForkContextInput,
@@ -80,6 +81,13 @@ const makeThreadForkContextRepository = Effect.gen(function* () {
       `,
   });
 
+  const markConsumedRow = SqlSchema.void({
+    Request: ConsumeThreadForkContextInput,
+    execute: ({ threadId, consumedAt }) =>
+      sql`UPDATE thread_fork_context SET consumed_at = ${consumedAt}
+          WHERE thread_id = ${threadId}`,
+  });
+
   const deleteThreadForkContextRow = SqlSchema.void({
     Request: DeleteThreadForkContextInput,
     execute: ({ threadId }) =>
@@ -138,6 +146,10 @@ const makeThreadForkContextRepository = Effect.gen(function* () {
   return {
     upsert,
     get,
+    markConsumed: (input) =>
+      markConsumedRow(input).pipe(
+        Effect.mapError(toPersistenceSqlError("ThreadForkContextRepository.markConsumed:query")),
+      ),
     delete: deleteRow,
     deleteBySourceThreadId,
   } satisfies ThreadForkContextRepositoryShape;

@@ -164,7 +164,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
   const save = useSaveWorkItem();
   const saveProfiles = useSaveProfiles();
   const create = useAtomCommand(threadEnvironment.create, { reportFailure: false });
-  const listRefs = useAtomQueryRunner(vcsEnvironment.listRefs, {
+  const listRefs = useAtomQueryRunner(vcsEnvironment.readRefs, {
     reportFailure: false,
     refresh: true,
   });

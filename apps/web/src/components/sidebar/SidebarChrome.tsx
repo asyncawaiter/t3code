@@ -1,13 +1,8 @@
-import {
-  ArrowLeftIcon,
-  ChartNoAxesColumnIcon,
-  GitPullRequestIcon,
-  LayoutDashboardIcon,
-  SettingsIcon,
-} from "lucide-react";
+import { globalDashboardNavigation } from "../../lib/globalDashboardNavigation";
+import { ChartNoAxesColumnIcon, LayoutDashboardIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { lazy, memo, Suspense, useCallback } from "react";
-import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
@@ -47,6 +42,7 @@ const T3ConnectSidebarAvatar = lazy(() =>
     default: module.T3ConnectSidebarAvatar,
   })),
 );
+import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -105,11 +101,12 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       )}
       to="/"
     >
-      <span className="inline-flex min-w-0 items-baseline gap-1">
-        <T3Wordmark aria-label="T3" className="h-2.5 w-auto shrink-0" />
+      {/* Center the visible capitals, without the font's ascender/descender space. */}
+      <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
+        <T3Wordmark aria-label="T3" className="h-[1cap] w-auto shrink-0" />
         <span
           className={cn(
-            "truncate text-sm font-medium tracking-tight",
+            "truncate [text-box:trim-both_cap_alphabetic]",
             onBackdrop ? "text-white/70" : "text-muted-foreground",
           )}
         >
@@ -124,17 +121,25 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
+  active = false,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  active?: boolean;
 }) {
   return (
     <SidebarMenuItem className="shrink-0">
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton
+              aria-label={label}
+              aria-current={active ? "page" : undefined}
+              isActive={active}
+              onClick={onClick}
+              size="icon"
+            >
               {icon}
             </SidebarMenuButton>
           }
@@ -147,7 +152,6 @@ function SidebarUtilityItem({
 
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
   const currentFooterPage = useLocation({
     select: (location) =>
@@ -188,7 +192,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
   const handleDashboardClick = useCallback(() => {
     closeMobileSidebar();
-    void navigate({ to: "/dashboard" });
+    void navigate(globalDashboardNavigation());
   }, [closeMobileSidebar, navigate]);
 
   const handleUsageClick = useCallback(() => {
@@ -198,50 +202,34 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
 
-  const handleBackClick = useCallback(() => {
-    closeMobileSidebar();
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, closeMobileSidebar, navigate]);
-
   return (
     <SidebarMenu className="flex-row items-center">
-      {currentFooterPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton onClick={handleBackClick}>
-            <ArrowLeftIcon />
-            <span>Back</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ) : (
-        <>
-          <SidebarUtilityItem
-            icon={<LayoutDashboardIcon />}
-            label="Dashboard"
-            onClick={handleDashboardClick}
-          />
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
-          {pullRequestsSupported ? (
-            <SidebarUtilityItem
-              icon={<GitPullRequestIcon />}
-              label="Pull Requests"
-              onClick={handlePullRequestsClick}
-            />
-          ) : null}
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-          />
-        </>
-      )}
+      <SidebarUtilityItem
+        icon={<LayoutDashboardIcon />}
+        label="Global dashboard"
+        active={currentFooterPage === "dashboard"}
+        onClick={handleDashboardClick}
+      />
+      <SidebarUtilityItem
+        icon={<SettingsIcon />}
+        label="Settings"
+        active={currentFooterPage === "settings" || currentFooterPage === "project-settings"}
+        onClick={handleSettingsClick}
+      />
+      {pullRequestsSupported ? (
+        <SidebarUtilityItem
+          icon={<PullRequestGlyph.pullRequest />}
+          label="Pull Requests"
+          active={currentFooterPage === "pull-requests"}
+          onClick={handlePullRequestsClick}
+        />
+      ) : null}
+      <SidebarUtilityItem
+        icon={<ChartNoAxesColumnIcon />}
+        label="Usage"
+        active={currentFooterPage === "usage"}
+        onClick={handleUsageClick}
+      />
       <SidebarUpdatePill />
     </SidebarMenu>
   );
@@ -249,7 +237,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
-    <SidebarFooter className="p-[var(--sidebar-content-inset)]">
+    <SidebarFooter className="px-[var(--sidebar-content-inset)] py-1">
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <ProfileSyncStatus />

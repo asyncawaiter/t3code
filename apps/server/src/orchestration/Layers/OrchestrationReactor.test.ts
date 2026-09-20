@@ -11,10 +11,12 @@ import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import * as ThreadSettlementReactor from "../ThreadSettlementReactor.ts";
+import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
+import { StorageCleanup } from "../../storageCleanup.ts";
 
 describe("OrchestrationReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<OrchestrationReactor, never> | null = null;
@@ -31,6 +33,15 @@ describe("OrchestrationReactor", () => {
 
     runtime = ManagedRuntime.make(
       Layer.effect(OrchestrationReactor, makeOrchestrationReactor).pipe(
+        Layer.provideMerge(
+          Layer.succeed(StorageCleanup, {
+            start: () => {
+              started.push("storage-cleanup");
+              return Effect.void;
+            },
+            drain: Effect.void,
+          }),
+        ),
         Layer.provideMerge(
           Layer.succeed(ProviderRuntimeIngestionService, {
             start: () => {
@@ -95,6 +106,16 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(PullRequestSyncReactor.PullRequestSyncReactor, {
+            start: () => {
+              started.push("pull-request-sync-reactor");
+              return Effect.void;
+            },
+            drain: Effect.void,
+            requestSync: () => Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
             publishThread: () => Effect.void,
             start: () => {
@@ -116,8 +137,10 @@ describe("OrchestrationReactor", () => {
       "checkpoint-reactor",
       "thread-deletion-reactor",
       "thread-pull-request-reactor",
+      "pull-request-sync-reactor",
       "agent-awareness-relay",
       "task-preparation-reactor",
+      "storage-cleanup",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

@@ -4,10 +4,9 @@
  *
  * A row holds the portable text entries a "Fork in a new tab" action curated
  * from the source thread at fork time. The child thread's first successful
- * turn reads the row to prepend that context to the provider input, then
- * deletes it so later turns never resend it. A failed send leaves the row in
- * place for the retry to pick up; deletion is not exactly-once (a crash
- * between a successful sendTurn and the delete could resend on retry).
+ * turn reads the row to prepend that context to the provider input. Keep the
+ * snapshot after consumption so rewinding the first turn can restore it.
+ * A failed send leaves consumedAt unset for retry.
  *
  * @module ThreadForkContextRepository
  */
@@ -44,6 +43,11 @@ export const GetThreadForkContextInput = Schema.Struct({
 });
 export type GetThreadForkContextInput = typeof GetThreadForkContextInput.Type;
 
+export const ConsumeThreadForkContextInput = Schema.Struct({
+  threadId: ThreadId,
+  consumedAt: IsoDateTime,
+});
+
 export const DeleteThreadForkContextInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -70,13 +74,15 @@ export interface ThreadForkContextRepositoryShape {
   readonly upsert: (row: ThreadForkContext) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**
-   * Read the fork context row for a thread, if one is still present. The row
-   * is deleted once its context has been sent (see `delete`), so presence
-   * alone means "not yet sent".
+   * Read the captured context, including snapshots already sent to a provider.
    */
   readonly get: (
     input: GetThreadForkContextInput,
   ) => Effect.Effect<Option.Option<ThreadForkContext>, ProjectionRepositoryError>;
+
+  readonly markConsumed: (
+    input: typeof ConsumeThreadForkContextInput.Type,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**
    * Delete the fork context row for a thread.

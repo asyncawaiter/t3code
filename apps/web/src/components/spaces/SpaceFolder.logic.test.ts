@@ -40,6 +40,7 @@ function chat(id: string, override: Partial<EnvironmentThreadShell> = {}): Envir
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
+    pullRequests: [],
     ...override,
   };
 }

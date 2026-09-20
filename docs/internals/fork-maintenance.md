@@ -12,8 +12,10 @@ Deduplicate by tag, SHA, Git ancestry, and prior review records.
 
 ## Authority and baseline
 
-Work against `/Users/abhishek/Documents/t3code`, including tracked and untracked
-custom work. A task's separate worktree is not the authoritative checkout.
+Locate the latest accepted fork source and inventory every checkout carrying custom
+work, including `/Users/abhishek/Documents/t3code`. Include tracked and untracked
+changes. A new worktree does not inherit those edits. Confirm source authority from
+accepted integration records and content, not the working directory or branch label.
 Scheduled runs authorize investigation only: fetch selected release refs,
 inspect source and release notes, and run focused checks or reversible merge
 trials in isolation. Do not alter or stash the user's checkout, write live app
@@ -61,18 +63,21 @@ verify Connect controls in the packaged app before delivery.
   Connected devices share organization while keeping local selections independent.
   Switching supports sidebar controls, deliberate smooth trackpad swipes,
   keybindings, and the command palette.
-- Preserve equal Space tiles, the permanent Default tile for unassigned chats, the compact matte neutral UI, and all
+- Preserve equal Space tiles, the Unsorted tile within profiles for unassigned chats, compact theme-aligned UI, and all
   views, nearby device/path previews, arbitrary-folder browsing, Space launch
   defaults, reliable standard new-chat entry points, and same-profile assignment.
 - One pin menu offers global, owning-profile, and assigned-space scopes. Space
   deletion returns threads and pins to their profile. Preserve unique numbered
   fork titles, Show current chat/Show in list, and account/T3 Connect controls.
+- Settlement is manual, including when old settings enabled inactivity or PR
+  auto-settlement. Space tile counts exclude settled chats.
 - Dashboard scope includes profile, space, project, device, provider, and Git
   filters with dependent options. Active work uses horizontal columns;
   snoozed, settled, and archived work has separate history views.
-- Latest-message editing retains attachments and offers conversation rewind
-  with optional code restoration. Inspect actual Codex and Claude capabilities
-  and limitations, including detached-session edits and resend recovery.
+- Use the adopted upstream rewind flow, retaining attachments when restoring a
+  message to the composer. Do not restore the retired custom edit payload flow.
+  Older clients sending that payload must receive an explicit upgrade error
+  before history or files change. Inspect provider rewind capabilities and limits.
 - Provider-only user-turn metadata preserves submission, delivery, previous-user
   time and elapsed gap, plus original dates in newly created fork context.
 - Preserve the composer account-usage indicator and its detailed quota/reset popup,
@@ -118,7 +123,9 @@ Preserve applied migration identities and validate upgrades from both existing
 fork data and fresh schemas in isolation. Retain fork migration IDs 048
 (fork origin) and 049 (fork context).
 The September 8 nightly's branch PR and active ordering migrations are 050 and 051
-in this fork. Validate the existing fork rows after applying both.
+in this fork. Subsequent multi-PR, message-context, title-state, and PR-file-view
+migrations use 052 through 055. Validate existing fork rows and migration identities
+when upgrading; never reuse an applied ID for another migration.
 Before an authorized migration-bearing
 installation, back up data and establish rollback; an old DMG alone is insufficient.
 Package accurate source metadata and verify bundled custom features. Coordinate

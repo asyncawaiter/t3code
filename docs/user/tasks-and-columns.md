@@ -25,12 +25,12 @@ Drag each column's right edge to resize it independently. You can also focus the
 
 Only the focused column receives global composer shortcuts. Drafts and reading positions survive moving between columns. Offscreen columns release their rendered chat views. Layout choices stay on the viewing device.
 
-**Monitor** shows compact rows across Spaces. Select a row or chat to open its columns. In Columns, use the Space rail to switch boards; arrow keys work while the rail has focus, and vertical trackpad scrolling over the rail changes Spaces. Scrolling inside a conversation stays within that conversation.
+Use the scoped dashboard to see status and work needing attention. In Columns, use the Space rail to switch boards, including Unsorted; arrow keys work while the rail has focus, and vertical trackpad scrolling over the rail changes Spaces. Scrolling inside a conversation stays within that conversation.
 
 The phone dashboard supports task capture, editing, screenshot selection or clipboard paste, status, brief preparation, and opening a prepared or linked chat with its context and attachments. The multi-column workspace is available in web and desktop layouts.
 
 ## Inspect a Space
 
-Click a Space to open the dashboard filtered to it. The global dashboard starts across all profiles and Spaces. Scope, device, folder, provider, and Git filters remain visible; saved views preserve combinations you reuse.
+Click a Space to open its dashboard filtered to that Space. The permanent Global dashboard button in the sidebar, or Cmd+Shift+H on macOS, opens all profiles and Spaces and clears device, folder, provider, search, and Git narrowing. Saved views remain available. Scope, device, folder, provider, and Git filters remain visible; saved views preserve combinations you reuse.
 
 **Folders** shows associated folders, instruction file lists, and checkout state directly. Select an instruction file to read it. Paths and scope distinguish parent, folder-level, and nested instructions. Branch graphs and the device's file manager remain available from each folder.

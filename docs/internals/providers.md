@@ -323,9 +323,10 @@ A forked thread's first turn gets one extra step. [`ProviderCommandReactor`][cmd
 thread has a `forkedFrom` origin and an unconsumed fork context row; if so, it prepends the bounded
 transcript captured from the source thread to the provider input for that turn only, honoring the
 120,000-character input limit by packing the newest entries first and noting how many older entries
-were omitted. Every later turn on that thread sends only the user's own message, exactly as on any
-other thread. The persisted user message is never rewritten, and no adapter needs to know a fork
-happened.
+were omitted. Keep the captured snapshot after marking it consumed: rewinding the first turn can
+remove the provider's copy, so its replacement turn needs the same snapshot again. Ordinary later
+turns send only the user's own message. The persisted user message is never rewritten, and no
+adapter needs to know a fork happened.
 
 ## Server-side workers
 

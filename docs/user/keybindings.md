@@ -25,6 +25,40 @@ and devices, revealing the destination's profile and Space. It does not change t
 shortcuts or next/previous sidebar order. The command palette also offers **Return to previous
 chat**. Customize `thread.quickReturn` in Settings; its default leaves focused terminals alone.
 
+## Composer controls
+
+In **Settings → General → Send shortcut**, choose whether Enter sends, requires
+`mod+Enter` for multiline prompts, or always requires `mod+Enter`. `Shift+Enter`
+inserts a new line. This applies to the web and desktop composer at desktop widths.
+
+**Follow-up behavior** chooses Queue or Steer while the agent runs. Use
+`mod+Enter` to do the opposite for one message. When sending requires `mod+Enter`,
+use `mod+Shift+Enter` for the opposite action. In a new thread, `mod+Enter` keeps
+starting the thread in the background.
+
+Use `mod+shift+m` to choose a model and `mod+alt+h` to choose a host.
+Use `mod+shift+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
+workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
+current checkout, a new worktree, and the previous worktree when available.
+Use `mod+shift+l` to reuse the previous worktree directly.
+
+In the model picker, press Left in an empty search field or Shift+Tab to reach
+the provider list. Use Up/Down to move and Enter to choose. Right returns to
+model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
+search. These provider shortcuts can also be changed in Settings.
+
+These shortcuts run inside the focused web or desktop client. `mod` uses Command
+on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
+Hyprland. If a custom desktop shortcut takes the same keys, choose another binding
+in Settings.
+
+## Copy pull request references
+
+With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`
+to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
+Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
+or “Copy Number”. They copy the selected PR and leave terminal input alone.
+
 ## Edit the configuration file
 
 Keybindings live on the environment's machine, in
@@ -59,7 +93,12 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 ## When conditions
 
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
-`previewOpen`, and `modelPickerOpen`. Unknown keys evaluate to `false`.
+`previewOpen`, `modelPickerOpen`, `isWeb`, and `isDesktop`. `isWeb` is true in a
+browser tab. `isDesktop` is true in the desktop app. Unknown keys evaluate to
+`false`.
+
+`mod+1` through `mod+9` select Spaces, or models while the model picker is open.
+Use `mod+shift+h` to open the global dashboard. These bindings work in web and desktop.
 
 Combine keys with `!` for not, `&&` for and, `||` for or, and parentheses:
 

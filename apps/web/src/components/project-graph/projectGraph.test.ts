@@ -53,6 +53,7 @@ function thread(overrides: Partial<EnvironmentThreadShell> = {}): EnvironmentThr
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
+    pullRequests: [],
     ...overrides,
   };
 }

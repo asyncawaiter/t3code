@@ -1,5 +1,9 @@
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { assert, describe, it } from "vite-plus/test";
+import {
+  compileResolvedKeybindingsConfig,
+  DEFAULT_RESOLVED_KEYBINDINGS,
+  mergeWithDefaultKeybindings,
+} from "@t3tools/shared/keybindings";
 
 import {
   type KeybindingCommand,
@@ -10,6 +14,7 @@ import {
 import {
   formatShortcutLabel,
   isDiffToggleShortcut,
+  isRichTextBoldShortcut,
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
   isOpenFavoriteEditorShortcut,
@@ -535,6 +540,31 @@ describe("thread navigation helpers", () => {
       }),
     );
   });
+
+  it("uses separate chat and Space jumps on web and desktop", () => {
+    for (const isDesktop of [false, true]) {
+      for (const [ctrlKey, command] of [
+        [false, "space.jump.1"],
+        [true, "thread.jump.1"],
+      ] as const) {
+        assert.equal(
+          resolveShortcutCommand(
+            event({ key: "1", metaKey: true, ctrlKey }),
+            DEFAULT_RESOLVED_KEYBINDINGS,
+            { platform: "MacIntel", context: { isDesktop } },
+          ),
+          command,
+        );
+      }
+      assert.isTrue(
+        shouldShowThreadJumpHintsForModifiers(
+          event({ metaKey: true, ctrlKey: true }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          { platform: "MacIntel", context: { isDesktop } },
+        ),
+      );
+    }
+  });
 });
 
 describe("model picker navigation helpers", () => {
@@ -545,6 +575,20 @@ describe("model picker navigation helpers", () => {
     assert.strictEqual(modelPickerJumpIndexFromCommand("modelPicker.jump.1"), 0);
     assert.strictEqual(modelPickerJumpIndexFromCommand("modelPicker.jump.3"), 2);
     assert.isNull(modelPickerJumpIndexFromCommand("thread.jump.1"));
+  });
+
+  it("lets the model picker own digits only while open on either client", () => {
+    for (const isDesktop of [false, true]) {
+      for (const modelPickerOpen of [false, true]) {
+        assert.equal(
+          resolveShortcutCommand(event({ key: "3", metaKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform: "MacIntel",
+            context: { isDesktop, modelPickerOpen },
+          }),
+          modelPickerOpen ? "modelPicker.jump.3" : "space.jump.3",
+        );
+      }
+    }
   });
 });
 
@@ -963,6 +1007,21 @@ describe("isTerminalClearShortcut", () => {
   });
 });
 
+describe("isRichTextBoldShortcut", () => {
+  it("matches Mod+B without extra modifiers", () => {
+    assert.isTrue(isRichTextBoldShortcut(event({ key: "b", metaKey: true })));
+    assert.isTrue(isRichTextBoldShortcut(event({ key: "B", ctrlKey: true })));
+  });
+
+  it("ignores shifted, alted, bare, and non-keydown presses", () => {
+    assert.isFalse(isRichTextBoldShortcut(event({ key: "b", metaKey: true, shiftKey: true })));
+    assert.isFalse(isRichTextBoldShortcut(event({ key: "b", metaKey: true, altKey: true })));
+    assert.isFalse(isRichTextBoldShortcut(event({ key: "b" })));
+    assert.isFalse(isRichTextBoldShortcut(event({ key: "i", metaKey: true })));
+    assert.isFalse(isRichTextBoldShortcut(event({ type: "keyup", key: "b", metaKey: true })));
+  });
+});
+
 describe("terminalDeleteShortcutData", () => {
   it("maps Cmd+Backspace on macOS to delete-to-line-start", () => {
     assert.strictEqual(
@@ -1079,4 +1138,211 @@ it("keeps Space, profile, and chat digits distinct and yields to the model picke
   assert.equal(resolve({ ctrlKey: true }), "thread.jump.1");
   assert.equal(resolve({}, true), "modelPicker.jump.1");
   assert.isNull(resolve({ shiftKey: true }));
+});
+
+describe("composer and pull request shortcuts", () => {
+  it("fills missing number shortcuts without replacing the saved URL binding", () => {
+    const olderServerBindings = DEFAULT_RESOLVED_KEYBINDINGS.filter(
+      (binding) =>
+        binding.command !== "pullRequest.copyNumber" && binding.command !== "thread.copyReference",
+    );
+    const bindings = mergeWithDefaultKeybindings([
+      ...olderServerBindings,
+      ...compileResolvedKeybindingsConfig([
+        { key: "mod+shift+8", command: "thread.copyReference", when: "!terminalFocus" },
+      ]),
+    ]);
+    for (const [key, command] of [
+      ["k", "pullRequest.copyNumber"],
+      ["8", "thread.copyReference"],
+      ["c", null],
+      ["y", null],
+    ] as const) {
+      assert.strictEqual(
+        resolveShortcutCommand(event({ key, metaKey: true, shiftKey: true }), bindings, {
+          platform: "MacIntel",
+        }),
+        command,
+      );
+    }
+  });
+
+  it.each(["terminalOpen", "previewFocus", "previewOpen", "modelPickerOpen", "isWeb", "isDesktop"])(
+    "honors custom PR shortcut conditions for %s",
+    (condition) => {
+      const bindings = compileResolvedKeybindingsConfig([
+        { key: "mod+shift+k", command: "thread.copyReference", when: condition },
+        { key: "mod+shift+k", command: "pullRequest.copyNumber", when: `!${condition}` },
+      ]);
+      const input = event({ key: "k", ctrlKey: true, shiftKey: true });
+      for (const enabled of [false, true]) {
+        assert.strictEqual(
+          resolveShortcutCommand(input, bindings, {
+            platform: "Linux",
+            context: { [condition]: enabled },
+          }),
+          enabled ? "thread.copyReference" : "pullRequest.copyNumber",
+        );
+      }
+    },
+  );
+
+  const shortcuts = [
+    ["e", "composer.effort"],
+    ["a", "composer.mode"],
+    ["x", "composer.workspace"],
+    ["g", "composer.branch"],
+    ["l", "composer.previousWorktree"],
+    ["c", "thread.copyReference"],
+    ["k", "pullRequest.copyNumber"],
+    ["Enter", "thread.steerQueuedMessage"],
+  ] as const;
+
+  for (const platform of ["MacIntel", "Win32", "Linux"]) {
+    it.each(shortcuts)(
+      `resolves %s on ${platform} and leaves terminal input alone`,
+      (key, command) => {
+        const input = event({
+          key,
+          shiftKey: true,
+          metaKey: platform === "MacIntel",
+          ctrlKey: platform !== "MacIntel",
+        });
+        assert.strictEqual(
+          resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { terminalFocus: false },
+          }),
+          command,
+        );
+        assert.isNull(
+          resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { terminalFocus: true },
+          }),
+        );
+      },
+    );
+  }
+
+  for (const platform of ["MacIntel", "Win32", "Linux"]) {
+    it.each([
+      ["s", "thread.settle"],
+      ["p", "thread.pin"],
+    ])(`preserves the existing %s shortcut on ${platform}`, (key, command) => {
+      assert.strictEqual(
+        resolveShortcutCommand(
+          event({
+            key,
+            shiftKey: true,
+            metaKey: platform === "MacIntel",
+            ctrlKey: platform !== "MacIntel",
+          }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          { platform },
+        ),
+        command,
+      );
+    });
+  }
+
+  const altEffortBindings = compileResolvedKeybindingsConfig([
+    { key: "mod+alt+e", command: "composer.effort", when: "!terminalFocus" },
+  ]);
+
+  it("leaves AltGr text entry alone with a custom Alt binding", () => {
+    for (const platform of ["Win32", "Linux"]) {
+      const input = event({
+        key: "€",
+        code: "KeyE",
+        ctrlKey: true,
+        altKey: true,
+        getModifierState: (key) => key === "AltGraph",
+      });
+      assert.isNull(resolveShortcutCommand(input, altEffortBindings, { platform }));
+      assert.strictEqual(
+        resolveShortcutCommand({ ...input, getModifierState: () => false }, altEffortBindings, {
+          platform,
+        }),
+        "composer.effort",
+      );
+    }
+  });
+
+  it("keeps Firefox modifier reporting usable on Windows and macOS", () => {
+    const getModifierState = (key: string) => key === "AltGraph";
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "e", ctrlKey: true, altKey: true, getModifierState }),
+        altEffortBindings,
+        { platform: "Win32" },
+      ),
+      "composer.effort",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "´", code: "KeyE", metaKey: true, altKey: true, getModifierState }),
+        altEffortBindings,
+        { platform: "MacIntel" },
+      ),
+      "composer.effort",
+    );
+  });
+
+  it.each(shortcuts)("uses a custom binding for %s", (_key, command) => {
+    const bindings = compileResolvedKeybindingsConfig([
+      { key: "mod+shift+y", command, when: "!terminalFocus" },
+    ]);
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "Y", code: "KeyY", ctrlKey: true, shiftKey: true }),
+        bindings,
+        { platform: "Linux" },
+      ),
+      command,
+    );
+  });
+
+  for (const platform of ["MacIntel", "Win32", "Linux"]) {
+    it.each([
+      ["ArrowUp", "modelPicker.previousProvider"],
+      ["ArrowDown", "modelPicker.nextProvider"],
+    ] as const)(`limits %s to the model picker on ${platform}`, (key, command) => {
+      const input = event({
+        key,
+        shiftKey: true,
+        metaKey: platform === "MacIntel",
+        ctrlKey: platform !== "MacIntel",
+      });
+      assert.strictEqual(
+        resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { modelPickerOpen: true },
+        }),
+        command,
+      );
+      assert.isNull(
+        resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { modelPickerOpen: false },
+        }),
+      );
+    });
+  }
+});
+
+it("keeps the global dashboard shortcut separate from the host picker", () => {
+  for (const [altKey, shiftKey, command] of [
+    [false, true, "dashboard.toggle"],
+    [true, false, "composer.host"],
+  ] as const) {
+    assert.equal(
+      resolveShortcutCommand(
+        event({ key: "h", metaKey: true, altKey, shiftKey }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "MacIntel", context: { terminalFocus: false } },
+      ),
+      command,
+    );
+  }
 });

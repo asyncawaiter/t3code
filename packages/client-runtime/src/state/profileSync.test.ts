@@ -9,7 +9,7 @@ import {
   OUTSIDE_SPACES,
   moveProjectToProfile,
   saveSharedProfiles,
-} from "./profileSync";
+} from "./profileSync.ts";
 
 const godel = Schema.decodeUnknownSync(EnvironmentId)("godel");
 const poly = Schema.decodeUnknownSync(EnvironmentId)("poly");
@@ -255,6 +255,17 @@ describe("fork placement", () => {
     expect(result[1]).toBe(unrelated);
     expect(parent.spaces?.[0]?.threads).toHaveLength(1);
     expect(inheritForkPlacement(result, input)[0]?.spaces?.[0]?.threads).toHaveLength(2);
+  });
+  it("places every model fanout child beside its source draft", () => {
+    const result = ["codex-child", "claude-child"].reduce<readonly Profile[]>(
+      (profiles, threadId) => inheritForkPlacement(profiles, { ...input, threadId }),
+      [parent],
+    );
+    expect(result[0]?.spaces?.[0]?.threads.map((thread) => thread.threadKey)).toEqual([
+      "godel:source",
+      "godel:codex-child",
+      "godel:claude-child",
+    ]);
   });
   it("keeps Default forks in Default and does not match another device's identical IDs", () => {
     const profiles = [parent];
