@@ -2,7 +2,7 @@ import { DashboardPage } from "../components/dashboard/DashboardPage";
 import { WorkspaceViews } from "../components/spaces/WorkspaceViews";
 import { workspaceView } from "../components/spaces/workspaceView";
 import { ALL_PROFILE } from "@t3tools/contracts";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { GitBranchIcon, PlusIcon } from "lucide-react";
 import { ALL_PROFILE_ID } from "@t3tools/contracts";
@@ -44,6 +44,7 @@ export const Route = createFileRoute("/_chat/spaces/$profileId")({
 
 function SpaceOverview() {
   const { profileId } = Route.useParams();
+  const activation = useLocation({ select: (location) => location.state.overviewActivation });
   const { space: spaceId, unsorted, view, folder: folderKey, focus } = Route.useSearch();
   const navigate = Route.useNavigate();
   const spaceGesture = useRef({ delta: 0, at: 0, switched: 0 });
@@ -103,11 +104,14 @@ function SpaceOverview() {
     ? "Space unavailable"
     : unsorted
       ? "Unsorted"
-      : (space?.name ?? "All chats");
+      : (space?.name ?? profile?.name ?? "All chats");
 
   if (!missing && !view) {
     return (
-      <DashboardPage key={`${profileId}:${filter}`} scope={{ profileId, spaceId, unsorted }} />
+      <DashboardPage
+        key={`${profileId}:${filter}:${activation ?? ""}`}
+        scope={{ profileId, spaceId, unsorted }}
+      />
     );
   }
 

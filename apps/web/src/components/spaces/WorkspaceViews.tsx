@@ -1,3 +1,7 @@
+import {
+  globalDashboardNavigation,
+  scopedOverviewNavigation,
+} from "../../lib/globalDashboardNavigation";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Columns3Icon, LayoutDashboardIcon, FolderOpenIcon } from "lucide-react";
 import { useUiStateStore } from "../../uiStateStore";
@@ -54,7 +58,15 @@ export function WorkspaceViews({
       <nav aria-label="Workspace views" className="flex shrink-0 items-center gap-0.5">
         {(
           [
-            ["overview", "Dashboard", LayoutDashboardIcon],
+            [
+              "overview",
+              space || filter === OUTSIDE_SPACES
+                ? "Space overview"
+                : profile
+                  ? "Profile overview"
+                  : "Dashboard",
+              LayoutDashboardIcon,
+            ],
             ["folders", "Folders", FolderOpenIcon],
             ["columns", "Columns", Columns3Icon],
           ] as const
@@ -73,19 +85,28 @@ export function WorkspaceViews({
                   : "text-muted-foreground"
               }
               aria-pressed={view === key || (key === "folders" && view === "branches")}
-              onClick={() =>
-                void (key === "overview" && !onSpace && profileId === "all" && !filter
-                  ? navigate({ to: "/dashboard" })
-                  : navigate({
-                      to: "/spaces/$profileId",
-                      params: { profileId },
-                      search: {
-                        space: filter && filter !== OUTSIDE_SPACES ? filter : undefined,
-                        unsorted: filter === OUTSIDE_SPACES,
-                        view: key === "overview" ? undefined : key,
+              onClick={() => {
+                const overviewScope = {
+                  profileId,
+                  spaceId: filter && filter !== OUTSIDE_SPACES ? filter : undefined,
+                  unsorted: filter === OUTSIDE_SPACES,
+                };
+                void navigate(
+                  key === "overview"
+                    ? profileId === "all" && !filter
+                      ? globalDashboardNavigation()
+                      : scopedOverviewNavigation(overviewScope)
+                    : {
+                        to: "/spaces/$profileId",
+                        params: { profileId },
+                        search: {
+                          space: overviewScope.spaceId,
+                          unsorted: overviewScope.unsorted,
+                          view: key,
+                        },
                       },
-                    }))
-              }
+                );
+              }}
             >
               <Icon className="size-3.5" />
               {label}

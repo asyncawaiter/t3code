@@ -1,3 +1,4 @@
+import { useLocation } from "@tanstack/react-router";
 import { useComposerDraftStore, composerDraftHasUserContent } from "../../composerDraftStore";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { SpaceLaunch } from "./SpaceLaunch";
@@ -16,6 +17,7 @@ import {
   Layers3Icon,
   MessageSquareIcon,
   SquarePenIcon,
+  LayoutDashboardIcon,
 } from "lucide-react";
 import {
   type Profile,
@@ -118,6 +120,7 @@ export function SpaceToolbar({
   onCreated,
   selectedSpaceId,
   onFilterChange,
+  onOverview,
 }: {
   profile: Profile;
   onChange: (profile: Profile) => void | Promise<void>;
@@ -125,8 +128,16 @@ export function SpaceToolbar({
   onCreated?: (id: string) => void;
   selectedSpaceId: string | null;
   onFilterChange: (id: string | null) => void;
+  onOverview: () => void;
 }) {
   const [creating, setCreating] = useState(false);
+  const location = useLocation();
+  const search = new URLSearchParams(location.searchStr);
+  const overviewActive =
+    location.pathname === `/spaces/${encodeURIComponent(profile.id)}` &&
+    !search.get("space") &&
+    search.get("unsorted") !== "true" &&
+    !search.get("view");
   useEffect(() => {
     const create = () => {
       if (!disabled && profile.id !== ALL_PROFILE_ID) setCreating(true);
@@ -136,14 +147,28 @@ export function SpaceToolbar({
   }, [disabled, profile.id]);
   return (
     <div className="px-1 pt-1" data-thread-selection-safe>
-      <div className="flex h-7 items-center justify-between px-1.5">
-        <span className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-sidebar-muted-foreground">
-          <span className="truncate font-medium text-sidebar-foreground">{profile.name}</span>
-          <span aria-hidden="true" className="opacity-50">
-            /
-          </span>
-          <span>Spaces</span>
+      <div className="mb-1 flex min-h-8 items-center justify-between gap-2 border-b border-sidebar-border/50 px-1.5 pb-1">
+        <span className="min-w-0 truncate text-xs font-medium text-sidebar-foreground">
+          {profile.name}
         </span>
+        <Button
+          size="xs"
+          variant="ghost"
+          aria-pressed={overviewActive}
+          onClick={onOverview}
+          className={cn(
+            "shrink-0 gap-1.5 text-[11px]",
+            overviewActive
+              ? "bg-sidebar-row-active text-sidebar-foreground ring-1 ring-sidebar-border"
+              : "text-sidebar-muted-foreground",
+          )}
+        >
+          <LayoutDashboardIcon className="size-3.5" />
+          Profile overview
+        </Button>
+      </div>
+      <div className="flex h-7 items-center justify-between px-1.5">
+        <span className="min-w-0 flex-1 text-[11px] text-sidebar-muted-foreground">Spaces</span>
 
         <Button
           size="xs"

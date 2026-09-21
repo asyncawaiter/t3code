@@ -1,3 +1,4 @@
+import { dashboardStorageScope } from "../../lib/globalDashboardNavigation";
 import { TaskShelf } from "../tasks/TaskShelf";
 import { openWorkItem, useWorkItems } from "../../workItems";
 import { DashboardSavedViews, type DashboardView } from "./DashboardSavedViews";
@@ -105,9 +106,7 @@ export function DashboardPage({
 }: {
   scope?: { profileId: string; spaceId?: string | undefined; unsorted: boolean };
 }) {
-  const storageScope = scope
-    ? `t3.dashboard.${scope.profileId}:${scope.spaceId ?? scope.unsorted}`
-    : "t3.dashboard.global";
+  const storageScope = dashboardStorageScope(scope);
   const [globalProfileId, setDashboardProfileId] = useLocalStorage(
     "t3.dashboard.global.profileFilter",
     null,

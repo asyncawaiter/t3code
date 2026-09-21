@@ -31,6 +31,6 @@ The phone dashboard supports task capture, editing, screenshot selection or clip
 
 ## Inspect a Space
 
-Click a Space to open its dashboard filtered to that Space. The permanent Global dashboard button in the sidebar, or Cmd+Shift+H on macOS, opens all profiles and Spaces and clears device, folder, provider, search, and Git narrowing. Saved views remain available. Scope, device, folder, provider, and Git filters remain visible; saved views preserve combinations you reuse.
+Click a profile to open its **Profile overview**, including all its Spaces and Unsorted chats. The Profile overview button above the Space tiles returns to this view. Click a Space to open its **Space overview**; the same button stays available beside Folders and Columns while reading chats. These overview entries clear narrower filters for their scope. **All chats** filters the sidebar list without changing the main view. The permanent Global dashboard button in the sidebar, or Cmd+Shift+H on macOS, opens all profiles and Spaces and clears device, folder, provider, search, and Git narrowing. Saved views remain available. Scope, device, folder, provider, and Git filters remain visible; saved views preserve combinations you reuse.
 
 **Folders** shows associated folders, instruction file lists, and checkout state directly. Select an instruction file to read it. Paths and scope distinguish parent, folder-level, and nested instructions. Branch graphs and the device's file manager remain available from each folder.

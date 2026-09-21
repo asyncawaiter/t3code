@@ -1,6 +1,9 @@
 import { Input } from "./ui/input";
 import { SearchIcon } from "lucide-react";
-import { globalDashboardNavigation } from "../lib/globalDashboardNavigation";
+import {
+  globalDashboardNavigation,
+  scopedOverviewNavigation,
+} from "../lib/globalDashboardNavigation";
 import { spaceDeviceDefaults } from "@t3tools/contracts";
 import { useWorkflowState } from "../workflowState";
 import { useWorkflowNavigation } from "../hooks/useWorkflowNavigation";
@@ -2451,27 +2454,13 @@ export default function Sidebar() {
   const setActiveProfileId = useCallback(
     (id: string | null) => {
       useUiStateStore.getState().setActiveProfileId(id);
-      if (!router.state.location.pathname.startsWith("/spaces/")) return;
       if (id === null) {
         void router.navigate(globalDashboardNavigation());
         return;
       }
-      const profile = resolvedProfiles.find((item) => item.id === id);
-      if (!profile) return;
-      const selection = useUiStateStore.getState().spaceSelection;
-      const filter = resolveSidebarSpaceFilter(
-        profile,
-        selection ? selection.filter : OUTSIDE_SPACES,
-      );
-      void router.navigate({
-        to: "/spaces/$profileId",
-        params: { profileId: id },
-        search: {
-          space: filter === OUTSIDE_SPACES ? undefined : (filter ?? undefined),
-          unsorted: filter === OUTSIDE_SPACES,
-          ...(router.state.location.search.view === "columns" ? { view: "columns" as const } : {}),
-        },
-      });
+      if (!resolvedProfiles.some((profile) => profile.id === id)) return;
+      useUiStateStore.setState((state) => selectSidebarSpace(state, id, null));
+      void router.navigate(scopedOverviewNavigation({ profileId: id, unsorted: false }));
     },
     [router, resolvedProfiles],
   );
@@ -2582,15 +2571,14 @@ export default function Sidebar() {
   const setSelectedSpaceId = useCallback(
     (filter: string | null) => {
       useUiStateStore.setState((state) => selectSidebarSpace(state, activeProfile.id, filter));
-      void router.navigate({
-        to: "/spaces/$profileId",
-        params: { profileId: activeProfile.id },
-        search: {
-          space: filter === OUTSIDE_SPACES ? undefined : (filter ?? undefined),
+      if (filter === null) return;
+      void router.navigate(
+        scopedOverviewNavigation({
+          profileId: activeProfile.id,
+          spaceId: filter === OUTSIDE_SPACES ? undefined : filter,
           unsorted: filter === OUTSIDE_SPACES,
-          ...(router.state.location.search.view === "columns" ? { view: "columns" as const } : {}),
-        },
-      });
+        }),
+      );
     },
     [activeProfile.id, router],
   );
@@ -6178,6 +6166,7 @@ export default function Sidebar() {
                                 onChange={changeSpaces}
                                 selectedSpaceId={spaceFilter}
                                 onFilterChange={setSelectedSpaceId}
+                                onOverview={() => setActiveProfileId(activeProfile.id)}
                                 disabled={!primarySettingsLoaded}
                               />
                               <SortableContext

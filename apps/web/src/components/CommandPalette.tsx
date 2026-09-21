@@ -1,7 +1,10 @@
 import { COMMAND_PALETTE_META_ICON_CLASS, CommandPaletteMetaDot } from "./ThreadCommandSubtitle";
 ("use client");
 
-import { globalDashboardNavigation } from "../lib/globalDashboardNavigation";
+import {
+  globalDashboardNavigation,
+  scopedOverviewNavigation,
+} from "../lib/globalDashboardNavigation";
 import { openWorkItem } from "../workItems";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useWorkflowState } from "../workflowState";
@@ -1882,6 +1885,11 @@ function OpenCommandPaletteDialog(props: {
         icon: <CircleIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
           setActiveProfileId(profile.id === ALL_PROFILE_ID ? null : profile.id);
+          await navigate(
+            profile.id === ALL_PROFILE_ID
+              ? globalDashboardNavigation()
+              : scopedOverviewNavigation({ profileId: profile.id, unsorted: false }),
+          );
         },
       });
     }
