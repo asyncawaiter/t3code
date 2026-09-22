@@ -7,6 +7,7 @@ import type { WorkItem } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_CHAT_BOARD,
   EnvironmentId,
   ModelSelection,
   ProjectId,
@@ -1761,4 +1762,45 @@ it.effect("persists tasks and claims attachments beyond pending upload expiry", 
       .pipe(Effect.result);
     assert.equal(conflict._tag, "Failure");
   }).pipe(Effect.provide(makeServerSettingsLayer().pipe(Layer.provideMerge(NodeServices.layer)))),
+);
+
+it.effect("streams shared columns to two clients and refuses stale board overwrites", () =>
+  Effect.gen(function* () {
+    const settings = yield* ServerSettingsModule.ServerSettingsService;
+    const first = {
+      ...DEFAULT_CHAT_BOARD,
+      order: ["godel:a", "poly:b"],
+      widths: { "poly:b": 560 },
+    };
+    const a = yield* settings.subscribeChanges;
+    const b = yield* settings.subscribeChanges;
+    yield* settings.updateSettings({ chatBoards: [first] }, undefined, undefined, undefined, []);
+    assert.deepEqual(Option.getOrThrow(yield* Stream.runHead(a)).chatBoards, [first]);
+    assert.deepEqual(Option.getOrThrow(yield* Stream.runHead(b)).chatBoards, [first]);
+    yield* settings.updateSettings(
+      { chatBoards: [{ ...first, name: "Review" }] },
+      undefined,
+      undefined,
+      undefined,
+      [first],
+    );
+    const stale = yield* settings
+      .updateSettings(
+        { chatBoards: [{ ...first, name: "Other" }] },
+        undefined,
+        undefined,
+        undefined,
+        [first],
+      )
+      .pipe(Effect.exit);
+    assert.equal(stale._tag, "Failure");
+    const missingBase = yield* settings.updateSettings({ chatBoards: [] }).pipe(Effect.exit);
+    assert.equal(missingBase._tag, "Failure");
+    assert.equal((yield* settings.getSettings).chatBoards?.[0]?.name, "Review");
+    assert.deepEqual((yield* settings.getSettings).chatBoards?.[0]?.widths, { "poly:b": 560 });
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(makeServerSettingsLayer()),
+    Effect.provide(NodeServices.layer),
+  ),
 );

@@ -3,7 +3,7 @@ import { WorkspaceViews } from "../components/spaces/WorkspaceViews";
 import { workspaceView } from "../components/spaces/workspaceView";
 import { ALL_PROFILE } from "@t3tools/contracts";
 import { createFileRoute, useLocation } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { GitBranchIcon, PlusIcon } from "lucide-react";
 import { ALL_PROFILE_ID } from "@t3tools/contracts";
 import { spaceOverviewThreads } from "../components/sidebar/Spaces.logic";
@@ -47,7 +47,6 @@ function SpaceOverview() {
   const activation = useLocation({ select: (location) => location.state.overviewActivation });
   const { space: spaceId, unsorted, view, folder: folderKey, focus } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const spaceGesture = useRef({ delta: 0, at: 0, switched: 0 });
   const { environments } = useEnvironments();
   const profiles = usePrimarySettings((settings) => settings.profiles);
   const profile =
@@ -57,11 +56,12 @@ function SpaceOverview() {
   const threads = useThreadShells();
   const projects = useProjects();
   useEffect(() => {
+    if (view === "columns") return;
     useUiStateStore.getState().setActiveProfileId(profileId === ALL_PROFILE_ID ? null : profileId);
     useUiStateStore.setState((state) => selectSidebarSpace(state, profileId, filter));
-  }, [profileId, filter]);
+  }, [profileId, filter, view]);
 
-  const missing = !profile || (!!spaceId && !space);
+  const missing = view !== "columns" && (!profile || (!!spaceId && !space));
   const chats =
     profileId === ALL_PROFILE_ID
       ? threads.filter(
@@ -189,94 +189,7 @@ function SpaceOverview() {
           )}
           {!missing && view === "columns" ? (
             <Suspense fallback={<p>Loading chats...</p>}>
-              <ChatColumns
-                key={`${profileId}:${filter}`}
-                scope={`${profileId}:${filter}`}
-                navigation={
-                  <nav
-                    aria-label="Switch Space"
-                    className="flex min-w-0 flex-1 gap-1 overflow-x-auto p-1 [scrollbar-width:thin]"
-                    aria-description="Scroll here to switch Spaces, or focus a Space and use arrow keys"
-                    onWheel={(event) => {
-                      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || event.ctrlKey) return;
-                      const now = performance.now(),
-                        gesture = spaceGesture.current;
-                      if (now - gesture.switched < 600) return;
-                      if (
-                        now - gesture.at > 180 ||
-                        Math.sign(event.deltaY) !== Math.sign(gesture.delta)
-                      )
-                        gesture.delta = 0;
-                      gesture.at = now;
-                      gesture.delta += event.deltaY;
-                      if (Math.abs(gesture.delta) < 90) return;
-                      const buttons = Array.from(event.currentTarget.querySelectorAll("button"));
-                      const index = buttons.findIndex(
-                        (button) => button.getAttribute("aria-pressed") === "true",
-                      );
-                      const next = buttons[index + (gesture.delta > 0 ? 1 : -1)];
-                      gesture.delta = 0;
-                      gesture.switched = now;
-                      next?.click();
-                    }}
-                    onKeyDown={(event) => {
-                      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key))
-                        return;
-                      const buttons = Array.from(event.currentTarget.querySelectorAll("button"));
-                      const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-                      const next =
-                        buttons[
-                          (index +
-                            (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) +
-                            buttons.length) %
-                            buttons.length
-                        ];
-                      if (next) {
-                        event.preventDefault();
-                        next.focus();
-                        next.click();
-                      }
-                    }}
-                  >
-                    {(profileId === ALL_PROFILE_ID ? profiles : profile ? [profile] : []).flatMap(
-                      (owner) =>
-                        [{ id: OUTSIDE_SPACES, name: "Unsorted" }, ...(owner.spaces ?? [])].map(
-                          (item) => (
-                            <Button
-                              key={`${owner.id}:${item.id}`}
-                              size="xs"
-                              variant={
-                                item.id === filter && owner.id === profileId ? "secondary" : "ghost"
-                              }
-                              className={
-                                item.id === filter && owner.id === profileId
-                                  ? "shrink-0 bg-primary/10 text-primary ring-1 ring-inset ring-primary/15"
-                                  : "shrink-0 text-muted-foreground"
-                              }
-                              aria-pressed={item.id === filter && owner.id === profileId}
-                              onClick={() =>
-                                void navigate({
-                                  params: { profileId: owner.id },
-                                  search: {
-                                    space: item.id === OUTSIDE_SPACES ? undefined : item.id,
-                                    unsorted: item.id === OUTSIDE_SPACES,
-                                    view: "columns",
-                                  },
-                                })
-                              }
-                            >
-                              {owner.id !== profileId ? `${owner.name} / ` : ""}
-                              {item.name}
-                            </Button>
-                          ),
-                        ),
-                    )}
-                  </nav>
-                }
-                chats={chats}
-                allChats={threads}
-                focus={focus}
-              />
+              <ChatColumns allChats={threads} focus={focus} />
             </Suspense>
           ) : !missing && view === "branches" && selectedFolder ? (
             <Suspense

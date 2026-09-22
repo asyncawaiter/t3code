@@ -62,19 +62,20 @@ export function TaskShelf({
     </button>
   );
   return (
-    <section aria-label="Planned work" className="col-span-full space-y-2">
+    <section
+      aria-label="Planned work"
+      className="col-span-full space-y-3 rounded-xl border border-border/70 bg-card/50 p-3"
+    >
       <div className="flex items-center gap-2">
         <ClipboardListIcon className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-medium">Planned work</h2>
+        {!eligible.some(({ item }) => item.status !== "done") && (
+          <span className="ml-auto text-xs text-muted-foreground">No planned tasks</span>
+        )}
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-2 empty:hidden sm:grid-cols-2 xl:grid-cols-3">
         {eligible.filter(({ item }) => item.status !== "done").map(render)}
       </div>
-      {!eligible.some(({ item }) => item.status !== "done") && (
-        <p className="text-xs text-muted-foreground">
-          Use New task to save work from a message, a call, or a thought.
-        </p>
-      )}
       {eligible.some(({ item }) => item.status === "done") && (
         <details>
           <summary className="cursor-pointer text-xs text-muted-foreground">

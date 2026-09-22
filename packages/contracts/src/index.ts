@@ -50,3 +50,5 @@ export * from "./threadRewind.ts";
 
 export * from "./workItem.ts";
 export * from "./worktreeSetup.ts";
+
+export * from "./chatBoard.ts";

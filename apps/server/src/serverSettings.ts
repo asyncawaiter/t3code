@@ -1,3 +1,4 @@
+import { mergeChatBoards, type ChatBoard } from "@t3tools/contracts";
 import {
   planAttachmentClaim,
   parseThreadSegmentFromAttachmentId,
@@ -75,9 +76,17 @@ const applyProfilePatch = (
   baseProfiles?: ReadonlyArray<Profile>,
   expectedProfileSourceId?: EnvironmentId | null,
   baseWorkItems?: readonly WorkItem[],
+  baseChatBoards?: readonly ChatBoard[],
 ) =>
   Effect.try({
     try: () => {
+      if (patch.chatBoards && !baseChatBoards)
+        throw new Error("Board changes require the version you edited.");
+      if (patch.chatBoards)
+        patch = {
+          ...patch,
+          chatBoards: mergeChatBoards(current.chatBoards ?? [], baseChatBoards!, patch.chatBoards),
+        };
       if (patch.workItems && !baseWorkItems)
         throw new Error("Task changes require the version you edited.");
       if (patch.workItems)
@@ -264,6 +273,7 @@ export class ServerSettingsService extends Context.Service<
       baseProfiles?: ReadonlyArray<Profile>,
       expectedProfileSourceId?: EnvironmentId | null,
       baseWorkItems?: readonly WorkItem[],
+      baseChatBoards?: readonly ChatBoard[],
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
     /** Stream of settings change events. */
@@ -302,7 +312,13 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
       start: Effect.void,
       ready: Effect.void,
       getSettings: Ref.get(currentSettingsRef).pipe(Effect.map(resolveTextGenerationProvider)),
-      updateSettings: (patch, baseProfiles, expectedProfileSourceId, baseWorkItems) =>
+      updateSettings: (
+        patch,
+        baseProfiles,
+        expectedProfileSourceId,
+        baseWorkItems,
+        baseChatBoards,
+      ) =>
         writes.withPermits(1)(
           Ref.get(currentSettingsRef).pipe(
             Effect.flatMap((currentSettings) =>
@@ -312,6 +328,7 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
                 baseProfiles,
                 expectedProfileSourceId,
                 baseWorkItems,
+                baseChatBoards,
               ),
             ),
             Effect.flatMap(normalizeServerSettings),
@@ -1016,6 +1033,7 @@ const make = Effect.gen(function* () {
     baseProfiles?: ReadonlyArray<Profile>,
     expectedProfileSourceId?: EnvironmentId | null,
     baseWorkItems?: readonly WorkItem[],
+    baseChatBoards?: readonly ChatBoard[],
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
     writeSemaphore.withPermits(1)(
       Effect.gen(function* () {
@@ -1026,6 +1044,7 @@ const make = Effect.gen(function* () {
           baseProfiles,
           expectedProfileSourceId,
           baseWorkItems,
+          baseChatBoards,
         );
         if (patch.workItems) {
           const workItems = yield* Effect.forEach(patched.workItems ?? [], (item) =>

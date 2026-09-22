@@ -1,6 +1,6 @@
 import { expect, it } from "vite-plus/test";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { columnOrder, columnWidth, boardChats } from "./ChatColumns";
+import { columnOrder, columnWidth, boardColumnKeys } from "./ChatColumns";
 it("keeps column order stable, appends new chats, and only retains explicitly chosen settled chats", () => {
   const chat = (id: string) => ({
     id: ThreadId.make(id),
@@ -43,21 +43,21 @@ it("mixes explicit chats from other Spaces and devices without importing every c
   const remote = chat("remote", "one");
   const unrelated = chat("remote", "two");
   const settled = { ...chat("remote", "reference"), settledOverride: "settled" as const };
-  const candidates = boardChats(
-    [local],
-    [local, remote, unrelated, settled],
-    ["local:one", "remote:one", "remote:reference", "missing:chat"],
-  );
-  expect(candidates).toEqual([local, remote, settled]);
+  const layout = {
+    order: ["remote:reference", "missing:chat", "remote:one", "local:one"],
+    kept: ["remote:reference"],
+    hidden: [],
+  };
+  expect(boardColumnKeys([local, remote, unrelated, settled], layout)).toEqual(layout.order);
   expect(
-    columnOrder(candidates, {
-      order: ["remote:reference", "remote:one", "local:one"],
-      kept: ["remote:reference"],
-      hidden: [],
+    boardColumnKeys([local, remote, unrelated, settled], {
+      ...layout,
+      hidden: ["remote:one"],
+      kept: [],
     }),
-  ).toEqual([settled, remote, local]);
-  expect(columnOrder(candidates, { order: [], kept: [], hidden: ["remote:one"] })).toEqual([local]);
+  ).toEqual(["missing:chat", "local:one"]);
 });
+
 it("bounds independently saved widths to a usable range", () => {
   const widths = { first: columnWidth(560), second: columnWidth(380) };
   expect(widths).toEqual({ first: 560, second: 380 });

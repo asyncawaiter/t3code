@@ -1,3 +1,4 @@
+import { ChatBoards } from "./chatBoard.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -600,6 +601,7 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
     patch: ServerSettingsPatch,
     baseProfiles: Schema.optionalKey(Schema.Array(Profile)),
     baseWorkItems: Schema.optionalKey(WorkItems),
+    baseChatBoards: Schema.optionalKey(ChatBoards),
     expectedProfileSourceId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
   }),
   success: ServerSettings,

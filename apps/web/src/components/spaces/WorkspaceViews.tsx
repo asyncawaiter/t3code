@@ -13,31 +13,36 @@ import { workspaceView } from "./workspaceView";
 /** View navigation stays available while reading a chat, without changing its assignment. */
 export function WorkspaceViews({
   embedded = false,
+  navigationOnly = false,
   scope,
 }: {
   embedded?: boolean;
+  navigationOnly?: boolean;
   scope?: { profileId: string; spaceId?: string | undefined; unsorted: boolean };
 }) {
   const location = useLocation();
   const navigate = useNavigate();
   const onSpace = location.pathname.startsWith("/spaces/");
   const search = new URLSearchParams(location.searchStr);
+  const onColumns = onSpace && workspaceView(search.get("view")) === "columns";
   const selectedProfileId = useUiStateStore((state) => state.activeProfileId ?? "all");
   const selectedFilter = useUiStateStore(
     (state) => state.spaceFiltersByProfile?.[selectedProfileId],
   );
   const profileId =
-    scope?.profileId ??
+    (onColumns ? selectedProfileId : scope?.profileId) ??
     (onSpace ? decodeURIComponent(location.pathname.split("/")[2] ?? "all") : selectedProfileId);
-  const filter = scope
-    ? scope.unsorted
-      ? OUTSIDE_SPACES
-      : scope.spaceId
-    : onSpace
-      ? search.get("unsorted") === "true"
+  const filter = onColumns
+    ? selectedFilter
+    : scope
+      ? scope.unsorted
         ? OUTSIDE_SPACES
-        : search.get("space")
-      : selectedFilter;
+        : scope.spaceId
+      : onSpace
+        ? search.get("unsorted") === "true"
+          ? OUTSIDE_SPACES
+          : search.get("space")
+        : selectedFilter;
   const profiles = usePrimarySettings((settings) => settings.profiles);
   const profile = profiles.find((item) => item.id === profileId);
   const space = profile?.spaces?.find((item) => item.id === filter);
@@ -48,13 +53,21 @@ export function WorkspaceViews({
       : null;
   return (
     <div
-      className={`flex min-h-10 shrink-0 items-center gap-3 bg-background py-1 [-webkit-app-region:no-drag] ${embedded ? "w-full" : "border-b border-border/60 px-4"}`}
+      className={`flex min-h-10 shrink-0 items-center gap-3 bg-background py-1 [-webkit-app-region:no-drag] ${navigationOnly ? "" : embedded ? "w-full" : "border-b border-border/60 px-4"}`}
     >
-      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-        {profile?.name ?? "All"}
-        <span className="px-1.5 text-muted-foreground/40">/</span>
-        {`${space?.name ?? (filter === OUTSIDE_SPACES ? "Unsorted" : "All chats")}${view === "columns" ? " board" : ""}`}
-      </span>
+      {!navigationOnly && (
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {onColumns ? (
+            "Columns"
+          ) : (
+            <>
+              {profile?.name ?? "All"}
+              <span className="px-1.5 text-muted-foreground/40">/</span>
+              {space?.name ?? (filter === OUTSIDE_SPACES ? "Unsorted" : "All chats")}
+            </>
+          )}
+        </span>
+      )}
       <nav aria-label="Workspace views" className="flex shrink-0 items-center gap-0.5">
         {(
           [
@@ -98,10 +111,10 @@ export function WorkspaceViews({
                       : scopedOverviewNavigation(overviewScope)
                     : {
                         to: "/spaces/$profileId",
-                        params: { profileId },
+                        params: { profileId: key === "columns" ? "all" : profileId },
                         search: {
-                          space: overviewScope.spaceId,
-                          unsorted: overviewScope.unsorted,
+                          space: key === "columns" ? undefined : overviewScope.spaceId,
+                          unsorted: key === "columns" ? false : overviewScope.unsorted,
                           view: key,
                         },
                       },

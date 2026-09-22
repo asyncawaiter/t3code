@@ -19,13 +19,15 @@ Connected agents have `task_list`, `task_create`, and `task_update` tools for ta
 
 ## Monitor chats side by side
 
-Use the persistent **Columns** view to open a board seeded with the selected Space's active chats. **Choose chats** searches across Spaces, folders, profiles, and devices. Enable **Show settled chats** to add a reference conversation. Mixing chats never changes their assignment. Your custom board is remembered for the Space where you started it.
+**Columns** opens the same independent workspace from any profile or Space. Use **Choose chats** to filter by profile, Space, device, or folder, then select conversations. Changing these filters never removes existing selections. Enable **Show settled chats** to add a reference conversation. Mixing chats never changes their assignment.
 
-Drag each column's right edge to resize it independently. You can also focus the resize edge and use the arrow keys. Double-click an edge to restore its default width, or use **Reset column widths** in Choose chats to reset every column. Scroll horizontally or expand one chat and return to the board afterward. The column menu lets you reorder chats, create a task from a chat, or keep a chat on the board after you settle it. Keeping a column does not pin the chat in the sidebar.
+Start with one board named Columns. Use its menu to rename it, create another board, duplicate an arrangement, or delete an extra board. Board names, selected chats, order, and individual widths are saved on the shared profile source and update on connected clients. Both clients and the shared source need a version that supports shared boards. Reconnect the source to edit an arrangement while it is offline. Conflicting edits to the same board are rejected so another device's changes are not overwritten.
 
-Only the focused column receives global composer shortcuts. Drafts and reading positions survive moving between columns. Offscreen columns release their rendered chat views. Layout choices stay on the viewing device.
+Existing device-local arrangements are imported as separate named boards when each updated client first opens Columns. Their original local settings are retained. The selected board, reading positions, and unsent drafts remain local to each client.
 
-Use the scoped dashboard to see status and work needing attention. In Columns, use the Space rail to switch boards, including Unsorted; arrow keys work while the rail has focus, and vertical trackpad scrolling over the rail changes Spaces. Scrolling inside a conversation stays within that conversation.
+Drag each column's right edge to resize it independently. You can also focus the resize edge and use the arrow keys. Double-click an edge to restore its default width, or use **Equal widths** to reset every column. Smaller windows scroll horizontally without changing saved widths. Expand one chat and return to the board afterward. The column menu lets you reorder chats, create a task from a chat, or keep a chat on the board after you settle it. Keeping a column does not pin the chat in the sidebar. Unavailable chats retain their place until their device reconnects.
+
+Only the focused column receives global composer shortcuts. Offscreen columns release their rendered chat views. Use Profile overview or Space overview for scoped activity, and Folders to inspect instructions and checkouts.
 
 The phone dashboard supports task capture, editing, screenshot selection or clipboard paste, status, brief preparation, and opening a prepared or linked chat with its context and attachments. The multi-column workspace is available in web and desktop layouts.
 

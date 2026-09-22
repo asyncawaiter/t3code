@@ -1,3 +1,4 @@
+import { ChatBoards } from "./chatBoard.ts";
 import { SshDeviceHostConfigs } from "./device.ts";
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
@@ -1148,6 +1149,7 @@ export const ServerSettings = Schema.Struct({
    * The active profile remains a client-local choice.
    */
   workItems: Schema.optionalKey(WorkItems),
+  chatBoards: Schema.optionalKey(ChatBoards),
   profiles: Schema.Array(Profile).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /** The environment holding the shared profile collection. Local copies are retained for recovery. */
   profileSyncSourceId: Schema.NullOr(EnvironmentId).pipe(
@@ -1475,6 +1477,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   profiles: Schema.optionalKey(Schema.Array(Profile)),
   workItems: Schema.optionalKey(WorkItems),
+  chatBoards: Schema.optionalKey(ChatBoards),
   profileSyncSourceId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({

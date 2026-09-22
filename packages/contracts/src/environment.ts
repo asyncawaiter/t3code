@@ -111,6 +111,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   profileSynchronization: Schema.optionalKey(Schema.Boolean),
   spaceDeviceDefaults: Schema.optionalKey(Schema.Boolean),
   workItems: Schema.optionalKey(Schema.Boolean),
+  chatBoards: Schema.optionalKey(Schema.Boolean),
   storageCleanup: Schema.optionalKey(Schema.Boolean),
   projectWorktreeCleanup: Schema.optionalKey(Schema.Boolean),
   /** Server persists the opt-in for continuing interrupted threads after restarts. */

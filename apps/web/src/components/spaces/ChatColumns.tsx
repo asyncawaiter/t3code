@@ -1,3 +1,6 @@
+import { useChatBoards } from "../../hooks/useChatBoards";
+import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
+import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import { useEffect, useMemo, useLayoutEffect, useRef, useState, lazy, Suspense } from "react";
 import * as Schema from "effect/Schema";
 import {
@@ -42,31 +45,11 @@ const Layout = Schema.Struct({
   hidden: Schema.Array(Schema.String),
   kept: Schema.Array(Schema.String),
 });
-const EMPTY_LAYOUT = { order: [], kept: [], hidden: [] };
 export const columnWidth = (width: number) =>
   Math.max(340, Math.min(1000, Number.isFinite(width) ? width : 420));
-const Widths = Schema.Record(Schema.String, Schema.Finite);
-const Added = Schema.Array(Schema.String);
-const NO_ADDED: string[] = [];
-const EMPTY_WIDTHS: Record<string, number> = {};
+
 const keyOf = (chat: Pick<EnvironmentThreadShell, "environmentId" | "id">) =>
   `${chat.environmentId}:${chat.id}`;
-
-export function boardChats<T extends Pick<EnvironmentThreadShell, "environmentId" | "id">>(
-  defaults: readonly T[],
-  available: readonly T[],
-  added: readonly string[],
-) {
-  const chosen = new Set(added);
-  return [
-    ...new Map(
-      [...defaults, ...available.filter((chat) => chosen.has(keyOf(chat)))].map((chat) => [
-        keyOf(chat),
-        chat,
-      ]),
-    ).values(),
-  ];
-}
 
 export function columnOrder<
   T extends Pick<
@@ -89,28 +72,64 @@ export function columnOrder<
   ].flatMap((key) => (byKey.has(key) ? [byKey.get(key)!] : []));
 }
 
+export function boardColumnKeys(
+  chats: Parameters<typeof columnOrder>[0],
+  layout: typeof Layout.Type,
+) {
+  const visible = new Set(columnOrder(chats, layout).map(keyOf));
+  const known = new Set(chats.map(keyOf));
+  return layout.order.filter(
+    (key) => !layout.hidden.includes(key) && (visible.has(key) || !known.has(key)),
+  );
+}
+
 export default function ChatColumns({
-  chats,
-  scope,
+  allChats,
   focus,
-  allChats = chats,
-  navigation,
 }: {
-  chats: readonly EnvironmentThreadShell[];
-  allChats?: readonly EnvironmentThreadShell[];
-  scope: string;
-  navigation?: React.ReactNode;
+  allChats: readonly EnvironmentThreadShell[];
   focus?: string | undefined;
 }) {
-  const [layout, setLayout] = useLocalStorage(`t3.chat-columns.${scope}`, EMPTY_LAYOUT, Layout);
-  const [added, setAdded] = useLocalStorage(`t3.chat-columns.added.${scope}`, NO_ADDED, Added);
-  const [widths, setWidths] = useLocalStorage(
-    `t3.chat-columns.widths.${scope}`,
-    EMPTY_WIDTHS,
-    Widths,
+  const state = useChatBoards();
+  return <BoardColumns key={state.board.id} state={state} allChats={allChats} focus={focus} />;
+}
+
+function BoardColumns({
+  state,
+  allChats,
+  focus,
+}: {
+  state: ReturnType<typeof useChatBoards>;
+  allChats: readonly EnvironmentThreadShell[];
+  focus?: string | undefined;
+}) {
+  const layout = state.board;
+  const widths = layout.widths;
+  const disabled = state.pending || !!state.unavailable;
+  const setLayout = (
+    update: typeof Layout.Type | ((current: typeof Layout.Type) => typeof Layout.Type),
+  ) => {
+    void state.update({ ...layout, ...(typeof update === "function" ? update(layout) : update) });
+  };
+  const setWidths = (
+    update: Record<string, number> | ((current: typeof widths) => Record<string, number>),
+  ) => {
+    void state.update({
+      ...layout,
+      widths: typeof update === "function" ? update(widths) : update,
+    });
+  };
+  const candidates = useMemo(
+    () => allChats.filter((chat) => layout.order.includes(keyOf(chat))),
+    [allChats, layout.order],
   );
-  const candidates = useMemo(() => boardChats(chats, allChats, added), [chats, allChats, added]);
   const columns = useMemo(() => columnOrder(candidates, layout), [candidates, layout]);
+  const [boardName, setBoardName] = useState("");
+  const [naming, setNaming] = useState<"rename" | "new" | "duplicate" | null>(null);
+  const [profileFilter, setProfileFilter] = useState("all");
+  const [spaceFilter, setSpaceFilter] = useState("all");
+  const [deviceFilter, setDeviceFilter] = useState("all");
+  const [folderFilter, setFolderFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [includeSettled, setIncludeSettled] = useState(false);
   const projects = useProjects();
@@ -127,6 +146,9 @@ export default function ChatColumns({
       (project) => project.environmentId === chat.environmentId && project.id === chat.projectId,
     );
     return {
+      profileId: owner?.id ?? "unassigned",
+      spaceId: placement ? `${placement.profile.id}:${placement.space.id}` : "unsorted",
+      folderId: `${chat.environmentId}:${chat.projectId}`,
       profile: owner?.name ?? "Unassigned",
       space: placement?.space.name ?? "Unsorted",
       folder: folder?.title,
@@ -147,14 +169,6 @@ export default function ChatColumns({
       .filter(Boolean)
       .join(" / ");
   };
-  useEffect(() => {
-    const added = candidates
-      .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .map(keyOf)
-      .filter((key) => !layout.order.includes(key));
-    if (added.length)
-      setLayout((current) => ({ ...current, order: [...new Set([...current.order, ...added])] }));
-  }, [candidates, layout.order, setLayout]);
   const [focused, setFocused] = useState<string | null>(focus ?? null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const active = columns.some((chat) => keyOf(chat) === focused)
@@ -165,7 +179,7 @@ export default function ChatColumns({
   const rail = useRef<HTMLDivElement>(null);
   const { environments } = useEnvironments();
   const [savedScroll, setSavedScroll] = useLocalStorage(
-    `t3.chat-columns.scroll.${scope}`,
+    `t3.columns-scroll.${state.board.id}`,
     0,
     Schema.Finite,
   );
@@ -174,21 +188,29 @@ export default function ChatColumns({
     if (rail.current) rail.current.scrollLeft = expanded ? 0 : scroll.current;
   }, [expanded]);
   const appliedFocus = useRef<string | undefined>(undefined);
+  const requestedFocus = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!focus || appliedFocus.current === focus) return;
-    const chat = candidates.find((chat) => keyOf(chat) === focus);
     if (
-      chat &&
-      (layout.hidden.includes(focus) ||
-        (chat.settledOverride === "settled" && !layout.kept.includes(focus)))
+      !focus ||
+      requestedFocus.current === focus ||
+      disabled ||
+      !allChats.some((chat) => keyOf(chat) === focus)
+    )
+      return;
+    requestedFocus.current = focus;
+    if (
+      !layout.order.includes(focus) ||
+      layout.hidden.includes(focus) ||
+      !layout.kept.includes(focus)
     ) {
       setLayout((current) => ({
         ...current,
+        order: [...new Set([...current.order, focus])],
         hidden: current.hidden.filter((key) => key !== focus),
         kept: [...new Set([...current.kept, focus])],
       }));
     }
-  }, [focus, candidates, layout, setLayout]);
+  }, [focus, allChats, layout, disabled, setLayout]);
   useLayoutEffect(() => {
     if (focus && focus !== appliedFocus.current && columns.length && rail.current) {
       const node = rail.current.querySelector(`[data-column-key="${CSS.escape(focus)}"]`);
@@ -206,14 +228,17 @@ export default function ChatColumns({
   }, [focus, columns, layout.hidden, setLayout]);
   useEffect(() => () => setSavedScroll(scroll.current), [setSavedScroll]);
   function reorder(key: string, delta: number) {
-    const order = columns.map(keyOf),
-      index = order.indexOf(key),
+    const visible = boardColumnKeys(allChats, layout);
+    const index = visible.indexOf(key),
       target = index + delta;
-    if (index < 0 || target < 0 || target >= order.length) return;
-    [order[index], order[target]] = [order[target]!, order[index]!];
+    if (index < 0 || target < 0 || target >= visible.length) return;
+    const order = [...layout.order];
+    const from = order.indexOf(key),
+      to = order.indexOf(visible[target]!);
+    [order[from], order[to]] = [order[to]!, order[from]!];
     setLayout({ ...layout, order });
   }
-  const selectedKeys = new Set(columns.map(keyOf));
+  const selectedKeys = new Set(boardColumnKeys(allChats, layout));
   const choices = allChats
     .filter(
       (chat) =>
@@ -221,10 +246,15 @@ export default function ChatColumns({
         (includeSettled || chat.settledOverride !== "settled" || selectedKeys.has(keyOf(chat))),
     )
     .map((chat) => ({ chat, detail: detailsFor(chat) }))
-    .filter(({ chat, detail }) =>
-      `${chat.title} ${Object.values(detail).join(" ")}`
-        .toLowerCase()
-        .includes(search.trim().toLowerCase()),
+    .filter(
+      ({ chat, detail }) =>
+        (profileFilter === "all" || detail.profileId === profileFilter) &&
+        (spaceFilter === "all" || detail.spaceId === spaceFilter) &&
+        (deviceFilter === "all" || chat.environmentId === deviceFilter) &&
+        (folderFilter === "all" || detail.folderId === folderFilter) &&
+        `${chat.title} ${Object.values(detail).join(" ")}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()),
     )
     .toSorted(
       ({ chat: a }, { chat: b }) =>
@@ -233,22 +263,124 @@ export default function ChatColumns({
     );
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="flex shrink-0 items-center gap-2 rounded-lg border border-border/70 bg-muted/25 p-1.5 text-xs text-muted-foreground">
-        {navigation && <div className="min-w-0 flex-1 overflow-hidden">{navigation}</div>}
-        <span className="flex shrink-0 items-center gap-1.5 border-l border-border/70 px-2">
-          <Columns3Icon aria-hidden className="size-3.5" />
-          {added.some(
-            (key) =>
-              columns.some((chat) => keyOf(chat) === key) &&
-              !chats.some((chat) => keyOf(chat) === key),
-          )
-            ? "Custom board"
-            : "Space board"}{" "}
-          <span className="rounded bg-background/70 px-1.5 py-0.5 text-[10px] tabular-nums text-foreground">
-            {columns.length}
-          </span>
-        </span>
+      <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/25 p-1.5 text-xs text-muted-foreground">
+        <Select
+          value={state.board.id}
+          onValueChange={(value) => {
+            if (value) state.setSelected(value);
+          }}
+        >
+          <SelectTrigger
+            size="xs"
+            aria-label="Columns board"
+            className="max-w-64 border-transparent bg-transparent font-medium text-foreground"
+          >
+            <Columns3Icon className="size-3.5" />
+            <SelectValue>{state.board.name}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup alignItemWithTrigger={false}>
+            {state.boards.map((board) => (
+              <SelectItem key={board.id} value={board.id}>
+                {board.name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+        <span className="shrink-0 tabular-nums">{selectedKeys.size} chats</span>
+        <Popover
+          open={naming !== null}
+          onOpenChange={(open) => {
+            if (!open) setNaming(null);
+          }}
+        >
+          <PopoverTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Manage boards"
+                disabled={disabled}
+              />
+            }
+            onClick={() => {
+              setBoardName(state.board.name);
+              setNaming("rename");
+            }}
+          >
+            <MoreHorizontalIcon />
+          </PopoverTrigger>
+          <PopoverPopup className="w-72">
+            <div className="flex gap-1 mb-3">
+              {(["rename", "new", "duplicate"] as const).map((mode) => (
+                <Button
+                  key={mode}
+                  size="xs"
+                  variant={naming === mode ? "secondary" : "ghost"}
+                  onClick={() => {
+                    setNaming(mode);
+                    setBoardName(
+                      mode === "new"
+                        ? ""
+                        : mode === "duplicate"
+                          ? `${state.board.name} copy`
+                          : state.board.name,
+                    );
+                  }}
+                >
+                  {mode === "rename" ? "Rename" : mode === "new" ? "New board" : "Duplicate"}
+                </Button>
+              ))}
+            </div>
+            <form
+              onSubmit={async (event) => {
+                event.preventDefault();
+                if (!boardName.trim() || disabled) return;
+                const next = {
+                  ...(naming === "new" ? DEFAULT_CHAT_BOARD : layout),
+                  id: naming === "rename" ? layout.id : crypto.randomUUID(),
+                  name: boardName.trim(),
+                };
+                const saved =
+                  naming === "rename" ? await state.update(next) : await state.save([next], []);
+                if (saved) {
+                  state.setSelected(next.id);
+                  setNaming(null);
+                }
+              }}
+            >
+              <Input
+                aria-label="Board name"
+                maxLength={100}
+                value={boardName}
+                onChange={(event) => setBoardName(event.target.value)}
+                autoFocus
+              />
+              <div className="mt-3 flex justify-between gap-2">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  disabled={disabled || layout.id === "default"}
+                  onClick={async () => {
+                    if (await state.remove(layout)) {
+                      state.setSelected("default");
+                      setNaming(null);
+                    }
+                  }}
+                >
+                  Delete board
+                </Button>
+                <Button size="xs" type="submit" disabled={disabled || !boardName.trim()}>
+                  Save
+                </Button>
+              </div>
+            </form>
+          </PopoverPopup>
+        </Popover>
         <div className="ml-auto flex items-center gap-2">
+          <Button size="xs" variant="ghost" disabled={disabled} onClick={() => setWidths({})}>
+            Equal widths
+          </Button>
           <Popover>
             <PopoverTrigger render={<Button size="xs" variant="outline" />}>
               <Columns3Icon className="size-3.5" />
@@ -256,7 +388,7 @@ export default function ChatColumns({
             </PopoverTrigger>
             <PopoverPopup
               align="end"
-              className="w-[min(26rem,calc(100vw-2rem))]"
+              className="w-[min(34rem,calc(100vw-2rem))]"
               viewportClassName="p-0 not-data-transitioning:overflow-hidden"
             >
               <div className="flex max-h-[min(32rem,var(--available-height))] flex-col">
@@ -281,6 +413,89 @@ export default function ChatColumns({
                       onChange={(event) => setSearch(event.target.value)}
                     />
                   </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      {
+                        label: "Profile",
+                        value: profileFilter,
+                        set: (value: string) => {
+                          setProfileFilter(value);
+                          setSpaceFilter("all");
+                        },
+                        options: [{ id: "unassigned", name: "Unassigned" }, ...profiles],
+                      },
+                      {
+                        label: "Space",
+                        value: spaceFilter,
+                        set: setSpaceFilter,
+                        options: [
+                          { id: "unsorted", name: "Unsorted" },
+                          ...profiles
+                            .filter(
+                              (profile) => profileFilter === "all" || profile.id === profileFilter,
+                            )
+                            .flatMap((profile) =>
+                              (profile.spaces ?? []).map((space) => ({
+                                id: `${profile.id}:${space.id}`,
+                                name:
+                                  profileFilter === "all"
+                                    ? `${profile.name} / ${space.name}`
+                                    : space.name,
+                              })),
+                            ),
+                        ],
+                      },
+                      {
+                        label: "Device",
+                        value: deviceFilter,
+                        set: (value: string) => {
+                          setDeviceFilter(value);
+                          setFolderFilter("all");
+                        },
+                        options: environments.map((env) => ({
+                          id: env.environmentId,
+                          name: env.label,
+                        })),
+                      },
+                      {
+                        label: "Folder",
+                        value: folderFilter,
+                        set: setFolderFilter,
+                        options: projects
+                          .filter(
+                            (project) =>
+                              deviceFilter === "all" || project.environmentId === deviceFilter,
+                          )
+                          .map((project) => ({
+                            id: `${project.environmentId}:${project.id}`,
+                            name: project.title,
+                          })),
+                      },
+                    ].map((filter) => (
+                      <Select
+                        key={filter.label}
+                        value={filter.value}
+                        onValueChange={(value) => filter.set(value ?? "all")}
+                      >
+                        <SelectTrigger size="xs" aria-label={`Choose chats: ${filter.label}`}>
+                          <SelectValue>
+                            {filter.value === "all"
+                              ? `All ${filter.label.toLowerCase()}s`
+                              : (filter.options.find((option) => option.id === filter.value)
+                                  ?.name ?? filter.label)}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectPopup alignItemWithTrigger={false}>
+                          <SelectItem value="all">All {filter.label.toLowerCase()}s</SelectItem>
+                          {filter.options.map((option) => (
+                            <SelectItem key={option.id} value={option.id}>
+                              {option.name}
+                            </SelectItem>
+                          ))}
+                        </SelectPopup>
+                      </Select>
+                    ))}
+                  </div>
                   <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
                     <Checkbox checked={includeSettled} onCheckedChange={setIncludeSettled} />
                     Show settled chats
@@ -302,21 +517,26 @@ export default function ChatColumns({
                           className="mt-0.5"
                           aria-label={chat.title}
                           checked={visible}
+                          disabled={disabled}
                           onCheckedChange={(checked) => {
-                            if (checked) setAdded((current) => [...new Set([...current, key])]);
-                            setLayout((current) => ({
-                              ...current,
-                              order: checked
-                                ? [...new Set([...current.order, key])]
-                                : current.order,
+                            void state.update({
+                              ...layout,
+                              labels: {
+                                ...layout.labels,
+                                [key]: {
+                                  title: chat.title.slice(0, 500),
+                                  context: contextFor(chat).slice(0, 1500),
+                                },
+                              },
+                              order: checked ? [...new Set([...layout.order, key])] : layout.order,
                               hidden: checked
-                                ? current.hidden.filter((id) => id !== key)
-                                : [...new Set([...current.hidden, key])],
+                                ? layout.hidden.filter((id) => id !== key)
+                                : [...new Set([...layout.hidden, key])],
                               kept:
                                 checked && chat.settledOverride === "settled"
-                                  ? [...new Set([...current.kept, key])]
-                                  : current.kept,
-                            }));
+                                  ? [...new Set([...layout.kept, key])]
+                                  : layout.kept,
+                            });
                           }}
                         />
                         <span className="min-w-0 flex-1 space-y-1">
@@ -374,9 +594,9 @@ export default function ChatColumns({
                   )}
                 </div>
                 <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/60 px-3 py-2">
-                  <Button size="xs" variant="ghost" onClick={() => setWidths({})}>
-                    Reset column widths
-                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Selections stay when you change filters.
+                  </span>
                   <PopoverClose render={<Button size="xs" variant="secondary" />}>
                     Done
                   </PopoverClose>
@@ -386,6 +606,11 @@ export default function ChatColumns({
           </Popover>
         </div>
       </div>
+      {(state.error || state.unavailable) && (
+        <p role="status" className="px-2 text-xs text-muted-foreground">
+          {state.error ?? state.unavailable}
+        </p>
+      )}
       <div
         ref={rail}
         onScroll={(event) => {
@@ -393,8 +618,39 @@ export default function ChatColumns({
         }}
         className="flex min-h-0 flex-1 snap-x snap-proximity gap-3 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:thin]"
       >
-        {columns.map((chat) => {
-          const key = keyOf(chat);
+        {[...selectedKeys].map((key) => {
+          const chat = columns.find((chat) => keyOf(chat) === key);
+          if (!chat) {
+            if (allChats.some((chat) => keyOf(chat) === key)) return null;
+            return (
+              <section
+                key={key}
+                style={{ width: columnWidth(widths[key] ?? 420) }}
+                className={`${expanded ? "hidden" : "flex"} shrink-0 flex-col rounded-xl border border-border p-3`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium">
+                    {layout.labels?.[key]?.title ?? "Chat unavailable"}
+                  </span>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label="Remove unavailable chat"
+                    disabled={disabled}
+                    onClick={() => setLayout({ ...layout, hidden: [...layout.hidden, key] })}
+                  >
+                    <XIcon />
+                  </Button>
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Reconnect its device to load this chat. Its position and width are saved.
+                </p>
+                <span className="mt-2 break-all text-[10px] text-muted-foreground">
+                  {layout.labels?.[key]?.context ?? key}
+                </span>
+              </section>
+            );
+          }
           return (
             <Column
               key={key}
@@ -402,8 +658,11 @@ export default function ChatColumns({
               context={contextFor(chat)}
               width={columnWidth(widths[key] ?? 420)}
               onResize={(width) =>
-                setWidths((current) => ({ ...current, [key]: columnWidth(width) }))
+                disabled
+                  ? Promise.resolve(false)
+                  : state.update({ ...layout, widths: { ...widths, [key]: columnWidth(width) } })
               }
+              resizeDisabled={disabled}
               active={active === key}
               expanded={expanded === key}
               hidden={expanded !== null && expanded !== key}
@@ -424,6 +683,7 @@ export default function ChatColumns({
                       size="icon-xs"
                       variant="ghost"
                       aria-label={`Column options for ${chat.title}`}
+                      disabled={disabled}
                     />
                   }
                 >
@@ -443,11 +703,17 @@ export default function ChatColumns({
                     Create task from this chat
                   </MenuItem>
                   <MenuSeparator />
-                  <MenuItem disabled={columns[0] === chat} onClick={() => reorder(key, -1)}>
+                  <MenuItem
+                    disabled={[...selectedKeys][0] === key}
+                    onClick={() => reorder(key, -1)}
+                  >
                     <ArrowLeftIcon />
                     Move left
                   </MenuItem>
-                  <MenuItem disabled={columns.at(-1) === chat} onClick={() => reorder(key, 1)}>
+                  <MenuItem
+                    disabled={[...selectedKeys].at(-1) === key}
+                    onClick={() => reorder(key, 1)}
+                  >
                     <ArrowRightIcon />
                     Move right
                   </MenuItem>
@@ -482,6 +748,7 @@ export default function ChatColumns({
                 size="icon-xs"
                 variant="ghost"
                 aria-label={`Hide ${chat.title} from columns`}
+                disabled={disabled}
                 onClick={() => {
                   setExpanded(null);
                   setLayout({ ...layout, hidden: [...layout.hidden, key] });
@@ -492,10 +759,10 @@ export default function ChatColumns({
             </Column>
           );
         })}
-        {!columns.length && (
+        {!selectedKeys.size && (
           <p className="m-auto max-w-sm text-center text-sm text-muted-foreground">
-            No active chats here. Start a chat or use Choose chats to bring back a reference
-            conversation.
+            Choose chats from any profile, space, or device. Enable Show settled chats to bring back
+            a reference conversation.
           </p>
         )}
       </div>
@@ -514,10 +781,12 @@ function Column({
   children,
   width,
   onResize,
+  resizeDisabled,
   context,
 }: {
   width: number;
-  onResize: (width: number) => void;
+  resizeDisabled: boolean;
+  onResize: (width: number) => Promise<boolean>;
   context: string;
   chat: EnvironmentThreadShell;
   active: boolean;
@@ -584,7 +853,7 @@ function Column({
           {children}
         </div>
       </header>
-      {!expanded && (
+      {!expanded && !resizeDisabled && (
         <div
           role="separator"
           tabIndex={0}
@@ -623,7 +892,9 @@ function Column({
             if (resize.current) {
               const next = columnWidth(resize.current.width + event.clientX - resize.current.x);
               resize.current = null;
-              onResize(next);
+              void onResize(next).then((saved) => {
+                if (!saved && element.current) element.current.style.width = `${width}px`;
+              });
             }
           }}
           onLostPointerCapture={() => {

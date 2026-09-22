@@ -2609,6 +2609,7 @@ const makeWsRpcLayer = (
           baseProfiles,
           expectedProfileSourceId,
           baseWorkItems,
+          baseChatBoards,
         }) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateSettings,
@@ -2626,6 +2627,7 @@ const makeWsRpcLayer = (
                 baseProfiles,
                 expectedProfileSourceId,
                 baseWorkItems,
+                baseChatBoards,
               );
               return ServerSettings.redactServerSettingsForClient(settings);
             }),
