@@ -54,6 +54,59 @@ it.effect(
       expect(saved.status).toBe("ready");
       expect(saved.notes).toBe(input.notes);
       expect(saved.brief).toBe("Relevant files and first step");
+      const linked = {
+        ...saved,
+        chats: [
+          {
+            environmentId: scope.environmentId,
+            threadId: ThreadId.make("reviewer"),
+            purpose: "Review",
+          },
+          {
+            environmentId: EnvironmentId.make("remote"),
+            threadId: ThreadId.make("reviewer"),
+            purpose: "Remote implementation",
+          },
+        ],
+      };
+      yield* service.updateSettings({ workItems: [linked] }, undefined, undefined, [saved]);
+      yield* toolkit
+        .handle("task_update", {
+          id: input.id,
+          expectedUpdatedAt: linked.updatedAt,
+          notes: "Reviewer context",
+          chatPurpose: "Final review",
+          chatResult: "Verified the retry behavior",
+        })
+        .pipe(
+          Stream.unwrap,
+          Stream.runCollect,
+          Effect.provideService(McpInvocationContext, {
+            ...scope,
+            threadId: ThreadId.make("reviewer"),
+          }),
+        );
+      const edited = (yield* service.getSettings).workItems![0]!;
+      expect(edited.notes).toBe("Reviewer context");
+      expect(edited.chats?.[0]).toMatchObject({
+        purpose: "Final review",
+        result: "Verified the retry behavior",
+      });
+      expect(edited.chats?.[1]).toEqual(linked.chats[1]);
+      yield* service.updateSettings(
+        { workItems: [{ ...edited, deletedAt: "2026-09-22T12:00:00.000Z" }] },
+        undefined,
+        undefined,
+        [edited],
+      );
+      yield* toolkit
+        .handle("task_update", {
+          id: input.id,
+          expectedUpdatedAt: edited.updatedAt,
+          notes: "Must not revive",
+        })
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.result);
+      expect((yield* service.getSettings).workItems![0]!.notes).toBe("Reviewer context");
     }).pipe(
       Effect.provide(handlers.pipe(Layer.provideMerge(ServerSettingsService.layerTest()))),
       Effect.provideService(McpInvocationContext, scope),

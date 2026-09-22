@@ -2478,7 +2478,7 @@ const makeWsRpcLayer = (
                   detail: "This provider does not bank reset credits.",
                 });
               }
-              const outcome = yield* instance.consumeResetCredit().pipe(
+              const result = yield* instance.consumeResetCredit().pipe(
                 Effect.mapError(
                   (error) =>
                     new ProviderSetupError({
@@ -2489,7 +2489,7 @@ const makeWsRpcLayer = (
                     }),
                 ),
               );
-              return { outcome };
+              return result;
             }),
             { "rpc.aggregate": "provider" },
           ),

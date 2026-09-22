@@ -117,7 +117,11 @@ function SpaceOverview() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background">
-      <WorkspacePageHeader electron={isElectron} className="border-b border-border/60">
+      <WorkspacePageHeader
+        electron={isElectron}
+        chatModes
+        className={`border-b border-border/60 ${isElectron && view === "columns" ? "pl-16 sm:pl-16" : ""}`}
+      >
         <WorkspaceViews embedded />
       </WorkspacePageHeader>
       <main

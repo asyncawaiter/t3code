@@ -1,3 +1,24 @@
+import { useAtomValue } from "@effect/atom-react";
+import { primaryServerKeybindingsAtom } from "../../state/server";
+import {
+  resolveShortcutCommand,
+  threadJumpIndexFromCommand,
+  threadTraversalDirectionFromCommand,
+} from "../../keybindings";
+import { isCommandPaletteOpen } from "../../commandPaletteBus";
+import { isModelPickerOpen } from "../../modelPickerVisibility";
+import { isTerminalFocused } from "../../lib/terminalFocus";
+import { useNavigate, useLocation } from "@tanstack/react-router";
+import { openChatCreation } from "../../chatCreationStore";
+import {
+  useComposerDraftStore,
+  DraftId,
+  finalizePromotedDraftThreadByRef,
+} from "../../composerDraftStore";
+import { threadShellHasStarted } from "../ChatView.logic";
+import { useColumnNavigation } from "./columnNavigation";
+import { Sheet, SheetPopup, SheetTitle } from "../ui/sheet";
+import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { useChatBoards } from "../../hooks/useChatBoards";
 import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
@@ -26,7 +47,7 @@ import { ChatPaneContext } from "../chat/ChatPaneContext";
 import { useProjects } from "../../state/entities";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { indexProfileSpaces } from "@t3tools/contracts";
-import { Popover, PopoverTrigger, PopoverPopup, PopoverTitle, PopoverClose } from "../ui/popover";
+import { Popover, PopoverTrigger, PopoverPopup } from "../ui/popover";
 import { Input } from "../ui/input";
 import {
   Menu,
@@ -39,7 +60,21 @@ import {
 import { Checkbox } from "../ui/checkbox";
 import { openWorkItem } from "../../workItems";
 
+type ColumnChat = Pick<
+  EnvironmentThreadShell,
+  | "environmentId"
+  | "id"
+  | "projectId"
+  | "title"
+  | "createdAt"
+  | "archivedAt"
+  | "settledOverride"
+  | "hasPendingApprovals"
+  | "hasPendingUserInput"
+  | "session"
+> & { draftId?: DraftId };
 const ChatView = lazy(() => import("../ChatView"));
+const OptionalChatKey = Schema.NullOr(Schema.String);
 const Layout = Schema.Struct({
   order: Schema.Array(Schema.String),
   hidden: Schema.Array(Schema.String),
@@ -59,7 +94,7 @@ export function columnOrder<
 >(chats: readonly T[], layout: typeof Layout.Type) {
   const eligible = chats.filter(
     (chat) =>
-      !chat.archivedAt &&
+      (!chat.archivedAt || layout.kept.includes(keyOf(chat))) &&
       !layout.hidden.includes(keyOf(chat)) &&
       (chat.settledOverride !== "settled" || layout.kept.includes(keyOf(chat))),
   );
@@ -84,14 +119,86 @@ export function boardColumnKeys(
 }
 
 export default function ChatColumns({
-  allChats,
+  allChats: liveChats,
   focus,
 }: {
   allChats: readonly EnvironmentThreadShell[];
   focus?: string | undefined;
 }) {
   const state = useChatBoards();
-  return <BoardColumns key={state.board.id} state={state} allChats={allChats} focus={focus} />;
+  const { environments } = useEnvironments();
+  const archiveDevices = useMemo(
+    () =>
+      environments
+        .filter(
+          (environment) =>
+            environment.connection.phase === "connected" &&
+            state.board.order.some(
+              (key) =>
+                key.startsWith(`${environment.environmentId}:`) &&
+                !liveChats.some((chat) => keyOf(chat) === key),
+            ),
+        )
+        .map((environment) => environment.environmentId),
+    [environments, state.board.order, liveChats],
+  );
+  const archive = useArchivedThreadSnapshots(archiveDevices);
+  const allChats = useMemo(
+    () => [
+      ...liveChats,
+      ...archive.snapshots.flatMap(({ environmentId, snapshot }) =>
+        snapshot.threads
+          .map((shell) => ({ ...shell, environmentId }))
+          .filter(
+            (shell) =>
+              state.board.order.includes(keyOf(shell)) &&
+              !liveChats.some((chat) => keyOf(chat) === keyOf(shell)),
+          ),
+      ),
+    ],
+    [liveChats, archive.snapshots, state.board.order],
+  );
+  const drafts = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
+  useEffect(() => {
+    for (const draft of Object.values(drafts)) {
+      const key = `${draft.environmentId}:${draft.threadId}`;
+      if (!state.board.order.includes(key)) continue;
+      const shell = allChats.find((chat) => keyOf(chat) === key);
+      if (threadShellHasStarted(shell))
+        finalizePromotedDraftThreadByRef({
+          environmentId: draft.environmentId,
+          threadId: draft.threadId,
+        });
+    }
+  }, [allChats, drafts, state.board.order]);
+  const chats: readonly ColumnChat[] = useMemo(
+    () => [
+      ...allChats,
+      ...Object.entries(drafts)
+        .filter(
+          ([, draft]) =>
+            !draft.promotedTo &&
+            !allChats.some(
+              (chat) => chat.id === draft.threadId && chat.environmentId === draft.environmentId,
+            ),
+        )
+        .map(([draftId, draft]) => ({
+          environmentId: draft.environmentId,
+          id: draft.threadId,
+          projectId: draft.projectId,
+          title: "New chat",
+          createdAt: draft.createdAt,
+          archivedAt: null,
+          settledOverride: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          session: null,
+          draftId: DraftId.make(draftId),
+        })),
+    ],
+    [allChats, drafts],
+  );
+  return <BoardColumns key={state.board.id} state={state} allChats={chats} focus={focus} />;
 }
 
 function BoardColumns({
@@ -100,9 +207,18 @@ function BoardColumns({
   focus,
 }: {
   state: ReturnType<typeof useChatBoards>;
-  allChats: readonly EnvironmentThreadShell[];
+  allChats: readonly ColumnChat[];
   focus?: string | undefined;
 }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { environments } = useEnvironments();
+  const [focused, setFocused] = useLocalStorage(
+    `t3.columns-focus.${state.board.id}`,
+    null,
+    OptionalChatKey,
+  );
+  const choosing = useColumnNavigation((state) => state.choosing);
   const layout = state.board;
   const widths = layout.widths;
   const disabled = state.pending || !!state.unavailable;
@@ -124,6 +240,37 @@ function BoardColumns({
     [allChats, layout.order],
   );
   const columns = useMemo(() => columnOrder(candidates, layout), [candidates, layout]);
+  const createChat = () => {
+    useColumnNavigation.setState({ choosing: false });
+    openChatCreation({
+      onCreated: async ({ threadId, projectRef }) => {
+        const key = `${projectRef.environmentId}:${threadId}`;
+        const saved = await state.update({
+          ...layout,
+          order: [...new Set([...layout.order, key])],
+          hidden: layout.hidden.filter((item) => item !== key),
+          labels: {
+            ...layout.labels,
+            [key]: {
+              title: "New chat",
+              context: `Unsent draft on ${environments.find((device) => device.environmentId === projectRef.environmentId)?.label ?? "another device"}`,
+            },
+          },
+        });
+        if (!saved)
+          throw new Error(
+            "The chat draft is saved, but could not be added to this board. Close this dialog and retry from Choose chats.",
+          );
+        setFocused(key);
+        await navigate({
+          to: "/spaces/$profileId",
+          params: { profileId: "all" },
+          search: { view: "columns", space: undefined, unsorted: false, focus: key },
+          state: { dashboardReturn: location.state.dashboardReturn },
+        });
+      },
+    });
+  };
   const [boardName, setBoardName] = useState("");
   const [naming, setNaming] = useState<"rename" | "new" | "duplicate" | null>(null);
   const [profileFilter, setProfileFilter] = useState("all");
@@ -135,7 +282,7 @@ function BoardColumns({
   const projects = useProjects();
   const profiles = usePrimarySettings((settings) => settings.profiles);
   const placements = useMemo(() => indexProfileSpaces(profiles), [profiles]);
-  const detailsFor = (chat: EnvironmentThreadShell) => {
+  const detailsFor = (chat: ColumnChat) => {
     const placement = placements.get(keyOf(chat));
     const owner =
       placement?.profile ??
@@ -158,7 +305,7 @@ function BoardColumns({
         "Offline device",
     };
   };
-  const contextFor = (chat: EnvironmentThreadShell) => {
+  const contextFor = (chat: ColumnChat) => {
     const detail = detailsFor(chat);
     return [
       detail.profile,
@@ -169,7 +316,6 @@ function BoardColumns({
       .filter(Boolean)
       .join(" / ");
   };
-  const [focused, setFocused] = useState<string | null>(focus ?? null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const active = columns.some((chat) => keyOf(chat) === focused)
     ? focused
@@ -177,7 +323,49 @@ function BoardColumns({
       ? keyOf(columns[0])
       : null;
   const rail = useRef<HTMLDivElement>(null);
-  const { environments } = useEnvironments();
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        choosing ||
+        isCommandPaletteOpen() ||
+        isModelPickerOpen() ||
+        document.querySelector('[role="dialog"][aria-modal="true"]')
+      )
+        return;
+      const command = resolveShortcutCommand(event, keybindings, {
+        platform: navigator.platform,
+        context: { terminalFocus: isTerminalFocused() },
+      });
+      if (command === "chat.new" || command === "chat.newLocal") {
+        event.preventDefault();
+        event.stopPropagation();
+        createChat();
+        return;
+      }
+      const jump = threadJumpIndexFromCommand(command ?? "");
+      const direction = threadTraversalDirectionFromCommand(command);
+      const index =
+        jump ??
+        (direction === null
+          ? -1
+          : columns.findIndex((chat) => keyOf(chat) === active) + (direction === "next" ? 1 : -1));
+      const target = columns[index];
+      if (!target) return;
+      event.preventDefault();
+      const key = keyOf(target);
+      setFocused(key);
+      if (expanded) setExpanded(key);
+      else
+        rail.current
+          ?.querySelector(`[data-column-key="${CSS.escape(key)}"]`)
+          ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [active, choosing, columns, expanded, keybindings, setFocused, createChat]);
   const [savedScroll, setSavedScroll] = useLocalStorage(
     `t3.columns-scroll.${state.board.id}`,
     0,
@@ -188,44 +376,17 @@ function BoardColumns({
     if (rail.current) rail.current.scrollLeft = expanded ? 0 : scroll.current;
   }, [expanded]);
   const appliedFocus = useRef<string | undefined>(undefined);
-  const requestedFocus = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (
-      !focus ||
-      requestedFocus.current === focus ||
-      disabled ||
-      !allChats.some((chat) => keyOf(chat) === focus)
-    )
-      return;
-    requestedFocus.current = focus;
-    if (
-      !layout.order.includes(focus) ||
-      layout.hidden.includes(focus) ||
-      !layout.kept.includes(focus)
-    ) {
-      setLayout((current) => ({
-        ...current,
-        order: [...new Set([...current.order, focus])],
-        hidden: current.hidden.filter((key) => key !== focus),
-        kept: [...new Set([...current.kept, focus])],
-      }));
-    }
-  }, [focus, allChats, layout, disabled, setLayout]);
   useLayoutEffect(() => {
     if (focus && focus !== appliedFocus.current && columns.length && rail.current) {
       const node = rail.current.querySelector(`[data-column-key="${CSS.escape(focus)}"]`);
       if (node instanceof HTMLElement) {
-        rail.current.scrollLeft = node.offsetLeft - rail.current.offsetLeft;
+        node.scrollIntoView({ block: "nearest", inline: "nearest" });
+        node.querySelector<HTMLButtonElement>("header button")?.focus({ preventScroll: true });
         appliedFocus.current = focus;
         setFocused(focus);
-      } else if (layout.hidden.includes(focus)) {
-        setLayout((current) => ({
-          ...current,
-          hidden: current.hidden.filter((key) => key !== focus),
-        }));
       }
     }
-  }, [focus, columns, layout.hidden, setLayout]);
+  }, [focus, columns, setFocused]);
   useEffect(() => () => setSavedScroll(scroll.current), [setSavedScroll]);
   function reorder(key: string, delta: number) {
     const visible = boardColumnKeys(allChats, layout);
@@ -237,6 +398,16 @@ function BoardColumns({
       to = order.indexOf(visible[target]!);
     [order[from], order[to]] = [order[to]!, order[from]!];
     setLayout({ ...layout, order });
+  }
+  function selectBoard(id: string) {
+    state.setSelected(id);
+    void navigate({
+      to: "/spaces/$profileId",
+      params: { profileId: "all" },
+      search: { view: "columns", unsorted: false, space: undefined },
+      state: { dashboardReturn: location.state.dashboardReturn },
+      replace: true,
+    });
   }
   const selectedKeys = new Set(boardColumnKeys(allChats, layout));
   const choices = allChats
@@ -267,7 +438,7 @@ function BoardColumns({
         <Select
           value={state.board.id}
           onValueChange={(value) => {
-            if (value) state.setSelected(value);
+            if (value) selectBoard(value);
           }}
         >
           <SelectTrigger
@@ -343,7 +514,7 @@ function BoardColumns({
                 const saved =
                   naming === "rename" ? await state.update(next) : await state.save([next], []);
                 if (saved) {
-                  state.setSelected(next.id);
+                  selectBoard(next.id);
                   setNaming(null);
                 }
               }}
@@ -363,7 +534,7 @@ function BoardColumns({
                   disabled={disabled || layout.id === "default"}
                   onClick={async () => {
                     if (await state.remove(layout)) {
-                      state.setSelected("default");
+                      selectBoard("default");
                       setNaming(null);
                     }
                   }}
@@ -378,23 +549,27 @@ function BoardColumns({
           </PopoverPopup>
         </Popover>
         <div className="ml-auto flex items-center gap-2">
+          <Button size="xs" variant="outline" disabled={disabled} onClick={createChat}>
+            <PlusIcon className="size-3.5" />
+            New chat
+          </Button>
           <Button size="xs" variant="ghost" disabled={disabled} onClick={() => setWidths({})}>
             Equal widths
           </Button>
-          <Popover>
-            <PopoverTrigger render={<Button size="xs" variant="outline" />}>
-              <Columns3Icon className="size-3.5" />
-              Choose chats
-            </PopoverTrigger>
-            <PopoverPopup
-              align="end"
-              className="w-[min(34rem,calc(100vw-2rem))]"
-              viewportClassName="p-0 not-data-transitioning:overflow-hidden"
+          <Sheet
+            open={choosing}
+            onOpenChange={(open) => useColumnNavigation.setState({ choosing: open })}
+          >
+            <SheetPopup
+              side="left"
+              showCloseButton={false}
+              className="w-[min(26rem,calc(100vw-1rem))] max-w-none"
+              backdropClassName="bg-black/10 backdrop-blur-none"
             >
-              <div className="flex max-h-[min(32rem,var(--available-height))] flex-col">
+              <div className="flex min-h-0 flex-1 flex-col">
                 <div className="shrink-0 space-y-3 border-b border-border/60 p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <PopoverTitle className="text-sm font-semibold">Choose chats</PopoverTitle>
+                    <SheetTitle className="text-sm font-semibold">Choose chats</SheetTitle>
                     <span aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
                       {columns.length} on this board
                     </span>
@@ -502,7 +677,7 @@ function BoardColumns({
                   </label>
                 </div>
                 <div
-                  className="flex min-h-0 flex-col gap-0.5 overflow-y-auto overscroll-contain p-1.5"
+                  className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-1.5"
                   aria-label="Available chats"
                 >
                   {choices.map(({ chat, detail }) => {
@@ -597,13 +772,17 @@ function BoardColumns({
                   <span className="text-xs text-muted-foreground">
                     Selections stay when you change filters.
                   </span>
-                  <PopoverClose render={<Button size="xs" variant="secondary" />}>
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => useColumnNavigation.setState({ choosing: false })}
+                  >
                     Done
-                  </PopoverClose>
+                  </Button>
                 </div>
               </div>
-            </PopoverPopup>
-          </Popover>
+            </SheetPopup>
+          </Sheet>
         </div>
       </div>
       {(state.error || state.unavailable) && (
@@ -643,7 +822,8 @@ function BoardColumns({
                   </Button>
                 </div>
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Reconnect its device to load this chat. Its position and width are saved.
+                  This chat is not available here yet. Connect its device, or send its first message
+                  if it is still a draft.
                 </p>
                 <span className="mt-2 break-all text-[10px] text-muted-foreground">
                   {layout.labels?.[key]?.context ?? key}
@@ -734,15 +914,22 @@ function BoardColumns({
                 </MenuPopup>
               </Menu>
               <Button
-                size="icon-xs"
+                size={expanded === key ? "xs" : "icon-xs"}
                 variant="ghost"
-                aria-label={expanded === key ? "Return to columns" : `Expand ${chat.title}`}
+                aria-label={expanded === key ? "Back to columns" : `Expand ${chat.title}`}
                 onClick={() => {
                   setFocused(key);
                   setExpanded(expanded === key ? null : key);
                 }}
               >
-                {expanded === key ? <Minimize2Icon /> : <Maximize2Icon />}
+                {expanded === key ? (
+                  <>
+                    <Minimize2Icon />
+                    <span>Back to columns</span>
+                  </>
+                ) : (
+                  <Maximize2Icon />
+                )}
               </Button>
               <Button
                 size="icon-xs"
@@ -788,7 +975,7 @@ function Column({
   resizeDisabled: boolean;
   onResize: (width: number) => Promise<boolean>;
   context: string;
-  chat: EnvironmentThreadShell;
+  chat: ColumnChat;
   active: boolean;
   expanded: boolean;
   hidden: boolean;
@@ -838,9 +1025,11 @@ function Column({
                   ? "Answer needed"
                   : chat.session?.status === "running"
                     ? "Running"
-                    : chat.settledOverride === "settled"
-                      ? "Settled"
-                      : "Idle"}
+                    : chat.archivedAt
+                      ? "Archived"
+                      : chat.settledOverride === "settled"
+                        ? "Settled"
+                        : "Idle"}
           </span>
         </div>
         <div className="flex items-center gap-0.5">
@@ -918,7 +1107,9 @@ function Column({
               <ChatView
                 environmentId={chat.environmentId}
                 threadId={chat.id}
-                routeKind="server"
+                {...(chat.draftId
+                  ? { routeKind: "draft", draftId: chat.draftId }
+                  : { routeKind: "server" })}
                 reserveTitleBarControlInset={false}
               />
             </Suspense>

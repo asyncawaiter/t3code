@@ -123,6 +123,10 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const submitButton = useRef<HTMLButtonElement>(null);
+  const boardDraft = useRef<{
+    locationKey: string;
+    opened: NonNullable<Awaited<ReturnType<typeof handleNewThread>>>;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const resolveProject = useResolveChatProject();
   const saveProfiles = useSaveProfiles();
@@ -257,18 +261,25 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
             replaceOptions: true,
           });
       } else {
-        const opened = await handleNewThread(resolved.projectRef, {
-          spaceId,
-          ...(favoriteSelection ? { modelSelection: favoriteSelection } : {}),
-        });
+        const locationKey = `${projectKey}:${profileId}:${spaceId}`;
+        const opened =
+          request.onCreated && boardDraft.current?.locationKey === locationKey
+            ? boardDraft.current.opened
+            : await handleNewThread(resolved.projectRef, {
+                spaceId,
+                ...(request.onCreated ? { navigate: false, forceNew: true } : {}),
+                ...(favoriteSelection ? { modelSelection: favoriteSelection } : {}),
+              });
+        if (opened && request.onCreated) boardDraft.current = { locationKey, opened };
         if (!opened) throw new Error("The draft changed while opening. Try again.");
         if (favoriteSelection)
           useComposerDraftStore.getState().setModelSelection(opened.draftId, favoriteSelection, {
             explicit: true,
             replaceOptions: true,
           });
+        await request.onCreated?.({ ...opened, projectRef: resolved.projectRef });
       }
-      revealChatLocation(profileId, spaceId);
+      if (!request.onCreated) revealChatLocation(profileId, spaceId);
       close();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not open this location. Try again.");

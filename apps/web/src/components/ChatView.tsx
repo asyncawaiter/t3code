@@ -1,7 +1,6 @@
 import { useContext } from "react";
 import { ChatPaneContext } from "./chat/ChatPaneContext";
 import { ChatTaskBar } from "./tasks/ChatTaskBar";
-import { uploadTaskFile, taskAttachmentUrl } from "./tasks/taskAttachments";
 import { openWorkItem } from "../workItems";
 import { DashboardReviewBar } from "./dashboard/DashboardReviewBar";
 import { inheritForkPlacement } from "@t3tools/client-runtime/state/profiles";
@@ -9739,7 +9738,10 @@ export default function ChatView(props: ChatViewProps) {
       className={cn(
         // Keep one viewport anchor inside the header's no-drag region. The
         // header can shrink behind the right panel without moving the controls.
-        "pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]",
+        "pointer-events-none z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]",
+        reserveTitleBarControlInset
+          ? "fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)]"
+          : "absolute top-0 right-3",
       )}
       data-workspace-titlebar-controls
     >
@@ -9974,7 +9976,7 @@ export default function ChatView(props: ChatViewProps) {
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
           className="relative bg-background"
         >
-          {isElectron && rightPanelControlsAtRoot ? (
+          {isElectron && reserveTitleBarControlInset && rightPanelControlsAtRoot ? (
             <span
               aria-hidden
               className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
@@ -9995,33 +9997,30 @@ export default function ChatView(props: ChatViewProps) {
                         const draft = useComposerDraftStore
                           .getState()
                           .getComposerDraft({ environmentId, threadId });
+                        const taskFiles: File[] = [];
                         const attachments: import("@t3tools/contracts").ChatAttachment[] = [];
                         if (!selected && draft)
                           for (const attachment of [...draft.images, ...draft.files]) {
-                            let file = attachment.file;
+                            const file = attachment.file;
                             if (
                               !file &&
                               "uploadedAttachmentId" in attachment &&
                               attachment.uploadedAttachmentId
                             ) {
-                              const url = await taskAttachmentUrl(environmentId, {
-                                ...attachment,
+                              attachments.push({
+                                name: attachment.name,
+                                type: attachment.type,
                                 id: attachment.uploadedAttachmentId,
+                                mimeType: attachment.mimeType,
+                                sizeBytes: attachment.sizeBytes,
                               });
-                              const response = await fetch(url);
-                              if (!response.ok)
-                                throw new Error(
-                                  `Could not copy ${attachment.name}. Reattach it first.`,
-                                );
-                              file = new File([await response.blob()], attachment.name, {
-                                type: attachment.mimeType,
-                              });
+                              continue;
                             }
                             if (!file)
                               throw new Error(
                                 `Reattach ${attachment.name} before capturing this task.`,
                               );
-                            attachments.push(await uploadTaskFile(environmentId, file));
+                            taskFiles.push(file);
                           }
                         openWorkItem({
                           environmentId,
@@ -10033,6 +10032,7 @@ export default function ChatView(props: ChatViewProps) {
                           },
                           notes: selected || draft?.prompt || "",
                           attachments,
+                          files: taskFiles,
                         });
                       } catch (cause) {
                         toastManager.add({

@@ -1,13 +1,20 @@
 import { create } from "zustand";
 import { useAtomValue } from "@effect/atom-react";
 import { useMemo } from "react";
-import { type EnvironmentId, type WorkItem } from "@t3tools/contracts";
+import { EnvironmentId, type WorkItem } from "@t3tools/contracts";
+import { useTaskCaptures } from "./components/tasks/taskCaptureStorage";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { environmentServerConfigsAtom, serverEnvironment } from "./state/server";
 import { useAtomCommand } from "./state/use-atom-command";
 import { appAtomRegistry } from "./rpc/atomRegistry";
 
-export type LocatedWorkItem = { environmentId: EnvironmentId; item: WorkItem };
+export type LocatedWorkItem = {
+  environmentId: EnvironmentId;
+  item: WorkItem;
+  localCaptureId?: string;
+  localDraft?: boolean;
+  syncError?: string;
+};
 export type WorkItemRequest = Partial<LocatedWorkItem> & {
   source?: WorkItem["source"];
   title?: string;
@@ -16,6 +23,7 @@ export type WorkItemRequest = Partial<LocatedWorkItem> & {
   profileId?: string | null;
   spaceId?: string | null;
   projectId?: WorkItem["projectId"];
+  files?: File[];
 };
 export function workItemDraftKey(request: WorkItemRequest) {
   if (request.item) return request.item.id;
@@ -34,13 +42,34 @@ export function openWorkItem(request: WorkItemRequest = {}) {
 
 export function useWorkItems() {
   const configs = useAtomValue(environmentServerConfigsAtom);
-  return useMemo(
-    () =>
-      [...configs].flatMap(([environmentId, config]) =>
-        (config.settings.workItems ?? []).map((item) => ({ environmentId, item })),
-      ),
-    [configs],
-  );
+  const captures = useTaskCaptures((state) => state.captures);
+  return useMemo(() => {
+    const saved = [...configs].flatMap(([environmentId, config]) =>
+      (config.settings.workItems ?? []).map((item) => ({ environmentId, item })),
+    );
+    return [
+      ...saved,
+      ...captures
+        .filter(
+          (capture) =>
+            (capture.queued ||
+              capture.item.notes.trim() ||
+              capture.files.length ||
+              capture.item.attachments?.length) &&
+            !saved.some(
+              (entry) =>
+                entry.environmentId === capture.environmentId && entry.item.id === capture.id,
+            ),
+        )
+        .map((capture) => ({
+          environmentId: capture.environmentId ?? EnvironmentId.make("local-task-capture"),
+          item: capture.item,
+          localCaptureId: capture.id,
+          localDraft: !capture.queued,
+          ...(capture.error ? { syncError: capture.error } : {}),
+        })),
+    ];
+  }, [configs, captures]);
 }
 
 export function useSaveWorkItem() {
@@ -48,7 +77,7 @@ export function useSaveWorkItem() {
   return async (environmentId: EnvironmentId, item: WorkItem, base?: WorkItem) => {
     if (
       !appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment
-        .capabilities.workItems
+        .capabilities.taskCapture
     )
       throw new Error("Update this device before saving tasks to it.");
     const result = await update({

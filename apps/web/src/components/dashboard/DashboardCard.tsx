@@ -1,3 +1,4 @@
+import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
 import { openWorkItem, type LocatedWorkItem } from "../../workItems";
 import { useWorkflowState } from "../../workflowState";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -50,10 +51,13 @@ function dashboardTimeLabel(entry: DashboardBoardEntry, nowMs: number): string {
   }
 }
 
+const NO_TASKS: LocatedWorkItem[] = [];
+
 export const DashboardCard = memo(function DashboardCard({
   entry,
-  task,
+  tasks = NO_TASKS,
   onOpen,
+  opening = false,
   unread,
   now,
   project,
@@ -64,8 +68,9 @@ export const DashboardCard = memo(function DashboardCard({
   deviceLabel,
   connected,
 }: {
-  task?: LocatedWorkItem | undefined;
+  tasks?: LocatedWorkItem[] | undefined;
   onOpen: () => void;
+  opening?: boolean;
   readonly unread: boolean;
   readonly entry: DashboardBoardEntry;
   readonly now: string;
@@ -92,9 +97,8 @@ export const DashboardCard = memo(function DashboardCard({
   const escalated = isEscalated(entry, now);
 
   const openThread = useCallback(() => {
-    onOpen();
-    void navigate({ to: "/$environmentId/$threadId", params: { environmentId, threadId } });
-  }, [environmentId, navigate, threadId, onOpen]);
+    if (!opening) onOpen();
+  }, [opening, onOpen]);
 
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
   const [stopping, setStopping] = useState(false);
@@ -171,6 +175,8 @@ export const DashboardCard = memo(function DashboardCard({
   return (
     <div
       role="button"
+      data-dashboard-chat-key={`${environmentId}:${threadId}`}
+      aria-busy={opening}
       tabIndex={0}
       onClick={openThread}
       onKeyDown={(event) => {
@@ -184,12 +190,17 @@ export const DashboardCard = memo(function DashboardCard({
         escalated && "ring-1 ring-amber-500/60 dark:ring-amber-400/50",
       )}
     >
+      {opening && (
+        <span role="status" className="text-xs text-muted-foreground">
+          Opening...
+        </span>
+      )}
       <div className="flex min-w-0 items-start gap-2">
         {unread ? (
           <span aria-label="Unread" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
         ) : null}
         <div className="line-clamp-2 min-w-0 text-sm font-medium leading-5 text-foreground">
-          {task?.item.title ?? shell.title}
+          {shell.title}
         </div>
       </div>
       <div className="flex min-w-0 flex-col gap-2">
@@ -243,24 +254,53 @@ export const DashboardCard = memo(function DashboardCard({
           ) : null}
         </div>
       </div>
-      <div className="flex items-center gap-2 text-xs">
-        <Button
-          size="xs"
-          variant="ghost"
-          onClick={(event) => {
-            event.stopPropagation();
-            openWorkItem(
-              task ?? {
+      <div className="flex items-center gap-2 text-xs" onClick={(event) => event.stopPropagation()}>
+        {tasks.length ? (
+          <Menu>
+            <MenuTrigger render={<Button size="xs" variant="ghost" />}>
+              {tasks.length === 1 ? "Task details" : `${tasks.length} tasks`}
+            </MenuTrigger>
+            <MenuPopup align="start">
+              {tasks.map((task) => (
+                <MenuItem
+                  key={`${task.environmentId}:${task.item.id}`}
+                  onClick={() => openWorkItem(task)}
+                >
+                  {task.item.title}
+                </MenuItem>
+              ))}
+              <MenuSeparator />
+              <MenuItem
+                onClick={() =>
+                  openWorkItem({
+                    environmentId,
+                    projectId: shell.projectId,
+                    source: { environmentId, threadId },
+                  })
+                }
+              >
+                Create task from this chat
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        ) : (
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() =>
+              openWorkItem({
                 environmentId,
                 projectId: shell.projectId,
                 source: { environmentId, threadId },
-              },
-            );
-          }}
-        >
-          {task ? "Task details" : "Create task from this chat"}
-        </Button>
-        {task && <span className="capitalize text-muted-foreground">{task.item.status}</span>}
+              })
+            }
+          >
+            Create task from this chat
+          </Button>
+        )}
+        {tasks.length === 1 && (
+          <span className="capitalize text-muted-foreground">{tasks[0]!.item.status}</span>
+        )}
       </div>
       <dl className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs">
         <dt className="text-[11px] text-muted-foreground">Space</dt>

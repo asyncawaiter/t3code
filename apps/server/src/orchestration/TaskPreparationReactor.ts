@@ -1,4 +1,10 @@
-import { CommandId, MessageId, workItemPrompt, type WorkItem } from "@t3tools/contracts";
+import {
+  CommandId,
+  MessageId,
+  workItemPrompt,
+  workItemPreparationThread,
+  type WorkItem,
+} from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
@@ -39,20 +45,23 @@ export const make = Effect.gen(function* () {
     const occupied = new Set<string>();
     for (const task of tasks) {
       const preparation = task.preparation;
-      if (!preparation || preparation.state === "failed") continue;
-      const threadId = task.source?.threadId ?? task.threadId;
+      if (task.deletedAt || !preparation || preparation.state === "failed") continue;
+      const threadId = workItemPreparationThread(task);
       if (!threadId || occupied.has(threadId)) continue;
       const update = (next: WorkItem) =>
         settings
           .updateSettings({ workItems: [next] }, undefined, undefined, [task])
           .pipe(Effect.ignore);
-      if (task.source && task.source.environmentId !== environmentId) {
+      const preparationEnvironmentId = task.preparationThreadId
+        ? environmentId
+        : (task.source?.environmentId ?? task.executionEnvironmentId ?? environmentId);
+      if (preparationEnvironmentId !== environmentId) {
         yield* update({
           ...task,
           preparation: {
             ...preparation,
             state: "failed",
-            error: "Prepare this handoff on the source chat's device.",
+            error: "Choose a preparation chat on this task's storage device.",
           },
         });
         continue;
@@ -88,7 +97,7 @@ export const make = Effect.gen(function* () {
               ...preparation,
               state: "failed",
               error:
-                "The preparation turn finished without saving a brief. Review its answer in the source chat.",
+                "The preparation turn finished without saving a brief. Review its answer in the preparation chat.",
             },
           });
         else if (preparation.state !== "running")

@@ -89,6 +89,7 @@ function useCreateDraft() {
         startFromOrigin?: boolean;
         replace?: boolean;
         forceNew?: boolean;
+        navigate?: boolean;
         spaceId?: string | null;
         useProjectDefaults?: boolean;
         modelSelection?: ModelSelection;
@@ -346,11 +347,12 @@ function useCreateDraft() {
           ) {
             return opened;
           }
-          await router.navigate({
-            to: "/draft/$draftId",
-            params: { draftId: emptyStoredDraftThread.draftId },
-            replace: options?.replace ?? false,
-          });
+          if (options?.navigate !== false)
+            await router.navigate({
+              to: "/draft/$draftId",
+              params: { draftId: emptyStoredDraftThread.draftId },
+              replace: options?.replace ?? false,
+            });
           return opened;
         })();
       }
@@ -427,11 +429,12 @@ function useCreateDraft() {
             interactionMode: racedDraft.interactionMode,
             ...pickExplicitWorkspaceOptions(options),
           });
-          await router.navigate({
-            to: "/draft/$draftId",
-            params: { draftId: racedDraft.draftId },
-            replace: options?.replace ?? false,
-          });
+          if (options?.navigate !== false)
+            await router.navigate({
+              to: "/draft/$draftId",
+              params: { draftId: racedDraft.draftId },
+              replace: options?.replace ?? false,
+            });
           return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
@@ -456,11 +459,12 @@ function useCreateDraft() {
           // state. The project default wins when both are present.
           setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
         }
-        await router.navigate({
-          to: "/draft/$draftId",
-          params: { draftId },
-          replace: options?.replace ?? false,
-        });
+        if (options?.navigate !== false)
+          await router.navigate({
+            to: "/draft/$draftId",
+            params: { draftId },
+            replace: options?.replace ?? false,
+          });
         return { draftId, threadId };
       })();
     },
@@ -540,7 +544,7 @@ export function useNewThreadHandler() {
         ui.activeProfileId === ALL_PROFILE_ID || ui.activeProfileId === null
           ? ALL_PROFILE_ID
           : (profile?.id ?? ALL_PROFILE_ID);
-      revealChatLocation(visibleProfileId, spaceId);
+      if (options?.navigate !== false) revealChatLocation(visibleProfileId, spaceId);
       return opened;
     },
     [createDraft, saveProfiles],

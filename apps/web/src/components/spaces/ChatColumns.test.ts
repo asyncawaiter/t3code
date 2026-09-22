@@ -29,6 +29,12 @@ it("keeps column order stable, appends new chats, and only retains explicitly ch
     }).map((item) => item.id),
   ).toEqual(["02"]);
   expect(columnOrder([{ ...recent, archivedAt: "2026-09-20T00:00:00.000Z" }], layout)).toEqual([]);
+  expect(
+    columnOrder([{ ...recent, archivedAt: "2026-09-20T00:00:00.000Z" }], {
+      ...layout,
+      kept: ["device:02"],
+    }).map((item) => item.id),
+  ).toEqual(["02"]);
 });
 
 it("mixes explicit chats from other Spaces and devices without importing every chat", () => {

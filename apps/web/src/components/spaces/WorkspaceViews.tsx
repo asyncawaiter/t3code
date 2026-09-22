@@ -3,7 +3,7 @@ import {
   scopedOverviewNavigation,
 } from "../../lib/globalDashboardNavigation";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { Columns3Icon, LayoutDashboardIcon, FolderOpenIcon } from "lucide-react";
+import { LayoutDashboardIcon, FolderOpenIcon, ArrowLeftIcon } from "lucide-react";
 import { useUiStateStore } from "../../uiStateStore";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { OUTSIDE_SPACES } from "../sidebar/Spaces.logic";
@@ -22,6 +22,7 @@ export function WorkspaceViews({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const dashboardReturn = location.state.dashboardReturn;
   const onSpace = location.pathname.startsWith("/spaces/");
   const search = new URLSearchParams(location.searchStr);
   const onColumns = onSpace && workspaceView(search.get("view")) === "columns";
@@ -53,11 +54,27 @@ export function WorkspaceViews({
       : null;
   return (
     <div
-      className={`flex min-h-10 shrink-0 items-center gap-3 bg-background py-1 [-webkit-app-region:no-drag] ${navigationOnly ? "" : embedded ? "w-full" : "border-b border-border/60 px-4"}`}
+      className={`flex min-h-10 items-center gap-3 bg-background py-1 [-webkit-app-region:no-drag] ${navigationOnly || embedded ? "min-w-0 flex-1" : "shrink-0 border-b border-border/60 px-4"}`}
     >
       {!navigationOnly && (
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {onColumns ? (
+          {dashboardReturn ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="max-w-full justify-start gap-1.5 px-1 text-muted-foreground"
+              aria-label={`Return to ${dashboardReturn.label}`}
+              onClick={() =>
+                void navigate({
+                  href: dashboardReturn.href,
+                  state: { dashboardFocusKey: dashboardReturn.threadKey },
+                })
+              }
+            >
+              <ArrowLeftIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{dashboardReturn.label}</span>
+            </Button>
+          ) : onColumns ? (
             "Columns"
           ) : (
             <>
@@ -68,64 +85,65 @@ export function WorkspaceViews({
           )}
         </span>
       )}
-      <nav aria-label="Workspace views" className="flex shrink-0 items-center gap-0.5">
-        {(
-          [
+      {!onColumns && (
+        <nav aria-label="Workspace views" className="flex shrink-0 items-center gap-0.5">
+          {(
             [
-              "overview",
-              space || filter === OUTSIDE_SPACES
-                ? "Space overview"
-                : profile
-                  ? "Profile overview"
-                  : "Dashboard",
-              LayoutDashboardIcon,
-            ],
-            ["folders", "Folders", FolderOpenIcon],
-            ["columns", "Columns", Columns3Icon],
-          ] as const
-        )
-          .filter(([key]) => key !== "overview" || location.pathname !== "/dashboard")
-          .map(([key, label, Icon]) => (
-            <Button
-              key={key}
-              size="xs"
-              variant={
-                view === key || (key === "folders" && view === "branches") ? "secondary" : "ghost"
-              }
-              className={
-                view === key || (key === "folders" && view === "branches")
-                  ? "bg-primary/10 text-primary ring-1 ring-primary/15"
-                  : "text-muted-foreground"
-              }
-              aria-pressed={view === key || (key === "folders" && view === "branches")}
-              onClick={() => {
-                const overviewScope = {
-                  profileId,
-                  spaceId: filter && filter !== OUTSIDE_SPACES ? filter : undefined,
-                  unsorted: filter === OUTSIDE_SPACES,
-                };
-                void navigate(
-                  key === "overview"
-                    ? profileId === "all" && !filter
-                      ? globalDashboardNavigation()
-                      : scopedOverviewNavigation(overviewScope)
-                    : {
-                        to: "/spaces/$profileId",
-                        params: { profileId: key === "columns" ? "all" : profileId },
-                        search: {
-                          space: key === "columns" ? undefined : overviewScope.spaceId,
-                          unsorted: key === "columns" ? false : overviewScope.unsorted,
-                          view: key,
+              [
+                "overview",
+                space || filter === OUTSIDE_SPACES
+                  ? "Space overview"
+                  : profile
+                    ? "Profile overview"
+                    : "Dashboard",
+                LayoutDashboardIcon,
+              ],
+              ["folders", "Folders", FolderOpenIcon],
+            ] as const
+          )
+            .filter(([key]) => key !== "overview" || location.pathname !== "/dashboard")
+            .map(([key, label, Icon]) => (
+              <Button
+                key={key}
+                size="xs"
+                variant={
+                  view === key || (key === "folders" && view === "branches") ? "secondary" : "ghost"
+                }
+                className={
+                  view === key || (key === "folders" && view === "branches")
+                    ? "bg-primary/10 text-primary ring-1 ring-primary/15"
+                    : "text-muted-foreground"
+                }
+                aria-pressed={view === key || (key === "folders" && view === "branches")}
+                onClick={() => {
+                  const overviewScope = {
+                    profileId,
+                    spaceId: filter && filter !== OUTSIDE_SPACES ? filter : undefined,
+                    unsorted: filter === OUTSIDE_SPACES,
+                  };
+                  void navigate(
+                    key === "overview"
+                      ? profileId === "all" && !filter
+                        ? globalDashboardNavigation()
+                        : scopedOverviewNavigation(overviewScope)
+                      : {
+                          to: "/spaces/$profileId",
+                          params: { profileId },
+                          search: {
+                            space: overviewScope.spaceId,
+                            unsorted: overviewScope.unsorted,
+                            view: key,
+                          },
                         },
-                      },
-                );
-              }}
-            >
-              <Icon className="size-3.5" />
-              {label}
-            </Button>
-          ))}
-      </nav>
+                  );
+                }}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </Button>
+            ))}
+        </nav>
+      )}
     </div>
   );
 }

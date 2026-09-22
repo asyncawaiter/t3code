@@ -19,6 +19,7 @@ import {
   moveThreadsToSpace,
   profileForProject,
   indexProfileSpaces,
+  workItemChats,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { useAtomValue } from "@effect/atom-react";
@@ -32,7 +33,11 @@ import type { ChatAttachment } from "@t3tools/contracts";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Checkbox } from "../ui/checkbox";
-import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
+import { TaskSelect } from "./TaskSelect";
+import { toastManager } from "../ui/toast";
+import { QuickTaskCapture } from "./QuickTaskCapture";
+import { TaskCaptureCoordinator } from "./TaskCaptureCoordinator";
+import { useTaskCaptures } from "./taskCaptureStorage";
 import {
   PaperclipIcon,
   ExternalLinkIcon,
@@ -65,14 +70,52 @@ const Draft = Schema.NullOr(
     base: Schema.optionalKey(WorkItem),
     device: Schema.NullOr(EnvironmentId),
     separate: Schema.optionalKey(Schema.Boolean),
+    launchThreadId: Schema.optionalKey(ThreadId),
   }),
 );
 const decodeStatus = Schema.decodeUnknownSync(WorkItem.fields.status);
 const decodeTask = Schema.decodeUnknownSync(WorkItem);
 
 export function WorkItemDialog() {
+  const closeCapture = useRef<(() => Promise<boolean>) | null>(null);
   const request = useWorkItemEditor((state) => state.request);
-  return request ? <TaskForm key={request.item?.id ?? "new"} request={request} /> : null;
+  const ready = useTaskCaptures((state) => state.ready);
+  return (
+    <>
+      <TaskCaptureCoordinator />
+      {request &&
+        (request.item && !request.localCaptureId ? (
+          <TaskForm key={request.item.id} request={request} />
+        ) : (
+          <Dialog
+            open
+            onOpenChange={(open) => {
+              if (!open)
+                void (closeCapture.current?.() ?? Promise.resolve(true)).then((saved) => {
+                  if (saved) useWorkItemEditor.setState({ request: null });
+                });
+            }}
+          >
+            <DialogPopup className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>New task</DialogTitle>
+              </DialogHeader>
+              <div className="px-5 pb-5">
+                {ready ? (
+                  <QuickTaskCapture
+                    closeRef={closeCapture}
+                    request={request}
+                    onSaved={() => useWorkItemEditor.setState({ request: null })}
+                  />
+                ) : (
+                  "Opening local drafts..."
+                )}
+              </div>
+            </DialogPopup>
+          </Dialog>
+        ))}
+    </>
+  );
 }
 
 function TaskForm({ request }: { request: WorkItemRequest }) {
@@ -96,14 +139,12 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
     (request.projectId && request.environmentId
       ? profileForProject(profiles, `${request.environmentId}:${request.projectId}`)
       : undefined);
+  const storageDevice = request.environmentId!;
   const [device, setDevice] = useState(
     draft?.device ??
-      request.environmentId ??
-      environments.find(
-        (env) =>
-          env.connection.phase === "connected" &&
-          env.serverConfig?.environment.capabilities.workItems,
-      )?.environmentId ??
+      (request.item?.executionEnvironmentId !== undefined
+        ? request.item.executionEnvironmentId
+        : request.environmentId) ??
       null,
   );
   const [base, setBase] = useState(draft?.base ?? request.item);
@@ -142,12 +183,18 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
         updatedAt: new Date().toISOString(),
       },
   );
+  const [preparationOpen, setPreparationOpen] = useState(
+    () => !!task.brief || !!task.threadId || !!task.preparation,
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [separate, setSeparate] = useState(draft?.separate ?? false);
+  const [nextThreadId] = useState(
+    () => draft?.launchThreadId ?? ThreadId.make(`task-${randomUUID()}`),
+  );
   const allTasks = useWorkItems();
   const live = allTasks.find(
-    (entry) => entry.environmentId === device && entry.item.id === task.id,
+    (entry) => entry.environmentId === storageDevice && entry.item.id === task.id,
   )?.item;
   useEffect(() => {
     if (live && base && Equal.equals(task, base) && !Equal.equals(live, base)) {
@@ -159,8 +206,8 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
   }, [live, base, task]);
   useEffect(() => {
     if (!Equal.equals(task, base) || separate)
-      setDraft({ task, ...(base ? { base } : {}), device, separate });
-  }, [task, base, device, separate, setDraft]);
+      setDraft({ task, ...(base ? { base } : {}), device, separate, launchThreadId: nextThreadId });
+  }, [task, base, device, separate, setDraft, nextThreadId]);
   const save = useSaveWorkItem();
   const saveProfiles = useSaveProfiles();
   const create = useAtomCommand(threadEnvironment.create, { reportFailure: false });
@@ -175,19 +222,26 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
     (folder) => folder.environmentId === device && folder.id === task.projectId,
   );
   const linked = threads.find(
-    (thread) =>
-      thread.environmentId === device && thread.id === (task.threadId ?? `task-${task.id}`),
+    (thread) => thread.environmentId === device && thread.id === (task.threadId ?? nextThreadId),
   );
   const connected = environments.some(
     (env) => env.environmentId === device && env.connection.phase === "connected",
   );
+  const storageConnected = environments.some(
+    (env) =>
+      env.environmentId === storageDevice &&
+      env.connection.phase === "connected" &&
+      env.serverConfig?.environment.capabilities.taskCapture,
+  );
+  const associated = workItemChats(task, storageDevice);
   const change = (patch: Partial<WorkItem>) => setTask((current) => ({ ...current, ...patch }));
   const close = () => useWorkItemEditor.setState({ request: null });
 
   async function persist(next = task) {
-    if (!device) throw new Error("Choose a device to store this task.");
+    if (!storageDevice) throw new Error("Task storage is unavailable.");
     const validated = decodeTask({
       ...next,
+      executionEnvironmentId: device,
       projectId: next.threadId
         ? next.projectId
         : (folders.find((folder) => folder.id === next.projectId)?.id ?? null),
@@ -195,10 +249,10 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
       links: next.links.map((link) => link.trim()).filter(Boolean),
       updatedAt: new Date().toISOString(),
     });
-    const saved = await save(device, validated, base);
+    const saved = await save(storageDevice, validated, base);
     setBase(saved);
     setTask(saved);
-    setDraft(separate ? { task: saved, base: saved, device, separate } : null);
+    setDraft({ task: saved, base: saved, device, separate, launchThreadId: nextThreadId });
     return saved;
   }
   async function run(action: () => Promise<void>) {
@@ -221,22 +275,25 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
   async function addFiles(files: File[]) {
     if (!files.length) return;
     await run(async () => {
-      if (!device || !connected)
-        throw new Error("Choose a connected device to attach screenshots or files.");
+      if (!storageConnected)
+        throw new Error("Reconnect the task storage device to add files to this saved task.");
       if ((task.attachments?.length ?? 0) + files.length > 8)
         throw new Error("Attach up to 8 files.");
       const attachments = [...(task.attachments ?? [])];
       for (const file of files) {
-        attachments.push(await uploadTaskFile(device, file));
+        attachments.push(await uploadTaskFile(storageDevice, file));
         change({ attachments: [...attachments] });
       }
-      if (task.title.trim()) await persist({ ...task, attachments });
     });
   }
   async function openChat() {
     if (!device || !project) throw new Error("Choose the folder where this work belongs.");
     let saved = await persist();
-    const threadId = saved.threadId ?? ThreadId.make(`task-${saved.id}`);
+    const threadId = saved.threadId ?? nextThreadId;
+    if (linked && linked.projectId !== project.id)
+      throw new Error(
+        "The previous attempt created a chat in another folder. Select that folder to reopen it.",
+      );
     if (!linked) {
       if (saved.threadId)
         throw new Error(
@@ -262,7 +319,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
         });
         if (refs._tag === "Failure") throw squashAtomCommandFailure(refs);
         const existing = refs.value.graph?.worktrees.find(
-          (item) => item.branch === `task/${saved.id}`,
+          (item) => item.branch === `task/${threadId}`,
         );
         if (existing) {
           worktreePath = existing.path;
@@ -273,7 +330,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
             input: {
               cwd: project.workspaceRoot,
               refName: "HEAD",
-              newRefName: `task/${saved.id}`,
+              newRefName: `task/${threadId}`,
               path: null,
             },
           });
@@ -285,7 +342,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
       const result = await create({
         environmentId: device,
         input: {
-          commandId: CommandId.make(`task-create-${saved.id}`),
+          commandId: CommandId.make(`task-create-${threadId}`),
           threadId,
           projectId: project.id,
           title: saved.title,
@@ -298,20 +355,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     }
-    saved = await save(
-      device,
-      {
-        ...saved,
-        threadId,
-        status: saved.status === "parked" ? "ready" : saved.status,
-        updatedAt: new Date().toISOString(),
-      },
-      saved,
-    );
-    setBase(saved);
-    setTask(saved);
-    setDraft(null);
-    if (saved.profileId)
+    if (saved.profileId && !task.threadId)
       await saveProfiles((current) =>
         current.map((owner) =>
           owner.id === saved.profileId
@@ -326,6 +370,28 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
             : owner,
         ),
       );
+    saved = await save(
+      storageDevice,
+      {
+        ...saved,
+        threadId,
+        executionEnvironmentId: device,
+        chats: workItemChats(saved, storageDevice).some(
+          (chat) => chat.environmentId === device && chat.threadId === threadId,
+        )
+          ? workItemChats(saved, storageDevice)
+          : [
+              ...workItemChats(saved, storageDevice),
+              { environmentId: device, threadId, purpose: "Work" },
+            ],
+        status: saved.status === "parked" ? "ready" : saved.status,
+        updatedAt: new Date().toISOString(),
+      },
+      saved,
+    );
+    setBase(saved);
+    setTask(saved);
+    setDraft(null);
     close();
     await navigate({
       to: "/$environmentId/$threadId",
@@ -417,7 +483,9 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                     change({
                       profileId: value || null,
                       spaceId: null,
-                      projectId: task.threadId ? task.projectId : null,
+                      projectId: null,
+                      threadId: null,
+                      chats: associated,
                     })
                   }
                   options={[
@@ -433,7 +501,9 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                   onChange={(value) =>
                     change({
                       spaceId: value || null,
-                      projectId: task.threadId ? task.projectId : null,
+                      projectId: null,
+                      threadId: null,
+                      chats: associated,
                     })
                   }
                   options={[
@@ -448,13 +518,13 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                   label="Device"
                   ariaLabel="Task device"
                   value={device ?? ""}
-                  disabled={!!base || !!task.attachments?.length}
+                  disabled={false}
                   onChange={(value) => {
-                    setDevice(EnvironmentId.make(value));
-                    change({ projectId: null });
+                    setDevice(value ? EnvironmentId.make(value) : null);
+                    change({ projectId: null, threadId: null, chats: associated });
                   }}
                   options={[
-                    { value: "", label: "Choose device", disabled: true },
+                    { value: "", label: "Choose later" },
                     ...environments.map((env) => ({
                       value: env.environmentId,
                       label: env.label,
@@ -519,7 +589,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={!device || !connected || (task.attachments?.length ?? 0) >= 8}
+                    disabled={!storageConnected || (task.attachments?.length ?? 0) >= 8}
                     onClick={() => fileInput.current?.click()}
                   >
                     <PaperclipIcon className="size-3" />
@@ -556,8 +626,8 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                           className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs hover:underline"
                           onClick={() =>
                             void run(async () => {
-                              if (device) {
-                                const url = await taskAttachmentUrl(device, attachment);
+                              if (storageDevice) {
+                                const url = await taskAttachmentUrl(storageDevice, attachment);
                                 if (attachment.type === "image")
                                   setPreview({
                                     images: [{ src: url, name: attachment.name }],
@@ -573,8 +643,8 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                             })
                           }
                         >
-                          {device && attachment.type === "image" ? (
-                            <TaskImage environmentId={device} attachment={attachment} />
+                          {storageDevice && attachment.type === "image" ? (
+                            <TaskImage environmentId={storageDevice} attachment={attachment} />
                           ) : (
                             <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
                           )}
@@ -599,8 +669,98 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                 ) : null}
               </div>
             </details>
+            {associated.length > 0 && (
+              <section className="space-y-2 rounded-lg border p-3">
+                <p className="text-xs font-medium">Working chats</p>
+                {associated.map((chat) => {
+                  const shell = threads.find(
+                    (thread) =>
+                      thread.environmentId === chat.environmentId && thread.id === chat.threadId,
+                  );
+                  return (
+                    <div
+                      key={`${chat.environmentId}:${chat.threadId}`}
+                      className="space-y-2 rounded-md bg-muted/30 p-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 truncate text-left text-xs hover:underline"
+                          onClick={() => {
+                            close();
+                            void navigate({ to: "/$environmentId/$threadId", params: chat });
+                          }}
+                        >
+                          {shell?.title ?? "Chat unavailable"}
+                        </button>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {shell?.session?.status === "running"
+                            ? "Running"
+                            : shell?.latestTurn?.state === "completed"
+                              ? "Result available"
+                              : shell
+                                ? "Idle"
+                                : "Unavailable"}
+                        </span>
+                        <Button
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label="Unlink chat"
+                          onClick={() =>
+                            change({
+                              chats: associated.filter((entry) => entry !== chat),
+                              ...(task.threadId === chat.threadId && device === chat.environmentId
+                                ? { threadId: null }
+                                : {}),
+                            })
+                          }
+                        >
+                          <XIcon />
+                        </Button>
+                      </div>
+                      <Input
+                        aria-label="Chat purpose"
+                        placeholder="Purpose of this chat"
+                        value={chat.purpose}
+                        onChange={(event) =>
+                          change({
+                            chats: associated.map((entry) =>
+                              entry === chat ? { ...entry, purpose: event.target.value } : entry,
+                            ),
+                          })
+                        }
+                      />
+                      <Textarea
+                        aria-label="Chat result"
+                        placeholder="Result or conclusion to keep"
+                        value={chat.result ?? ""}
+                        maxLength={4000}
+                        onChange={(event) =>
+                          change({
+                            chats: associated.map((entry) =>
+                              entry === chat ? { ...entry, result: event.target.value } : entry,
+                            ),
+                          })
+                        }
+                      />
+                    </div>
+                  );
+                })}
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    change({ chats: associated, threadId: null, projectId: null });
+                    setPreparationOpen(true);
+                  }}
+                >
+                  Add another chat
+                </Button>
+              </section>
+            )}
             <details
-              open={!!task.brief || !!task.threadId || !!task.preparation}
+              open={preparationOpen}
+              onToggle={(event) => setPreparationOpen(event.currentTarget.open)}
               className="group rounded-lg border border-border/60"
             >
               <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-medium [&::-webkit-details-marker]:hidden">
@@ -620,17 +780,38 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                     onChange={(e) => change({ brief: e.target.value })}
                   />
                 </label>
-                {(task.source || task.threadId) && (
+                <TaskSelect
+                  label="Prepare brief in"
+                  ariaLabel="Preparation chat"
+                  value={
+                    task.preparationThreadId !== undefined
+                      ? (task.preparationThreadId ?? "")
+                      : task.source?.environmentId === storageDevice
+                        ? task.source.threadId
+                        : task.threadId && device === storageDevice
+                          ? task.threadId
+                          : ""
+                  }
+                  onChange={(value) =>
+                    change({ preparationThreadId: value ? ThreadId.make(value) : null })
+                  }
+                  options={[
+                    { value: "", label: "Choose a chat" },
+                    ...threads
+                      .filter((thread) => thread.environmentId === storageDevice)
+                      .map((thread) => ({ value: thread.id, label: thread.title })),
+                  ]}
+                />
+                {(task.preparationThreadId !== undefined
+                  ? task.preparationThreadId
+                  : task.source?.environmentId === storageDevice ||
+                    (task.threadId && device === storageDevice)) && (
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={task.preparation?.state === "running" || !connected}
+                    disabled={task.preparation?.state === "running" || !storageConnected}
                     onClick={() =>
                       void run(async () => {
-                        if (task.source && task.source.environmentId !== device)
-                          throw new Error(
-                            "Save this task on the source chat's device to prepare it there.",
-                          );
                         await persist({
                           ...task,
                           preparation:
@@ -653,7 +834,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                     {task.preparation.state === "queued"
                       ? "Queued after the current turn. You can cancel until it starts."
                       : task.preparation.state === "running"
-                        ? "Preparing in the source chat. Review the brief before starting work."
+                        ? "Preparing in the selected chat. Review the brief before starting work."
                         : task.preparation.error}
                   </p>
                 )}
@@ -662,9 +843,11 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                     label={task.threadId ? "Linked chat" : "Link an existing chat"}
                     ariaLabel={task.threadId ? "Linked chat" : "Link existing chat"}
                     value={task.threadId ?? ""}
-                    onChange={(value) => change({ threadId: value ? ThreadId.make(value) : null })}
+                    onChange={(value) =>
+                      change({ threadId: value ? ThreadId.make(value) : null, chats: associated })
+                    }
                     options={[
-                      { value: "", label: task.threadId ? "Unlink chat" : "Create a new chat" },
+                      { value: "", label: "Create a new chat" },
                       ...threads
                         .filter((t) => t.environmentId === device && t.projectId === task.projectId)
                         .map((t) => ({ value: t.id, label: t.title })),
@@ -708,9 +891,40 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                 ]}
               />
             </div>
-            {!connected && (
+            <label className="grid gap-1.5 text-xs text-muted-foreground">
+              Remind me
+              <Input
+                nativeInput
+                type="datetime-local"
+                aria-label="Task reminder"
+                value={
+                  task.remindAt
+                    ? new Date(
+                        Date.parse(task.remindAt) -
+                          new Date(task.remindAt).getTimezoneOffset() * 60000,
+                      )
+                        .toISOString()
+                        .slice(0, 16)
+                    : ""
+                }
+                onChange={(event) =>
+                  change({
+                    remindAt: event.target.value
+                      ? new Date(event.target.value).toISOString()
+                      : null,
+                  })
+                }
+              />
+              {task.remindAt && (
+                <Button size="xs" variant="ghost" onClick={() => change({ remindAt: null })}>
+                  Clear reminder
+                </Button>
+              )}
+              Reminders appear in T3 while it is open, or when you return.
+            </label>
+            {!storageConnected && (
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Reconnect this device to save. Your draft stays on this device.
+                Reconnect the task storage device to save changes. Your draft stays here.
               </p>
             )}
             {error && (
@@ -730,15 +944,48 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
             disabled={busy}
             className="text-muted-foreground"
             onClick={() => {
-              setDraft(null);
               close();
             }}
           >
-            Discard draft
+            Close
           </Button>
           <Button
             size="sm"
-            disabled={busy || !task.title.trim() || !connected}
+            variant="ghost"
+            disabled={busy || !storageConnected}
+            onClick={() =>
+              void run(async () => {
+                const deleted = await persist({
+                  ...task,
+                  deletedAt: task.deletedAt ? null : new Date().toISOString(),
+                  preparation: null,
+                });
+                close();
+                if (deleted.deletedAt)
+                  toastManager.add({
+                    title: "Task moved to Trash",
+                    description: "Linked chats are unchanged.",
+                    actionProps: {
+                      children: "Undo",
+                      onClick: () => {
+                        void save(
+                          storageDevice,
+                          { ...deleted, deletedAt: null, updatedAt: new Date().toISOString() },
+                          deleted,
+                        ).catch((cause) =>
+                          toastManager.add({ type: "error", title: String(cause) }),
+                        );
+                      },
+                    },
+                  });
+              })
+            }
+          >
+            {task.deletedAt ? "Restore task" : "Delete task"}
+          </Button>
+          <Button
+            size="sm"
+            disabled={busy || !task.title.trim() || !storageConnected}
             onClick={() =>
               void run(async () => {
                 await persist();
@@ -752,57 +999,6 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
       </DialogPopup>
       {preview && <ExpandedImageDialog preview={preview} onClose={() => setPreview(null)} />}
     </Dialog>
-  );
-}
-
-function TaskSelect({
-  label,
-  ariaLabel,
-  value,
-  options,
-  onChange,
-  disabled = false,
-}: {
-  label: string;
-  ariaLabel: string;
-  value: string;
-  options: { value: string; label: string; detail?: string | undefined; disabled?: boolean }[];
-  onChange: (value: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">
-      <span>{label}</span>
-      <Select
-        value={value}
-        onValueChange={(next) => {
-          if (next !== null) onChange(next);
-        }}
-        disabled={disabled}
-      >
-        <SelectTrigger aria-label={ariaLabel} className="w-full min-w-0 font-normal">
-          <SelectValue>
-            {options.find((item) => item.value === value)?.label ?? "Unavailable"}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectPopup
-          alignItemWithTrigger={false}
-          className="max-h-64"
-          popupClassName="max-w-[min(28rem,calc(100vw-2rem))]"
-        >
-          {options.map((item) => (
-            <SelectItem key={item.value} value={item.value} disabled={item.disabled}>
-              <span className="block truncate">{item.label}</span>
-              {item.detail && (
-                <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                  {item.detail}
-                </span>
-              )}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </label>
   );
 }
 

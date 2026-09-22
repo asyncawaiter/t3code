@@ -8,16 +8,8 @@ import {
   UsageProviderKind,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import {
-  elapsedShare,
-  formatDuration,
-  formatResetsIn,
-  type LimitPace,
-  paceOf,
-  remainingPercent,
-} from "@t3tools/shared/usageLimits";
-import { GaugeIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
-import { Fragment, useState } from "react";
+import { formatDuration, formatResetsIn, remainingPercent } from "@t3tools/shared/usageLimits";
+import { Fragment, useRef, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { environmentPresentations } from "../../state/presentation";
@@ -38,12 +30,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
 
-const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof GaugeIcon }> = {
-  ahead: { label: "Ahead of pace: spending faster than the window elapses", icon: TrendingUpIcon },
-  on: { label: "On pace with the window", icon: GaugeIcon },
-  under: { label: "Under pace: headroom left for the rest of the window", icon: TrendingDownIcon },
-};
-
 /** The series colour the cost chart uses for this driver, so the two views read as one. */
 export function barColor(driver: ServerProvider["driver"]): string {
   const kind: UsageProviderKind | undefined =
@@ -51,33 +37,7 @@ export function barColor(driver: ServerProvider["driver"]): string {
   return kind ? PROVIDER_PRESENTATION[kind].color : "var(--foreground)";
 }
 
-/** Pace as a glyph with the words on hover. */
-export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
-  const Icon = PACE[pace].icon;
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            role="img"
-            aria-label={PACE[pace].label}
-            className="inline-flex text-muted-foreground"
-          />
-        }
-      >
-        <Icon className="size-3.5" aria-hidden />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{PACE[pace].label}</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-/**
- * One window as a full-width bar from the moment it opened to its reset.
- * The fill is the share of quota spent; the hairline is how far into the
- * window the clock is, which is also where even spending would have put the
- * fill. Hover for the exact figures and reset time.
- */
+/** Quota used or remaining, with the exact reset time on focus or hover. */
 function WindowBar({
   color,
   window,
@@ -92,16 +52,11 @@ function WindowBar({
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const remaining = used ? 100 - remainingPercent(window) : remainingPercent(window);
   const unit = used ? "used" : "left";
-  const elapsed = elapsedShare(window, now);
-  // Match the time marker to the selected quota direction.
-  const timeLeft = elapsed === null ? null : Math.round((used ? elapsed : 1 - elapsed) * 100);
   const resetsIn = formatResetsIn(window, now);
   const resetsAt = window.resetsAt
     ? formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)
     : null;
-  const summary = `${window.label}: ${remaining}% ${unit}${
-    timeLeft === null ? "" : `, ${timeLeft}% of the window ${used ? "elapsed" : "left"}`
-  }${resetsIn ? `, ${resetsIn}` : ""}`;
+  const summary = `${window.label}: ${remaining}% ${unit}${resetsIn ? `, ${resetsIn}` : ""}`;
 
   return (
     <Tooltip>
@@ -122,23 +77,12 @@ function WindowBar({
             style={{ width: `${remaining}%`, backgroundColor: color }}
           />
         ) : null}
-        {timeLeft !== null ? (
-          <span
-            aria-hidden
-            className="absolute inset-y-0.5 w-px -translate-x-1/2 bg-foreground/60"
-            style={{ left: `${timeLeft}%` }}
-          />
-        ) : null}
       </TooltipTrigger>
       <TooltipPopup side="top" className="max-w-72 text-xs">
         <div className="flex flex-col gap-0.5">
           <span className="text-foreground">
             {remaining}% {unit}
-            {timeLeft !== null ? ` · ${timeLeft}% of the window ${used ? "elapsed" : "left"}` : ""}
           </span>
-          {timeLeft !== null ? (
-            <span className="text-muted-foreground">The line is where even spending would be.</span>
-          ) : null}
           {resetsAt ? (
             <span className="text-muted-foreground">
               Resets {resetsAt}
@@ -152,7 +96,7 @@ function WindowBar({
 }
 
 /**
- * One account's windows as rows: label and percent, bar, pace and countdown.
+ * One account's windows as rows: label and percent, bar and countdown.
  * Compact rows fit the composer panel with narrower columns.
  */
 export function LimitWindows({
@@ -161,7 +105,9 @@ export function LimitWindows({
   now,
   compact = false,
   used = false,
+  cards = false,
 }: {
+  readonly cards?: boolean;
   readonly used?: boolean;
   readonly driver: ServerProvider["driver"];
   readonly windows: ReadonlyArray<ServerProviderUsageWindow>;
@@ -169,6 +115,30 @@ export function LimitWindows({
   readonly compact?: boolean;
 }) {
   const color = barColor(driver);
+  if (cards)
+    return (
+      <div className="flex flex-col divide-y divide-border/50">
+        {windows.map((window) => {
+          return (
+            <div key={window.id} className="py-3 first:pt-0 last:pb-0">
+              <div className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="min-w-0 font-medium">{window.label}</span>
+                <span className="shrink-0 tabular-nums">
+                  <strong className="text-base font-semibold">
+                    {used ? 100 - remainingPercent(window) : remainingPercent(window)}%
+                  </strong>{" "}
+                  <span className="text-xs text-muted-foreground">{used ? "used" : "left"}</span>
+                </span>
+              </div>
+              <WindowBar color={color} window={window} now={now} used={used} />
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>{formatResetsIn(window, now) ?? "Reset time unavailable"}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
   return (
     <div
       className={
@@ -178,7 +148,6 @@ export function LimitWindows({
       }
     >
       {windows.map((window) => {
-        const pace = paceOf(window, now);
         const resetsIn = formatResetsIn(window, now);
         return (
           <Fragment key={window.id}>
@@ -191,7 +160,6 @@ export function LimitWindows({
             </span>
             <WindowBar color={color} window={window} now={now} used={used} />
             <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-              {pace ? <PaceIcon pace={pace} /> : null}
               <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>
             </span>
           </Fragment>
@@ -217,15 +185,22 @@ export function useResetCredit(
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   const redeem = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setConfirming(false);
     setBusy(true);
     setStatus(null);
-    const result = await consume({ environmentId, input });
-    setBusy(false);
+    const result = await consume({ environmentId, input }).finally(() => {
+      inFlight.current = false;
+      setBusy(false);
+    });
     if (result._tag === "Success") {
-      setStatus(result.value.warning ?? OUTCOME_TEXT[result.value.outcome]);
+      setStatus(
+        [OUTCOME_TEXT[result.value.outcome], result.value.warning].filter(Boolean).join(" "),
+      );
       return;
     }
     setStatus(
@@ -248,7 +223,9 @@ export function ResetCreditDialog({
   open,
   onOpenChange,
   onConfirm,
+  accountLabel,
 }: {
+  readonly accountLabel?: string | undefined;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onConfirm: () => void;
@@ -258,9 +235,10 @@ export function ResetCreditDialog({
       <AlertDialogPopup>
         <AlertDialogHeader>
           <AlertDialogTitle>Use a reset credit?</AlertDialogTitle>
+          {accountLabel && <p className="text-sm font-medium break-words">{accountLabel}</p>}
           <AlertDialogDescription>
-            This redeems one credit on your account and clears the current rate-limit windows. It
-            cannot be undone.
+            This asks the provider to redeem one banked credit for this account. If applied, it
+            resets your rate-limit windows and cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -295,7 +273,11 @@ export function ResetCredits({
   input,
   credits,
   now,
+  accountLabel,
+  disabled = false,
 }: {
+  readonly accountLabel?: string | undefined;
+  readonly disabled?: boolean;
   readonly environmentId: EnvironmentId;
   readonly input: ProviderConsumeResetCreditInput;
   readonly credits: ServerProviderResetCredits;
@@ -307,15 +289,27 @@ export function ResetCredits({
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
       <span className="tabular-nums">{resetCreditsSummary(credits, now)}</span>
       {credits.availableCount > 0 ? (
-        <Button size="xs" variant="outline" disabled={busy} onClick={() => setConfirming(true)}>
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={busy || disabled}
+          onClick={() => setConfirming(true)}
+        >
           {busy ? "Using…" : "Use reset"}
         </Button>
       ) : null}
-      {status ? <span className="text-foreground">{status}</span> : null}
+      {status ? (
+        <span role="status" className="basis-full text-foreground">
+          {status}
+        </span>
+      ) : null}
       <ResetCreditDialog
         open={confirming}
         onOpenChange={setConfirming}
-        onConfirm={() => void redeem()}
+        onConfirm={() => {
+          if (!disabled) void redeem();
+        }}
+        accountLabel={accountLabel}
       />
     </div>
   );
@@ -323,8 +317,7 @@ export function ResetCredits({
 
 /**
  * Subscription quota across every connected environment's providers and hubs,
- * pooled per provider. The page advances `now` on explicit refresh rather than
- * ticking: a live clock would repaint the page for no decision-changing gain.
+ * pooled per provider. The page updates countdowns only while visible.
  */
 export function UsageLimitsSection({
   selectedEnvironmentIds,

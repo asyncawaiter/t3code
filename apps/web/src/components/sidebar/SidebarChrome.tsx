@@ -259,3 +259,14 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     </SidebarFooter>
   );
 });
+
+export function SidebarAccountControls() {
+  return hasCloudPublicConfig() ? (
+    <Suspense fallback={<p className="text-xs text-muted-foreground">Loading account...</p>}>
+      <T3ConnectSidebarSignIn />
+      <T3ConnectSidebarAvatar />
+    </Suspense>
+  ) : (
+    <p className="text-xs text-muted-foreground">T3 Connect is not configured on this server.</p>
+  );
+}

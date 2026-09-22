@@ -22,7 +22,7 @@
  * @module provider/ProviderDriver
  */
 import type {
-  ProviderConsumeResetCreditOutcome,
+  ProviderConsumeResetCreditResult,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
@@ -80,7 +80,7 @@ export interface ProviderInstance {
    * not thread-level, which is why it lives here rather than on the adapter.
    */
   readonly consumeResetCredit?: () => Effect.Effect<
-    ProviderConsumeResetCreditOutcome,
+    ProviderConsumeResetCreditResult,
     ProviderDriverError
   >;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;

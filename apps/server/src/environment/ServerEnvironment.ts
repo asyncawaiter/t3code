@@ -229,6 +229,7 @@ export const make = Effect.gen(function* () {
       profileSynchronization: true,
       spaceDeviceDefaults: true,
       workItems: true,
+      taskCapture: true,
       chatBoards: true,
       storageCleanup: true,
       projectWorktreeCleanup: true,

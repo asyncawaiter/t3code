@@ -1,14 +1,16 @@
 ---
 name: test-t3-app
-description: Test T3 Code's web and desktop UI through its built-in Browser panel against isolated development state. Use for browser verification, browser pairing recovery, and test fixtures. Use test-t3-mobile for native mobile verification.
+description: Test T3 Code's web and desktop UI through the Codex browser or T3's built-in Browser panel against isolated development state. Use for browser verification, browser pairing recovery, and test fixtures. Use test-t3-mobile for native mobile verification.
 ---
 
 # Test T3 web and desktop
 
-Use T3's built-in Browser panel for verification. If its tools are absent or
-the panel reports unavailable, explain the blocker and stop verification.
-Do not install or switch to another automation system. For native mobile
-testing, use [test-t3-mobile](../test-t3-mobile/SKILL.md).
+Use the Codex browser when working in Codex, or T3's built-in Browser panel
+when its tools are available. Once the user authorizes browser testing, either
+is allowed without another permission request. If the chosen browser is
+unavailable, use the other available browser. Report a blocker only when
+neither is available. For native mobile testing, use
+[test-t3-mobile](../test-t3-mobile/SKILL.md).
 
 ## Start the app
 
@@ -21,9 +23,12 @@ Test with meaningful project and thread data. Read
 [references/sqlite-fixtures.md](references/sqlite-fixtures.md) only when
 inspecting or seeding SQLite. Stop the test server before direct fixture writes.
 
-## Use the Browser panel
+## Use the browser
 
-Call `preview_status`, then `preview_open` if the Browser panel is
+For the Codex browser, use its provided browser tools and their documented
+APIs. Open the isolated dev app, reusing a paired tab when available.
+
+For T3's built-in Browser panel, call `preview_status`, then `preview_open` if the Browser panel is
 closed. Navigate to the complete startup pairing URL once with
 `preview_navigate`, then use `preview_snapshot` and T3's interaction tools.
 If the token was consumed or expired, run `node apps/server/src/bin.ts pair`

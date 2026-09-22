@@ -1,3 +1,15 @@
+import { useUiStateStore } from "../uiStateStore";
+import { ColumnsRail } from "./spaces/ColumnsRail";
+import {
+  isColumnsLocation,
+  useChatMode,
+  usesColumnsRail,
+  useColumnNavigation,
+  chatLocationToRemember,
+  ChatReturnLocation,
+  DEFAULT_CHAT_RETURN,
+} from "./spaces/columnNavigation";
+import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
@@ -7,10 +19,14 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
-import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
+import {
+  getLocalStorageItem,
+  removeLocalStorageItem,
+  useLocalStorage,
+} from "../hooks/useLocalStorage";
 import {
   isRichTextBoldShortcut,
   resolveShortcutCommand,
@@ -161,7 +177,49 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     usePanelAnimationSettings();
   // Settings routes show the settings nav in place of whichever thread
   // sidebar is active.
-  const pathname = useLocation({ select: (location) => location.pathname });
+  const location = useLocation();
+  const pathname = location.pathname;
+  const columns = isColumnsLocation(pathname, location.searchStr);
+  const [mode, setMode] = useChatMode();
+  const columnRail = usesColumnsRail(pathname, location.searchStr, mode);
+  useEffect(() => {
+    if (columns) setMode("columns");
+  }, [columns, setMode]);
+  const threadTarget = useRouterState({
+    select: ({ matches }) => resolveThreadRouteTarget(matches.at(-1)?.params ?? {}),
+  });
+  const activeProfileId = useUiStateStore((state) => state.activeProfileId);
+  const activeSpace = useUiStateStore(
+    (state) => state.spaceFiltersByProfile?.[activeProfileId ?? "all"] ?? null,
+  );
+  const [, setLastChat] = useLocalStorage(
+    "t3.workspace.chat-return",
+    DEFAULT_CHAT_RETURN,
+    ChatReturnLocation,
+  );
+  useEffect(() => {
+    if (!columns && threadTarget) {
+      const expected =
+        threadTarget.kind === "server"
+          ? `/${threadTarget.threadRef.environmentId}/${threadTarget.threadRef.threadId}`
+          : `/draft/${threadTarget.draftId}`;
+      const remembered = chatLocationToRemember(location.pathname, location.href, expected);
+      if (remembered) {
+        setLastChat({ href: remembered, profileId: activeProfileId, space: activeSpace });
+        setMode("chat");
+      }
+    }
+    if (!columns) useColumnNavigation.setState({ choosing: false });
+  }, [
+    threadTarget,
+    location.href,
+    location.pathname,
+    columns,
+    setLastChat,
+    setMode,
+    activeProfileId,
+    activeSpace,
+  ]);
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -188,6 +246,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   });
   const sidebarProviderStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
+    ...(columnRail
+      ? { "--workspace-rail-inset": isMacosDesktop && !isWindowFullscreen ? "64px" : "20px" }
+      : {}),
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
     ...(isMacosDesktop && !isWindowFullscreen
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
@@ -235,40 +296,45 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <SidebarProvider
         className="h-dvh! min-h-0!"
+        data-columns-rail={columnRail ? "true" : "false"}
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
         defaultOpen
         style={sidebarProviderStyle}
       >
         <ProjectProjectionRetention />
-        <Sidebar
-          side="left"
-          collapsible="offcanvas"
-          data-app-sidebar=""
-          className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
-          resizable={{
-            maxWidth: sidebarMaximumWidth,
-            minWidth: THREAD_SIDEBAR_MIN_WIDTH,
-            shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
-              nextWidth <= currentWidth ||
-              wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
-            storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
-            onResize: setSidebarWidth,
-          }}
-        >
-          {isOnSettings ? (
-            <>
-              <SidebarChromeHeader isElectron={isElectron} />
-              <SettingsSidebarNav pathname={pathname} />
-            </>
-          ) : legacySidebarEnabled ? (
-            <LegacyThreadSidebar />
-          ) : (
-            <ThreadSidebar />
-          )}
-          <SidebarRail onDoubleClick={resetSidebarWidth} />
-        </Sidebar>
+        {columnRail ? (
+          <ColumnsRail />
+        ) : (
+          <Sidebar
+            side="left"
+            collapsible="offcanvas"
+            data-app-sidebar=""
+            className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
+            resizable={{
+              maxWidth: sidebarMaximumWidth,
+              minWidth: THREAD_SIDEBAR_MIN_WIDTH,
+              shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
+                nextWidth <= currentWidth ||
+                wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+              storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
+              onResize: setSidebarWidth,
+            }}
+          >
+            {isOnSettings ? (
+              <>
+                <SidebarChromeHeader isElectron={isElectron} />
+                <SettingsSidebarNav pathname={pathname} />
+              </>
+            ) : legacySidebarEnabled ? (
+              <LegacyThreadSidebar />
+            ) : (
+              <ThreadSidebar />
+            )}
+            <SidebarRail onDoubleClick={resetSidebarWidth} />
+          </Sidebar>
+        )}
         {children}
-        <SidebarControl />
+        {!columnRail && <SidebarControl />}
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>
   );

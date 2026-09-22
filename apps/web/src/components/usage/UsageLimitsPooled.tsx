@@ -10,7 +10,7 @@ import {
   type LimitPoolWindow,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
-import { AlertTriangleIcon, TicketIcon } from "lucide-react";
+import { AlertTriangleIcon, MonitorIcon, TicketIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -21,12 +21,12 @@ import { getDriverOption } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
   LimitWindows,
   ResetCredits,
-  PaceIcon,
   ResetCreditDialog,
   barColor,
   resetCreditsSummary,
@@ -497,7 +497,6 @@ function PoolWindowCard({
             {pool.remainingPercent}%
           </span>
           <span className="text-sm text-muted-foreground">left</span>
-          {pool.pace ? <PaceIcon pace={pool.pace} /> : null}
         </span>
         {nextRefill ? (
           <span className="text-xs text-muted-foreground tabular-nums">
@@ -555,62 +554,136 @@ export function UsageLimitsPooled({
   const pools = collectLimitPools(accounts, now);
   const notices = collectLimitNotices(presentations);
   return (
-    <div className="flex flex-col gap-8">
-      <ToggleGroup
-        aria-label="Limits view"
-        value={[view]}
-        onValueChange={(values) => {
-          if (values[0] === "accounts" || values[0] === "pooled") setView(values[0]);
-        }}
-      >
-        <Toggle value="accounts">Accounts</Toggle>
-        <Toggle value="pooled">Combined</Toggle>
-      </ToggleGroup>
-      {pools.length === 0 && notices.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No provider on the selected environments reports subscription limits.
-        </p>
-      ) : null}
-      {view === "accounts"
-        ? accounts.map((account) => (
-            <section key={account.key} className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <AccountAvatar account={account} />
-                <AccountName account={account} className="font-medium" />
-                {account.email ? (
-                  <RedactedSensitiveText
-                    value={account.email}
-                    ariaLabel="Toggle account email visibility"
-                    revealTooltip="Reveal email"
-                    hideTooltip="Hide email"
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <ToggleGroup
+          aria-label="Limits view"
+          value={[view]}
+          onValueChange={(values) => {
+            if (values[0] === "accounts" || values[0] === "pooled") setView(values[0]);
+          }}
+        >
+          <Toggle value="accounts">Accounts</Toggle>
+          <Toggle value="pooled">Combined</Toggle>
+        </ToggleGroup>
+        {view === "pooled" && (
+          <p className="text-xs text-muted-foreground">
+            Weighted capacity across accounts. Each account keeps its own limits.
+          </p>
+        )}
+      </div>
+      {accounts.length === 0 && notices.length === 0 && (
+        <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+          No provider on the selected devices reports subscription limits.
+        </div>
+      )}
+      {view === "accounts" ? (
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          {accounts.map((account) => {
+            const checkedAt = new Date(account.limits.checkedAt);
+            const age = Math.max(0, now - checkedAt.getTime());
+            const offline =
+              account.environments.length > 0 &&
+              account.environments.every((entry) => {
+                const presentation = presentations.get(entry.environmentId);
+                return (
+                  presentation?.connection !== undefined &&
+                  presentation.connection.phase !== "connected"
+                );
+              });
+            return (
+              <section
+                key={account.key}
+                className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card"
+              >
+                <div className="flex flex-col gap-2 border-b border-border/60 bg-muted/20 px-4 py-3.5">
+                  <div className="flex items-center gap-2.5">
+                    <AccountAvatar account={account} />
+                    <h2 className="min-w-0 flex-1 text-sm">
+                      <AccountName account={account} className="font-semibold" />
+                    </h2>
+                    <span className="inline-flex max-w-[50%] items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground">
+                      <MonitorIcon aria-hidden className="size-3 shrink-0" />
+                      <span className="break-all">
+                        {account.environments.map((entry) => entry.label).join(", ") ||
+                          account.sourceLabel}
+                      </span>
+                    </span>
+                  </div>
+                  {account.plan && <p className="text-xs text-muted-foreground">{account.plan}</p>}
+                  {account.email && (
+                    <div className="min-w-0 truncate text-xs text-muted-foreground">
+                      <RedactedSensitiveText
+                        value={account.email}
+                        ariaLabel="Toggle account email visibility"
+                        revealTooltip="Reveal email"
+                        hideTooltip="Hide email"
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="p-4">
+                  <LimitWindows
+                    driver={account.driver}
+                    windows={account.limits.windows}
+                    now={now}
+                    used
+                    cards
                   />
-                ) : null}
-                {account.plan ? (
-                  <span className="text-muted-foreground">{account.plan}</span>
-                ) : null}
-                <span className="ms-auto text-xs text-muted-foreground">
-                  {account.environments.map((entry) => entry.label).join(", ") ||
-                    account.sourceLabel}
-                </span>
-              </div>
-              <LimitWindows
-                driver={account.driver}
-                windows={account.limits.windows}
-                now={now}
-                used
-                compact
-              />
-              {account.limits.resetCredits && account.redeem ? (
-                <ResetCredits
-                  environmentId={account.redeem.environmentId}
-                  input={account.redeem.input}
-                  credits={account.limits.resetCredits}
-                  now={now}
-                />
-              ) : null}
-            </section>
-          ))
-        : pools.map((pool) => <PoolSection key={pool.driver} pool={pool} now={now} />)}
+                </div>
+                <div className="flex flex-col gap-3 border-t border-border/60 bg-muted/10 px-4 py-3">
+                  <p
+                    className={cn(
+                      "text-[11px] text-muted-foreground",
+                      (offline || age > 5 * 60_000) && "text-amber-700 dark:text-amber-400",
+                    )}
+                  >
+                    {offline ? "Device disconnected · " : age > 5 * 60_000 ? "Older report · " : ""}
+                    Reported{" "}
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <time
+                            tabIndex={0}
+                            className="rounded focus-visible:ring-2 focus-visible:ring-ring"
+                            dateTime={account.limits.checkedAt}
+                          />
+                        }
+                      >
+                        {Number.isFinite(age)
+                          ? age < 60_000
+                            ? "just now"
+                            : `${formatDuration(age)} ago`
+                          : "at an unknown time"}
+                      </TooltipTrigger>
+                      <TooltipPopup>{checkedAt.toLocaleString()}</TooltipPopup>
+                    </Tooltip>
+                  </p>
+                  {account.limits.resetCredits && account.redeem && (
+                    <ResetCredits
+                      environmentId={account.redeem.environmentId}
+                      input={account.redeem.input}
+                      credits={account.limits.resetCredits}
+                      accountLabel={`${account.displayName ?? getDriverOption(account.driver)?.label ?? account.driver}${account.email ? ` · ${account.email}` : ""}`}
+                      disabled={
+                        account.redeem
+                          ? presentations.get(account.redeem.environmentId)?.connection?.phase !==
+                              undefined &&
+                            presentations.get(account.redeem.environmentId)?.connection?.phase !==
+                              "connected"
+                          : true
+                      }
+                      now={now}
+                    />
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        pools.map((pool) => <PoolSection key={pool.driver} pool={pool} now={now} />)
+      )}
       <LimitNotices notices={notices} />
     </div>
   );

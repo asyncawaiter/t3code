@@ -137,7 +137,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it.each([0, 1])(
+it.each([0])(
   "refreshes the visible limits countdown with refresh button %i without switching tabs, even when quota is unchanged",
   async (buttonIndex) => {
     await act(() => {

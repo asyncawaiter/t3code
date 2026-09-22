@@ -1,4 +1,4 @@
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useLocation } from "@tanstack/react-router";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { buildReviewDashboard, flattenBoardEntries } from "./DashboardPage.logic";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
@@ -16,6 +16,7 @@ export function DashboardReviewBar({
   const threads = useThreadShells();
   const openThread = useWorkflowNavigation();
   const navigate = useNavigate();
+  const dashboardReturn = useLocation({ select: (location) => location.state.dashboardReturn });
   const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
   const inQueue = workflow.triageQueue.includes(key);
   const shell = threads.find(
@@ -52,7 +53,7 @@ export function DashboardReviewBar({
       className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/50 px-4 py-1.5 text-xs text-muted-foreground"
       aria-label="Dashboard review"
     >
-      {inQueue ? (
+      {inQueue && !dashboardReturn ? (
         <Button
           size="micro"
           variant="ghost-muted"

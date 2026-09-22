@@ -4,22 +4,33 @@ A task records work you want to do. A chat is a conversation with an agent. Task
 
 ## Capture and prepare work
 
-Use **New task** on the dashboard or in the command palette. **Create task from this chat** saves a separate task with a source-chat link; it does not send work to that chat. Add the outcome and original request. Profile, Space, folder, source links, and a chat are optional. Tasks are saved on the chosen device and visible to its connected clients. Unsaved captures stay on the client where you wrote them.
+Use a Space tile's plus and choose **New task**. The same popover keeps **New chat** and its per-device folder defaults. It remembers your last choice. The dashboard and command palette open the same task capture. A Space supplies its profile and Space automatically; use Change only when you need a different assignment.
 
-After selecting a Space, the folder picker offers only its folders on the chosen
-device, including configured default folders. Choose later if no folder is ready.
+Write the request, paste screenshots, drop files, or use Attach. A title is generated from the first line; screenshots can be saved without text. Save task or close the capture to keep it. Closing an empty capture creates nothing. Folder, execution device, status, and chat choices can wait.
 
-Paste screenshots anywhere in the capture form, drop files, or use Attach files. Images have thumbnails and a full-size preview. Save the task to retain its attachments; unfinished uploads expire after 24 hours. Saving does not submit a prompt. Status is explicit: parked, ready, working, or done. A completed agent turn does not mark the task done.
+Captures keep text and original file bytes on this client before syncing. New captures sync to the shared profile source; both it and this client need task-capture support. An offline capture appears in Planned work with its sync state. Failed sync keeps the local copy and offers Retry. Existing tasks remain on their original storage device. The device storing a task can differ from the device where its chats run.
 
-**Prepare brief with agent** queues a preparation turn in the source or linked chat. It waits while that chat is busy. The agent is asked to save a handoff containing relevant decisions, files, questions, and a first step. Review the brief before implementation. Cancel queued preparation from the task. Once it starts, use the chat's normal stop control.
+Open Task details when you are ready to work. Select an execution device and a folder belonging to the Space, or leave either undecided. **Save & create new chat** creates an idle conversation. A separate worktree is optional. **Use brief** in the chat inserts the brief, original request, links, and attachments into an empty composer for review; it never overwrites a draft or sends automatically.
 
-**Save & create new chat** under Chat preparation creates a conversation in the chosen folder and Space. Choose a separate worktree when the task should have its own checkout, or link an existing chat. The new chat stays idle. **Use brief** puts the request and attachments into the composer for review before sending. It preserves an existing composer draft.
+**Create task from this chat** records where the request came from. That source link does not copy the entire conversation or send work to it. In Task details, **Prepare brief in** chooses the conversation that will prepare a handoff. It can replace an unavailable source and is independent of the source link. Preparation runs on the task's storage device. **Prepare brief with agent** runs a preparation turn there, waiting if the chat is busy. Cancel while queued; once running, use the chat's stop control. Review the brief before starting implementation.
 
-Connected agents have `task_list`, `task_create`, and `task_update` tools for tasks originating in or linked to their chat. These tools do not require browser access. Providers must support the app's MCP connection. Unsupported providers can still return a brief for you to save manually.
+A task can have several working chats, including chats on different devices. Record each chat's purpose and result, and unlink a chat without deleting it. A chat can also have several tasks; choose the task before using its brief. Folder choices stay scoped to the selected Space. Source links remain intact when execution changes.
+
+Status is explicit: Parked, Ready, Working, or Done. A completed agent turn does not complete a task or settle a chat. Task details offers a local-time reminder; T3 shows it while open or when you return. Use Move to top in a task's menu to order pending work.
+
+Delete task moves it to Trash. Undo or open Trash to restore it. Deletion does not stop, settle, or delete linked chats. Editing an existing task uses Save task; adding an attachment does not silently save your edits. Closing preserves an editing draft on this client.
+
+Connected agents have `task_list`, `task_create`, and `task_update` tools for tasks stored on their environment and captured from, linked to, or being prepared in their chat. Providers must support the app's MCP connection. Unsupported providers can return a brief for you to save manually. Linking a chat on another device does not give its agent remote access to the task store.
 
 ## Monitor chats side by side
 
+Switch between **Chat** and **Columns** in the main toolbar. Chat restores the last single conversation and the usual sidebar. Columns replaces the chat list with a compact navigation rail; Dashboard, profiles and Spaces, account/T3 Connect, Usage, and Settings remain accessible. **Choose chats** opens a temporary side panel; close it with Done or Escape to return to the board. Visiting a Space opens its overview without changing the board.
+
+Global, profile, and Space dashboards remember your preferred chat mode on this device. **Open chats in** changes that preference while you stay on the dashboard. Opening a chat in Columns focuses it if present or appends it to your current board, preserving the arrangement. Settled and archived chats open as references without changing their status. A return link names the dashboard you came from and restores its filters and reading position. **Open board** resumes your arrangement without selecting another chat.
+
 **Columns** opens the same independent workspace from any profile or Space. Use **Choose chats** to filter by profile, Space, device, or folder, then select conversations. Changing these filters never removes existing selections. Enable **Show settled chats** to add a reference conversation. Mixing chats never changes their assignment.
+
+**New chat** creates an editable draft directly on the board using the usual folder and device picker. Nothing is sent until you submit a message. Unsent drafts are local to this client; another device can open the conversation once it has been started.
 
 Start with one board named Columns. Use its menu to rename it, create another board, duplicate an arrangement, or delete an extra board. Board names, selected chats, order, and individual widths are saved on the shared profile source and update on connected clients. Both clients and the shared source need a version that supports shared boards. Reconnect the source to edit an arrangement while it is offline. Conflicting edits to the same board are rejected so another device's changes are not overwritten.
 
@@ -29,7 +40,7 @@ Drag each column's right edge to resize it independently. You can also focus the
 
 Only the focused column receives global composer shortcuts. Offscreen columns release their rendered chat views. Use Profile overview or Space overview for scoped activity, and Folders to inspect instructions and checkouts.
 
-The phone dashboard supports task capture, editing, screenshot selection or clipboard paste, status, brief preparation, and opening a prepared or linked chat with its context and attachments. The multi-column workspace is available in web and desktop layouts.
+Quick capture, local screenshot recovery, Trash, and multiple working chats are available in web and desktop. The phone retains its existing task workflow; editing tasks with newer fields requires a compatible client. The multi-column workspace is available in web and desktop layouts.
 
 ## Inspect a Space
 

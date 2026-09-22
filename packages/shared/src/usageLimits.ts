@@ -45,6 +45,7 @@ export type LimitPresentations = ReadonlyMap<
   EnvironmentId,
   {
     readonly entry: { readonly target: { readonly label: string } };
+    readonly connection?: { readonly phase: string };
     readonly serverConfig: {
       readonly providers?: readonly ServerProvider[] | undefined;
       readonly usageLimitSources?: UsageLimitSourceSnapshots | undefined;

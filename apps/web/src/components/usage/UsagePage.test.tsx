@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const testState = vi.hoisted(() => ({
   useUsage: vi.fn(),
-  metric: "cost" as "cost" | "tokens" | "limits",
+  metric: "tokens" as "tokens" | "limits",
   breakdown: "time" as "model" | "time",
 }));
 
@@ -152,7 +152,7 @@ const environments = [
 ];
 
 beforeEach(() => {
-  testState.metric = "cost";
+  testState.metric = "tokens";
   testState.breakdown = "time";
   testState.useUsage.mockReturnValue({
     merged: {
@@ -189,9 +189,9 @@ describe("UsagePage hourly breakdown", () => {
     const body = markup.match(/<tbody>(.*?)<\/tbody>/)?.[1] ?? "";
 
     expect(body.match(/<tr/g)).toHaveLength(2);
-    expect(body).toContain("$11.00");
-    expect(body).toContain("$13.00");
-    expect(body.indexOf("$11.00")).toBeLessThan(body.indexOf("$13.00"));
+    expect(body).toContain("11K");
+    expect(body).toContain("13K");
+    expect(body.indexOf("11K")).toBeLessThan(body.indexOf("13K"));
   });
 
   it("keeps chronological ordering when the token metric is selected", () => {
@@ -200,29 +200,17 @@ describe("UsagePage hourly breakdown", () => {
     const markup = renderToStaticMarkup(<UsagePage />);
     const body = markup.match(/<tbody>(.*?)<\/tbody>/)?.[1] ?? "";
 
-    expect(body).toMatch(/\$11\.00.*\$13\.00/);
+    expect(body).toMatch(/11K.*13K/);
   });
 });
 
 describe("UsagePage model breakdown", () => {
-  it("sorts models by cost when the cost metric is selected", () => {
+  it("shows token activity without estimated subscription bills", () => {
     testState.breakdown = "model";
-
     const markup = renderToStaticMarkup(<UsagePage />);
-    const body = markup.match(/<tbody>(.*?)<\/tbody>/)?.[1] ?? "";
-
-    expect(body).toMatch(/expensive-model.*token-heavy-model.*token-heavy-cheaper-model/);
-  });
-
-  it("flags a model with no known rates instead of showing it as free", () => {
-    testState.breakdown = "model";
-
-    const markup = renderToStaticMarkup(<UsagePage />);
-    const body = markup.match(/<tbody>(.*?)<\/tbody>/)?.[1] ?? "";
-    const unpricedRow = body.split("<tr").find((row) => row.includes("unpriced-model")) ?? "";
-
-    expect(unpricedRow).toContain("Unpriced");
-    expect(unpricedRow).not.toContain("$0.00");
+    expect(markup).not.toContain("$");
+    expect(markup).not.toContain("Unpriced");
+    expect(markup).toContain("unpriced-model");
   });
 
   it("sorts models by token usage when the token metric is selected", () => {
@@ -232,7 +220,7 @@ describe("UsagePage model breakdown", () => {
     const markup = renderToStaticMarkup(<UsagePage />);
     const body = markup.match(/<tbody>(.*?)<\/tbody>/)?.[1] ?? "";
 
-    expect(body).toMatch(/token-heavy-model.*token-heavy-cheaper-model.*expensive-model/);
+    expect(body).toMatch(/token-heavy-cheaper-model.*token-heavy-model.*expensive-model/);
     expect(modelTotals.map((model) => model.model)).toEqual([
       "expensive-model",
       "token-heavy-model",

@@ -58,7 +58,7 @@ const idle: OrchestrationThread = {
   messages: [],
   activities: [],
   checkpoints: [],
-    pullRequests: [],
+  pullRequests: [],
   proposedPlans: [],
   session: null,
 };
@@ -67,6 +67,7 @@ it.effect("defers busy chats, honors cancellation, and dispatches preparation on
     const settings = yield* ServerSettingsService;
     let thread = { ...idle };
     const commands: OrchestrationCommand[] = [];
+    const lookups: ThreadId[] = [];
     const reactor = yield* make.pipe(
       Effect.provideService(ServerEnvironment, {
         getEnvironmentId: Effect.succeed(environmentId),
@@ -95,7 +96,10 @@ it.effect("defers busy chats, honors cancellation, and dispatches preparation on
         getThreadRuntimeContext: () => Effect.die("unused"),
         getTurnStartMessage: () => Effect.die("unused"),
         getThreadDetailSnapshot: () => Effect.die("unused"),
-        getThreadDetailById: () => Effect.succeed(Option.some(thread)),
+        getThreadDetailById: (id) => {
+          lookups.push(id);
+          return Effect.succeed(Option.some(thread));
+        },
       }),
       Effect.provideService(OrchestrationEngineService, {
         readEvents: () => Stream.never,
@@ -167,6 +171,26 @@ it.effect("defers busy chats, honors cancellation, and dispatches preparation on
       ifThreadUnchangedSince: now,
     });
     expect((yield* settings.getSettings).workItems![0]!.status).toBe("parked");
+    const current = (yield* settings.getSettings).workItems![0]!;
+    const replacement = {
+      ...current,
+      preparationThreadId: ThreadId.make("replacement"),
+      preparation: { requestedAt: "2026-09-22T00:00:00.000Z", state: "queued" as const },
+      deletedAt: "2026-09-22T00:00:00.000Z",
+    };
+    yield* settings.updateSettings({ workItems: [replacement] }, undefined, undefined, [current]);
+    thread = idle;
+    yield* reactor.sweep();
+    expect(commands).toHaveLength(1);
+    yield* settings.updateSettings(
+      { workItems: [{ ...replacement, deletedAt: null }] },
+      undefined,
+      undefined,
+      [replacement],
+    );
+    yield* reactor.sweep();
+    expect(lookups.at(-1)).toBe("replacement");
+    expect(commands.at(-1)).toMatchObject({ type: "thread.turn.start", threadId: "replacement" });
   }).pipe(
     Effect.provide(
       Layer.merge(

@@ -3,7 +3,13 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit, McpServer } from "effect/unstable/ai";
 import * as Layer from "effect/Layer";
-import { WorkItem, WorkItems, ProjectId, indexProfileSpaces } from "@t3tools/contracts";
+import {
+  WorkItem,
+  WorkItems,
+  ProjectId,
+  indexProfileSpaces,
+  workItemChats,
+} from "@t3tools/contracts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { McpInvocationContext } from "../McpInvocationContext.ts";
 
@@ -45,7 +51,7 @@ export const TaskToolkit = Toolkit.make(
   }).annotate(Tool.Destructive, false),
   Tool.make("task_update", {
     description:
-      "Update a task linked to this chat, including its handoff brief. Read task_list first and supply updatedAt as expectedUpdatedAt. A brief should state the outcome, decisions, relevant files, open questions, and first step. Do not mark work done just because a turn finished.",
+      "Update a task linked to this chat, including its handoff brief. Read task_list first and supply updatedAt as expectedUpdatedAt. A brief should state the outcome, decisions, relevant files, open questions, and first step. Use chatPurpose or chatResult to record this linked chat's role and result. Do not mark work done just because a turn finished.",
     parameters: Schema.Struct({
       id: WorkItem.fields.id,
       expectedUpdatedAt: Schema.String,
@@ -54,6 +60,8 @@ export const TaskToolkit = Toolkit.make(
       brief: Schema.optionalKey(WorkItem.fields.brief),
       status: Schema.optionalKey(WorkItem.fields.status),
       links: Schema.optionalKey(WorkItem.fields.links),
+      chatPurpose: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(240))),
+      chatResult: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4000))),
     }),
     success: WorkItem,
     failure: TaskToolError,
@@ -74,8 +82,13 @@ export const handlers = TaskToolkit.toLayer({
       return {
         tasks: (settings.workItems ?? []).filter(
           (item) =>
+            !item.deletedAt &&
             (!input.status || item.status === input.status) &&
-            (item.threadId === scope.threadId ||
+            (item.preparationThreadId === scope.threadId ||
+              workItemChats(item, scope.environmentId).some(
+                (chat) =>
+                  chat.environmentId === scope.environmentId && chat.threadId === scope.threadId,
+              ) ||
               (item.source?.environmentId === scope.environmentId &&
                 item.source.threadId === scope.threadId)),
         ),
@@ -123,7 +136,7 @@ export const handlers = TaskToolkit.toLayer({
       yield* service.updateSettings({ workItems: [item] }, undefined, undefined, []);
       return item;
     }).pipe(Effect.mapError(failure)),
-  task_update: ({ id, expectedUpdatedAt, ...patch }) =>
+  task_update: ({ id, expectedUpdatedAt, chatPurpose, chatResult, ...patch }) =>
     Effect.gen(function* () {
       const scope = yield* requireTaskScope;
       const service = yield* ServerSettingsService;
@@ -131,7 +144,12 @@ export const handlers = TaskToolkit.toLayer({
       const existing = settings.workItems?.find((item) => item.id === id);
       if (
         !existing ||
-        (existing.threadId !== scope.threadId &&
+        existing.deletedAt ||
+        (existing.preparationThreadId !== scope.threadId &&
+          !workItemChats(existing, scope.environmentId).some(
+            (chat) =>
+              chat.environmentId === scope.environmentId && chat.threadId === scope.threadId,
+          ) &&
           !(
             existing.source?.environmentId === scope.environmentId &&
             existing.source.threadId === scope.threadId
@@ -142,9 +160,32 @@ export const handlers = TaskToolkit.toLayer({
         return yield* new TaskToolError({
           message: "The task changed. Read it again before updating.",
         });
+      const chats = workItemChats(existing, scope.environmentId);
+      if (
+        (chatPurpose !== undefined || chatResult !== undefined) &&
+        !chats.some(
+          (chat) => chat.environmentId === scope.environmentId && chat.threadId === scope.threadId,
+        )
+      )
+        return yield* new TaskToolError({
+          message: "Link this chat to the task before recording its result.",
+        });
       const item = {
         ...existing,
         ...patch,
+        ...(chatPurpose !== undefined || chatResult !== undefined
+          ? {
+              chats: chats.map((chat) =>
+                chat.environmentId === scope.environmentId && chat.threadId === scope.threadId
+                  ? {
+                      ...chat,
+                      ...(chatPurpose !== undefined ? { purpose: chatPurpose } : {}),
+                      ...(chatResult !== undefined ? { result: chatResult } : {}),
+                    }
+                  : chat,
+              ),
+            }
+          : {}),
         ...(patch.brief !== undefined
           ? {
               preparation: null,

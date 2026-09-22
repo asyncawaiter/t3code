@@ -1,7 +1,6 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { DashboardHistoryView } from "@t3tools/client-runtime/state/dashboard";
-import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -20,6 +19,8 @@ export function DashboardHistoryRow({
   provider,
   connected,
   onRestore,
+  onOpen,
+  opening,
 }: {
   shell: EnvironmentThreadShell;
   view: DashboardHistoryView;
@@ -31,6 +32,8 @@ export function DashboardHistoryRow({
   provider: ProviderInstanceEntry | undefined;
   connected: boolean;
   onRestore: () => Promise<void>;
+  onOpen: () => void;
+  opening: boolean;
 }) {
   const [pending, setPending] = useState(false);
   const action = view === "archived" ? "Restore" : view === "settled" ? "Reopen" : "Unsnooze";
@@ -40,12 +43,16 @@ export function DashboardHistoryRow({
       : `${view === "archived" ? "Archived" : "Settled"} ${formatRelativeTimeLabel((view === "archived" ? shell.archivedAt : shell.settledAt) ?? shell.updatedAt)}`;
   return (
     <li className="flex items-center gap-3 border-b border-border/60 px-3 py-2 last:border-0">
-      <Link
-        to="/$environmentId/$threadId"
-        params={{ environmentId: shell.environmentId, threadId: shell.id }}
-        className="min-w-0 flex-1 rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
+      <button
+        type="button"
+        data-dashboard-chat-key={`${shell.environmentId}:${shell.id}`}
+        onClick={onOpen}
+        aria-busy={opening}
+        className="min-w-0 flex-1 rounded-sm text-left outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <div className="truncate text-[13px] font-medium">{shell.title}</div>
+        <div className="truncate text-[13px] font-medium">
+          {opening ? "Opening..." : shell.title}
+        </div>
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           <Tooltip>
             <TooltipTrigger render={<span className="max-w-40 truncate" />}>
@@ -80,7 +87,7 @@ export function DashboardHistoryRow({
             <span className="capitalize">Last turn: {shell.latestTurn.state}</span>
           ) : null}
         </div>
-      </Link>
+      </button>
       <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
         <Tooltip>
           <TooltipTrigger render={<span className="text-[11px] text-muted-foreground" />}>

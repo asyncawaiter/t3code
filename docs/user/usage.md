@@ -3,8 +3,8 @@
 ## Understand your usage
 
 **Usage** combines Codex, Claude Code, and Grok Build session history from your connected
-environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
-cost. These estimates are not your subscription bill.
+environments. It shows subscription limits and token activity by provider, model, and date.
+Token totals measure activity, not subscription allowance or your bill.
 
 Totals depend on the history available on each server. Grok turns without a saved completed-turn
 record are missing from the totals.
@@ -15,40 +15,26 @@ variable. Use absolute paths or `~/` paths in the account's environment settings
 environment paths depend on each project's working directory and cannot be reliably discovered
 by Usage. Accounts sharing a history directory count once.
 
-On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
+On web and desktop, use the environment dropdown to filter tokens and limits. All
 environments are selected by default. The dropdown shows which environments are still scanning;
 results appear as each one responds.
 
-If recent work is missing or a new model shows no cost, refresh to rescan session history and
-update model pricing.
-
-## Set custom model prices
-
-On web or desktop, open the environment dropdown on **Usage**, then choose **Model prices** to add,
-edit, or reset a model's estimated price. **Apply to** starts with your current Usage filter;
-choose all environments or select individual destinations. Enter the exact model ID and USD
-rates per million input and output tokens. You can enter any model ID, including models
-without public pricing.
-
-Cache read and cache write rates are optional and use the input rate when blank. Enter `0` for
-tokens that are free. Saved prices replace automatic pricing for all of that environment's
-history and are shared with clients connected to it. When environments have different prices,
-cells show **Mixed**. Edit rates directly in the table, then choose **Save changes** to apply all
-edited rows. Untouched cells keep each environment's rate. Select one environment to inspect its
-prices. **Reset to automatic** marks a model's override for removal when you save; you can undo
-it before saving.
-
-Each destination reports whether the change saved. Offline or unavailable environments are
-marked **Not saved**. Reconnect them and choose **Retry failed saves** to finish the same change
-without writing again to environments that already saved. Changes are not queued after you close
-the dialog.
+If recent work is missing, refresh to rescan session history.
 
 ## Track subscription limits
 
 **Usage → Limits** opens in **Accounts**, showing each account's quota windows, percent used,
-pace, reset countdowns and available reset credits. Claude's overall and model-specific weekly
+reset countdowns and available reset credits. Claude's overall and model-specific weekly
 windows appear separately, including Fable when reported. Provider marks identify each account;
 the heading includes its plan and connected devices.
+
+Each account shows when its provider last reported usage. Refresh requests a new report;
+it does not make an old report current. Disconnected devices and older reports are marked.
+The date range applies to Tokens, not subscription limits.
+
+Reset credits require confirmation. A reset outcome and a failure to refresh the displayed
+balance are reported separately. If a reset request loses its response, retrying on the same
+device reuses the pending attempt, including after restarting the app.
 
 Choose **Combined** for the pooled summary across accounts. Each window card shows how much of the pool is left and a bar with one segment per account,
 kept in the same column across windows. Accounts are ordered by their 5-hour reset, soonest

@@ -3,17 +3,26 @@
  * share the directory holding `auth.json` share the credit, so their
  * redemptions must serialise on that directory, not the instance. This
  * service keeps one lock and one pending idempotency key per account key so
- * overlapping confirmations from any instance queue rather than spending two
- * credits, and a retry after a timeout re-sends the same attempt.
+ * overlapping confirmations from any instance queue, and a retry after a
+ * timeout or server restart re-sends the persisted attempt.
  *
  * @module provider/Layers/codexResetCredit
  */
-import type { ProviderConsumeResetCreditOutcome } from "@t3tools/contracts";
+import type {
+  ProviderConsumeResetCreditOutcome,
+  ProviderConsumeResetCreditResult,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Encoding from "effect/Encoding";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ServerConfig } from "../../config.ts";
+import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import type * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Semaphore from "effect/Semaphore";
@@ -27,7 +36,6 @@ export const CODEX_RESET_CREDIT_TIMEOUT = Duration.seconds(20);
 
 interface AccountRedemptionState {
   readonly lock: Semaphore.Semaphore;
-  readonly pendingKey: Ref.Ref<string | null>;
 }
 
 export class CodexResetCreditCoordinator extends Context.Service<
@@ -48,6 +56,9 @@ export class CodexResetCreditCoordinator extends Context.Service<
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const config = yield* ServerConfig;
   const statesRef = yield* Ref.make<ReadonlyMap<string, AccountRedemptionState>>(new Map());
 
   // Get-or-create through one Ref.modify so two first redemptions for the
@@ -59,7 +70,6 @@ export const make = Effect.gen(function* () {
     if (existing) return existing;
     const candidate = {
       lock: yield* Semaphore.make(1),
-      pendingKey: yield* Ref.make<string | null>(null),
     };
     return yield* Ref.modify(statesRef, (states) => {
       const current = states.get(accountKey);
@@ -75,11 +85,24 @@ export const make = Effect.gen(function* () {
       const state = yield* stateFor(accountKey);
       return yield* state.lock.withPermits(1)(
         Effect.gen(function* () {
-          const existing = yield* Ref.get(state.pendingKey);
-          const idempotencyKey = existing ?? (yield* crypto.randomUUIDv4);
-          yield* Ref.set(state.pendingKey, idempotencyKey);
+          const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(accountKey));
+          const filePath = path.join(config.stateDir, "reset-attempts", Encoding.encodeHex(digest));
+          const existing = yield* fs
+            .readFileString(filePath)
+            .pipe(
+              Effect.catch((error) =>
+                error.reason._tag === "NotFound" ? Effect.succeed("") : Effect.fail(error),
+              ),
+            );
+          const idempotencyKey = existing || (yield* crypto.randomUUIDv4);
+          // Persist before sending. A crash or timeout retries the same provider request.
+          if (!existing)
+            yield* writeFileStringAtomically({ filePath, contents: idempotencyKey }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fs),
+              Effect.provideService(Path.Path, path),
+            );
           const outcome = yield* consume(idempotencyKey);
-          yield* Ref.set(state.pendingKey, null);
+          yield* fs.remove(filePath);
           return outcome;
         }),
       );
@@ -111,4 +134,24 @@ export const layerTest = Layer.effect(
       ),
     );
   }),
+).pipe(
+  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-reset-credit-" })),
+  Layer.provide(NodeServices.layer),
 );
+
+/** A successful redemption must remain successful when refreshing its balance fails. */
+export const confirmResetCreditOutcome = <E, R>(
+  outcome: ProviderConsumeResetCreditOutcome,
+  refresh: Effect.Effect<boolean, E, R>,
+): Effect.Effect<ProviderConsumeResetCreditResult, never, R> =>
+  refresh.pipe(
+    Effect.orElseSucceed(() => false),
+    Effect.map((confirmed) => ({
+      outcome,
+      ...(!confirmed
+        ? {
+            warning: "Could not refresh the displayed limits. Refresh to check the latest balance.",
+          }
+        : {}),
+    })),
+  );

@@ -39,6 +39,7 @@ import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
 import {
   CODEX_RESET_CREDIT_TIMEOUT,
+  confirmResetCreditOutcome,
   CodexResetCreditCoordinator,
 } from "../Layers/codexResetCredit.ts";
 import {
@@ -312,28 +313,21 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
                   cause,
                 }),
             ),
-            // The windows just changed; re-probe so the snapshot says so. A
-            // failed probe republishes the pre-redemption limits rather than
-            // marking them failed, so "confirmed" means `checkedAt` moved
-            // past what was published before the redemption started.
-            Effect.tap(() =>
-              Effect.gen(function* () {
-                const before = (yield* snapshot.getSnapshot).usageLimits?.checkedAt;
-                const refreshed = yield* snapshot.refresh;
-                const after = refreshed.usageLimits?.checkedAt;
-                if (
-                  after === undefined ||
-                  after === before ||
-                  refreshed.usageLimits?.unavailable?.reason === "probeFailed"
-                ) {
-                  return yield* new ProviderDriverError({
-                    driver: DRIVER_KIND,
-                    instanceId,
-                    detail:
-                      "The reset was applied, but Codex could not confirm the new limits. Refresh to check.",
-                  });
-                }
-              }),
+            // Preserve the provider outcome even if the follow-up probe fails.
+            Effect.flatMap((outcome) =>
+              confirmResetCreditOutcome(
+                outcome,
+                Effect.gen(function* () {
+                  const before = (yield* snapshot.getSnapshot).usageLimits?.checkedAt;
+                  const refreshed = yield* snapshot.refresh;
+                  const after = refreshed.usageLimits?.checkedAt;
+                  return (
+                    after !== undefined &&
+                    after !== before &&
+                    refreshed.usageLimits?.unavailable?.reason !== "probeFailed"
+                  );
+                }),
+              ),
             ),
           );
 

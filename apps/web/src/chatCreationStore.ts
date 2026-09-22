@@ -2,12 +2,17 @@ import { ALL_PROFILE_ID } from "@t3tools/contracts";
 import { useUiStateStore } from "./uiStateStore";
 import { OUTSIDE_SPACES } from "./components/sidebar/Spaces.logic";
 import { create } from "zustand";
-import type { ScopedProjectRef } from "@t3tools/contracts";
+import type { ScopedProjectRef, ThreadId } from "@t3tools/contracts";
 import type { DraftId } from "./composerDraftStore";
 
 export interface ChatCreationRequest {
   projectRef?: ScopedProjectRef;
   draftId?: DraftId;
+  onCreated?: (draft: {
+    draftId: DraftId;
+    threadId: ThreadId;
+    projectRef: ScopedProjectRef;
+  }) => Promise<void>;
 }
 export const useChatCreationStore = create<{ request: ChatCreationRequest | null }>(() => ({
   request: null,

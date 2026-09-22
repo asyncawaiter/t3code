@@ -21,6 +21,21 @@ export const WorkItem = Schema.Struct({
     }),
   ),
   threadId: Schema.NullOr(ThreadId),
+  executionEnvironmentId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
+  deletedAt: Schema.optionalKey(Schema.NullOr(IsoDateTime)),
+  remindAt: Schema.optionalKey(Schema.NullOr(IsoDateTime)),
+  priority: Schema.optionalKey(Schema.Number.check(Schema.isFinite())),
+  chats: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        environmentId: EnvironmentId,
+        threadId: ThreadId,
+        purpose: Schema.String.check(Schema.isMaxLength(240)),
+        result: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4000))),
+      }),
+    ).check(Schema.isMaxLength(50)),
+  ),
+  preparationThreadId: Schema.optionalKey(Schema.NullOr(ThreadId)),
   preparation: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
@@ -57,7 +72,11 @@ export function mergeWorkItems(
     if (Equal.equals(previous, next) || Equal.equals(existing, next)) continue;
     if (!Equal.equals(existing, previous))
       throw new Error("This task changed on another device. Reopen it before saving.");
-    if (!next) throw new Error("Complete tasks instead of deleting their context.");
+    if (!next) throw new Error("Move tasks to Trash instead of erasing their context.");
+    if (existing?.deletedAt && !previous?.deletedAt)
+      throw new Error("This task is in Trash. Reopen it before restoring.");
+    if (existing?.chats && previous?.chats === undefined)
+      throw new Error("Update this client before editing tasks with multiple chats.");
     live.set(id, next);
   }
   const result = [...live.values()];
@@ -68,6 +87,34 @@ export function mergeWorkItems(
       "Saved task context has reached this device's 2 MB limit. Shorten older notes or briefs before saving.",
     );
   return result;
+}
+
+export function workItemChats(item: WorkItem, storageEnvironmentId: EnvironmentId) {
+  const chats = [...(item.chats ?? [])];
+  const environmentId = item.executionEnvironmentId ?? storageEnvironmentId;
+  if (
+    item.threadId &&
+    !chats.some((chat) => chat.environmentId === environmentId && chat.threadId === item.threadId)
+  )
+    chats.unshift({ environmentId, threadId: item.threadId, purpose: "Work" });
+  return chats;
+}
+
+export function workItemPreparationThread(item: WorkItem) {
+  return item.preparationThreadId !== undefined
+    ? item.preparationThreadId
+    : (item.source?.threadId ?? item.threadId);
+}
+
+export function workItemTitle(notes: string, attachmentCount = 0) {
+  return (
+    notes
+      .trim()
+      .split(/\r?\n/)
+      .find((line) => line.trim())
+      ?.trim()
+      .slice(0, 240) || (attachmentCount ? "Screenshot or file to review" : "Untitled task")
+  );
 }
 
 export function workItemPrompt(item: WorkItem) {

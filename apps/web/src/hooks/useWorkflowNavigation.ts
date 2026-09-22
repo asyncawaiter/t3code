@@ -1,6 +1,6 @@
 import { OUTSIDE_SPACES } from "../components/sidebar/Spaces.logic";
 import { useCallback } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useLocation } from "@tanstack/react-router";
 import { profileForProject, spaceForThread } from "@t3tools/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useThreadShells } from "../state/entities";
@@ -11,6 +11,7 @@ import { useWorkflowState } from "../workflowState";
 /** Opens a known chat and reveals its organization, including across profiles/devices. */
 export function useWorkflowNavigation() {
   const navigate = useNavigate();
+  const dashboardReturn = useLocation({ select: (location) => location.state.dashboardReturn });
   const threads = useThreadShells();
   const profiles = usePrimarySettings((s) => s.profiles);
   return useCallback(
@@ -34,9 +35,10 @@ export function useWorkflowNavigation() {
       void navigate({
         to: "/$environmentId/$threadId",
         params: { environmentId: thread.environmentId, threadId: thread.id },
+        state: { dashboardReturn },
       });
       return true;
     },
-    [threads, profiles, navigate],
+    [threads, profiles, navigate, dashboardReturn],
   );
 }

@@ -1,10 +1,19 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Layer from "effect/Layer";
+import * as FileSystem from "effect/FileSystem";
+import { ServerConfig } from "../../config.ts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Ref from "effect/Ref";
 
-import { CodexResetCreditCoordinator, layerTest } from "./codexResetCredit.ts";
+import {
+  CodexResetCreditCoordinator,
+  layerTest,
+  make,
+  confirmResetCreditOutcome,
+} from "./codexResetCredit.ts";
 
 describe("CodexResetCreditCoordinator", () => {
   it.effect("re-sends the same idempotency key after a failed attempt, then clears it", () =>
@@ -84,3 +93,73 @@ describe("CodexResetCreditCoordinator", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 });
+
+it.effect("keeps each provider outcome when balance refresh fails", () =>
+  Effect.gen(function* () {
+    for (const outcome of ["reset", "nothingToReset", "noCredit", "alreadyRedeemed"] as const) {
+      const failed = yield* confirmResetCreditOutcome(outcome, Effect.fail("offline"));
+      assert.strictEqual(failed.outcome, outcome);
+      assert.isString(failed.warning);
+      assert.deepStrictEqual(yield* confirmResetCreditOutcome(outcome, Effect.succeed(true)), {
+        outcome,
+      });
+    }
+  }),
+);
+
+it.effect("reuses an uncertain attempt after service restart, then starts a fresh attempt", () =>
+  Effect.gen(function* () {
+    const before = yield* make;
+    let firstKey = "";
+    yield* before
+      .redeem("account", (key) => {
+        firstKey = key;
+        return Effect.fail("response lost");
+      })
+      .pipe(Effect.result);
+    const restarted = yield* make;
+    let retriedKey = "";
+    assert.strictEqual(
+      yield* restarted.redeem("account", (key) => {
+        retriedKey = key;
+        return Effect.succeed("alreadyRedeemed" as const);
+      }),
+      "alreadyRedeemed",
+    );
+    assert.strictEqual(retriedKey, firstKey);
+    yield* restarted.redeem("account", (key) => {
+      assert.notStrictEqual(key, firstKey);
+      return Effect.succeed("noCredit" as const);
+    });
+  }).pipe(
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-reset-restart-" }).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
+);
+
+it.effect("does not consume a credit when the attempt cannot be persisted", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const config = yield* ServerConfig;
+    yield* fs.writeFileString(config.stateDir + "/reset-attempts", "not a directory");
+    const coordinator = yield* make;
+    let consumed = false;
+    const result = yield* coordinator
+      .redeem("account", () => {
+        consumed = true;
+        return Effect.succeed("reset" as const);
+      })
+      .pipe(Effect.result);
+    assert.strictEqual(result._tag, "Failure");
+    assert.isFalse(consumed);
+  }).pipe(
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-reset-write-" }).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
+);

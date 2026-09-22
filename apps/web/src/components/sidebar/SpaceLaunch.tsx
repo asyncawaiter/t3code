@@ -1,3 +1,7 @@
+import { useTaskCaptures } from "../tasks/taskCaptureStorage";
+import { QuickTaskCapture } from "../tasks/QuickTaskCapture";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
+import * as Schema from "effect/Schema";
 import { spaceProjectKeys } from "./Spaces.logic";
 import { ProjectLocationPicker } from "../ProjectLocationPicker";
 import {
@@ -41,6 +45,7 @@ import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../
 import { cn } from "../../lib/utils";
 
 type Defaults = SpaceNewChatDefaults;
+const creationMode = Schema.Literals(["task", "chat"]);
 
 function LaunchModel({
   environmentId,
@@ -117,6 +122,9 @@ export function SpaceLaunch({
   onOpenChange: (open: boolean) => void;
 }) {
   const { environments } = useEnvironments();
+  const capturesReady = useTaskCaptures((state) => state.ready);
+  const closeCapture = useRef<(() => Promise<boolean>) | null>(null);
+  const [mode, setMode] = useLocalStorage("t3.space-plus-mode", "task", creationMode);
   const [editingDevice, setEditingDevice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const defaults = spaceDeviceDefaults(space);
@@ -139,6 +147,12 @@ export function SpaceLaunch({
       open={open}
       onOpenChange={(next) => {
         if (busy) return;
+        if (!next && mode === "task" && closeCapture.current) {
+          void closeCapture.current().then((saved) => {
+            if (saved) onOpenChange(false);
+          });
+          return;
+        }
         setEditingDevice(null);
         onOpenChange(next);
       }}
@@ -148,7 +162,7 @@ export function SpaceLaunch({
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label={`New chat in ${space.name}`}
+            aria-label={`Add in ${space.name}`}
             className={cn(
               "absolute bottom-1 right-1 [--control-icon-color:currentColor]",
               selected
@@ -165,17 +179,52 @@ export function SpaceLaunch({
         align="start"
         className="w-80 max-w-[calc(100vw-2rem)]"
         viewportClassName="max-h-[min(36rem,80dvh)] overflow-y-auto p-2"
-        aria-label={`New chat in ${space.name}`}
+        aria-label={`Add in ${space.name}`}
       >
-        <PopoverTitle className="mb-2 truncate px-1 text-xs font-medium">
-          New chat in {space.name}
-        </PopoverTitle>
-        {writeBlockReason && (
+        <PopoverTitle className="mb-2 truncate px-1 text-xs font-medium">{space.name}</PopoverTitle>
+        <div
+          className="mb-3 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1"
+          role="group"
+          aria-label="Create in space"
+        >
+          <Button
+            size="xs"
+            variant={mode === "task" ? "secondary" : "ghost"}
+            aria-pressed={mode === "task"}
+            onClick={() => setMode("task")}
+          >
+            New task
+          </Button>
+          <Button
+            size="xs"
+            variant={mode === "chat" ? "secondary" : "ghost"}
+            aria-pressed={mode === "chat"}
+            onClick={() => {
+              void (closeCapture.current?.() ?? Promise.resolve(true)).then((saved) => {
+                if (saved) setMode("chat");
+              });
+            }}
+          >
+            New chat
+          </Button>
+        </div>
+        {mode === "task" && open && capturesReady && (
+          <QuickTaskCapture
+            closeRef={closeCapture}
+            key={space.id}
+            request={{ profileId: profile.id, spaceId: space.id }}
+            onSaved={() => onOpenChange(false)}
+          />
+        )}
+        {mode === "task" && open && !capturesReady && (
+          <p className="text-xs text-muted-foreground">Opening local drafts...</p>
+        )}
+        {mode === "chat" && writeBlockReason && (
           <p role="status" className="mb-2 px-1 text-xs text-muted-foreground">
             {writeBlockReason}
           </p>
         )}
-        {open && (
+        {open && mode === "chat" && (
           <div className="space-y-1.5">
             {devices.map((device) => (
               <SpaceDeviceLaunch
@@ -535,5 +584,92 @@ function SpaceDeviceLaunch({
         </p>
       )}
     </section>
+  );
+}
+
+export function UnsortedLaunch({
+  profileId,
+  onNewChat,
+}: {
+  profileId: string;
+  onNewChat: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useLocalStorage("t3.space-plus-mode", "task", creationMode);
+  const ready = useTaskCaptures((state) => state.ready);
+  const closeCapture = useRef<(() => Promise<boolean>) | null>(null);
+  const close = async () => {
+    if (await (closeCapture.current?.() ?? Promise.resolve(true))) setOpen(false);
+  };
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setOpen(true);
+        else void close();
+      }}
+    >
+      <PopoverTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Add in Unsorted"
+            className="absolute bottom-1 right-1"
+          />
+        }
+      >
+        <PlusIcon className="size-3.5" />
+      </PopoverTrigger>
+      <PopoverPopup
+        side="right"
+        align="start"
+        className="w-80 max-w-[calc(100vw-2rem)]"
+        viewportClassName="p-2"
+      >
+        <PopoverTitle className="mb-2 px-1 text-xs">Unsorted</PopoverTitle>
+        <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+          <Button
+            size="xs"
+            variant={mode === "task" ? "secondary" : "ghost"}
+            aria-pressed={mode === "task"}
+            onClick={() => setMode("task")}
+          >
+            New task
+          </Button>
+          <Button
+            size="xs"
+            variant={mode === "chat" ? "secondary" : "ghost"}
+            aria-pressed={mode === "chat"}
+            onClick={() => {
+              void (closeCapture.current?.() ?? Promise.resolve(true)).then((saved) => {
+                if (saved) setMode("chat");
+              });
+            }}
+          >
+            New chat
+          </Button>
+        </div>
+        {mode === "task" ? (
+          ready && (
+            <QuickTaskCapture
+              request={{ profileId, spaceId: null }}
+              closeRef={closeCapture}
+              onSaved={() => setOpen(false)}
+            />
+          )
+        ) : (
+          <Button
+            size="sm"
+            onClick={() => {
+              setOpen(false);
+              onNewChat();
+            }}
+          >
+            Choose where to open chat <ArrowRightIcon />
+          </Button>
+        )}
+      </PopoverPopup>
+    </Popover>
   );
 }

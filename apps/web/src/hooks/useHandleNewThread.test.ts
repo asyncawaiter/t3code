@@ -183,6 +183,7 @@ vi.mock("../uiStateStore", () => ({
 }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 
+import { revealChatLocation } from "../chatCreationStore";
 import { useNewThreadHandler } from "./useHandleNewThread";
 
 describe.each([
@@ -218,6 +219,21 @@ describe.each([
       );
     },
   );
+
+  it("creates a board draft without navigating or changing the sidebar scope", async () => {
+    testState.reset(draft);
+    vi.mocked(revealChatLocation).mockClear();
+    const pendingOpen = useNewThreadHandler()(
+      { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+      { navigate: false },
+    );
+    testState.completeProjectFileRead(null);
+    const opened = await pendingOpen;
+    expect(opened?.draftId).toBeTruthy();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalled();
+    expect(testState.router.navigate).not.toHaveBeenCalled();
+    expect(revealChatLocation).not.toHaveBeenCalled();
+  });
 
   it("abandons a delayed draft open when the user navigates elsewhere", async () => {
     testState.reset(draft);

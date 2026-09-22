@@ -1,7 +1,7 @@
 import { useLocation } from "@tanstack/react-router";
 import { useComposerDraftStore, composerDraftHasUserContent } from "../../composerDraftStore";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { SpaceLaunch } from "./SpaceLaunch";
+import { SpaceLaunch, UnsortedLaunch } from "./SpaceLaunch";
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { useDndContext, useDroppable } from "@dnd-kit/core";
@@ -291,19 +291,7 @@ export function DefaultSpaceTile({
           )}
         </span>
       </button>
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        aria-label="New chat in Unsorted"
-        onClick={onNewChat}
-        className={cn(
-          "absolute bottom-1 right-1 [--control-icon-color:currentColor]",
-          selected &&
-            "text-sidebar-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-        )}
-      >
-        <PlusIcon className="size-3.5" />
-      </Button>
+      <UnsortedLaunch profileId={profileId} onNewChat={onNewChat} />
     </li>
   );
 }

@@ -29,7 +29,7 @@ describe("Usage page preferences", () => {
   });
 
   it.each([1, 7, 30, 90] as const)("round-trips every metric with a %i-day range", (windowDays) => {
-    for (const metric of ["cost", "tokens", "limits"] as const) {
+    for (const metric of ["tokens", "limits"] as const) {
       saveUsagePagePreferences({ metric, windowDays });
       expect(readUsagePagePreferences()).toEqual({ metric, windowDays });
     }
@@ -46,13 +46,18 @@ describe("Usage page preferences", () => {
     expect(readUsagePagePreferences()).toEqual({ metric: "tokens", windowDays: 7 });
   });
 
+  it("migrates a saved Cost view to Limits without losing the date range", () => {
+    values.set(key, JSON.stringify({ metric: "cost", windowDays: 7 }));
+    expect(readUsagePagePreferences()).toEqual({ metric: "limits", windowDays: 7 });
+  });
+
   it("contains write failures and can save again after storage recovers", () => {
-    saveUsagePagePreferences({ metric: "cost", windowDays: 30 });
+    saveUsagePagePreferences({ metric: "limits", windowDays: 30 });
     const write = vi.spyOn(storage, "setItem").mockImplementation(() => {
       throw new Error("QuotaExceededError");
     });
     expect(() => saveUsagePagePreferences({ metric: "tokens", windowDays: 7 })).not.toThrow();
-    expect(readUsagePagePreferences()).toEqual({ metric: "cost", windowDays: 30 });
+    expect(readUsagePagePreferences()).toEqual({ metric: "limits", windowDays: 30 });
     write.mockRestore();
     saveUsagePagePreferences({ metric: "limits", windowDays: 7 });
     expect(readUsagePagePreferences()).toEqual({ metric: "limits", windowDays: 7 });

@@ -1,3 +1,6 @@
+import { useChatBoards } from "../../hooks/useChatBoards";
+import { useChatMode, boardWithOpenedChat } from "../spaces/columnNavigation";
+import { workItemChats } from "@t3tools/contracts";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { dashboardStorageScope } from "../../lib/globalDashboardNavigation";
 import { TaskShelf } from "../tasks/TaskShelf";
@@ -22,7 +25,7 @@ import {
   getLocalStorageItem,
   setLocalStorageItem,
 } from "../../hooks/useLocalStorage";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useLocation } from "@tanstack/react-router";
 import { Button } from "../ui/button";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentServerConfigsAtom } from "../../state/server";
@@ -123,6 +126,18 @@ export function DashboardPage({
     if (!scope) setGlobalProfileId(globalProfileId);
   }, [scope, globalProfileId, setGlobalProfileId]);
   const navigate = useNavigate();
+  const location = useLocation();
+  const [chatMode] = useChatMode();
+  const chatBoards = useChatBoards();
+  const [openingChat, setOpeningChat] = useState<string | null>(null);
+  const opening = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const workItems = useWorkItems();
   const now = useNow();
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
@@ -141,12 +156,11 @@ export function DashboardPage({
     "active",
     DashboardVisibilitySchema,
   );
-  const boardRef = useRef<HTMLDivElement>(null);
+  const boardRef = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
-    if (visibility !== "active") return;
     const node = boardRef.current;
     if (!node) return;
-    const scrollKey = `${storageScope}.scroll`;
+    const scrollKey = `${storageScope}.scroll${visibility === "active" ? "" : `.${visibility}`}`;
     let position = 0;
     try {
       position = getLocalStorageItem(scrollKey, Schema.Finite) ?? 0;
@@ -440,6 +454,24 @@ export function DashboardPage({
   );
 
   const allEntries = useMemo(() => flattenBoardEntries(filteredBoard), [filteredBoard]);
+  const focusedReturn = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const key = location.state.dashboardFocusKey;
+    if (
+      !key ||
+      focusedReturn.current === key ||
+      (!allEntries.some((entry) => threadVisitedKey(entry.shell) === key) &&
+        !history.some((shell) => threadVisitedKey(shell) === key))
+    )
+      return;
+    const card = boardRef.current?.querySelector<HTMLElement>(
+      `[data-dashboard-chat-key="${CSS.escape(key)}"]`,
+    );
+    if (card) {
+      card.focus({ preventScroll: true });
+      focusedReturn.current = key;
+    }
+  }, [location.state.dashboardFocusKey, allEntries, history]);
   const projectGroups = useMemo(() => groupEntriesByProject(allEntries), [allEntries]);
   const visibleLanes = DASHBOARD_LANE_ORDER;
 
@@ -614,6 +646,76 @@ export function DashboardPage({
     </Select>
   );
 
+  async function openDashboardChat(shell: EnvironmentThreadShell) {
+    if (opening.current) return;
+    opening.current = true;
+    const key = threadVisitedKey(shell);
+    setOpeningChat(key);
+    const dashboardReturn = {
+      href: location.href,
+      threadKey: key,
+      label: scope
+        ? `${scope.unsorted ? "Unsorted" : (selectedSpace?.name ?? activeProfile.name)} overview`
+        : "Global dashboard",
+    };
+    try {
+      if (chatMode === "columns") {
+        const board = boardWithOpenedChat(chatBoards.board, {
+          key,
+          title: shell.title,
+          context: [
+            shellSpace(shell)?.name ?? "Unsorted",
+            environmentByKind.get(shell.environmentId)?.label ?? "Offline device",
+          ].join(" / "),
+          reference: shell.settledOverride === "settled" || shell.archivedAt !== null,
+        });
+        if (board !== chatBoards.board && !(await chatBoards.update(board))) {
+          toastManager.add({
+            type: "error",
+            title: "Could not add this chat to Columns",
+            description:
+              chatBoards.unavailable ??
+              "The board changed or could not be saved. Your existing columns are intact. Try again.",
+          });
+          return;
+        }
+      }
+      if (!mounted.current) return;
+      useWorkflowState.setState({
+        triageProfileId: activeProfile.id,
+        triageSpaceId: scope?.spaceId,
+        triageUnsorted: scope?.unsorted,
+        triageScoped: !!scope,
+        triageQueue: allEntries
+          .filter((item) => item.lane === "needs-you" || item.lane === "done")
+          .map((item) => threadVisitedKey(item.shell)),
+      });
+      if (chatMode === "columns") {
+        await navigate({
+          to: "/spaces/$profileId",
+          params: { profileId: "all" },
+          search: { view: "columns", unsorted: false, space: undefined, focus: key },
+          state: { dashboardReturn },
+        });
+      } else {
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId: shell.environmentId, threadId: shell.id },
+          state: { dashboardReturn },
+        });
+      }
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not open this chat",
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      opening.current = false;
+      if (mounted.current) setOpeningChat(null);
+    }
+  }
+
   function renderCard(entry: DashboardBoardEntry) {
     const project = projectByKey.get(
       dashboardProjectKey(entry.shell.environmentId, entry.shell.projectId),
@@ -625,22 +727,17 @@ export function DashboardPage({
       <DashboardCard
         key={`${entry.shell.environmentId}:${entry.shell.id}`}
         entry={entry}
-        task={workItems.find(
+        tasks={workItems.filter(
           (task) =>
-            task.environmentId === entry.shell.environmentId &&
-            task.item.threadId === entry.shell.id,
+            !task.item.deletedAt &&
+            workItemChats(task.item, task.environmentId).some(
+              (chat) =>
+                chat.environmentId === entry.shell.environmentId &&
+                chat.threadId === entry.shell.id,
+            ),
         )}
-        onOpen={() =>
-          useWorkflowState.setState({
-            triageProfileId: activeProfile.id,
-            triageSpaceId: scope?.spaceId,
-            triageUnsorted: scope?.unsorted,
-            triageScoped: !!scope,
-            triageQueue: allEntries
-              .filter((item) => item.lane === "needs-you" || item.lane === "done")
-              .map((item) => threadVisitedKey(item.shell)),
-          })
-        }
+        onOpen={() => void openDashboardChat(entry.shell)}
+        opening={openingChat === threadVisitedKey(entry.shell)}
         spaceName={shellSpace(entry.shell)?.name ?? "Unsorted"}
         providerEntry={providers
           .get(entry.shell.environmentId)
@@ -673,6 +770,7 @@ export function DashboardPage({
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="@container/dashboard flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <WorkspacePageHeader
+          chatModes
           electron={isElectron}
           className="h-auto min-h-12 flex-wrap border-b-0 py-2"
         >
@@ -1112,7 +1210,7 @@ export function DashboardPage({
                       <SelectTrigger
                         size="xs"
                         className="h-8 w-full min-w-0 sm:h-8 rounded-md border-border/70 bg-background shadow-none hover:bg-foreground/10"
-                        aria-label="Group tasks"
+                        aria-label="Group chats"
                       >
                         <SelectValue>
                           {groupBy === "state"
@@ -1170,7 +1268,7 @@ export function DashboardPage({
             role="status"
             className="mx-4 mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground"
           >
-            No tasks match these filters.
+            No chats match these filters.
             <Button size="xs" variant="ghost" onClick={resetFilters}>
               Clear filters
             </Button>
@@ -1179,7 +1277,10 @@ export function DashboardPage({
         {visibility !== "active" ? (
           <section
             className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
-            aria-label={`${visibility} tasks`}
+            aria-label={`${visibility} chats`}
+            ref={(node) => {
+              boardRef.current = node;
+            }}
           >
             <div className="mb-2 flex items-center gap-2 text-xs">
               <h2 className="font-semibold capitalize">{visibility}</h2>
@@ -1194,7 +1295,7 @@ export function DashboardPage({
               </div>
             ) : null}
             {visibility === "archived" && archive.isLoading ? (
-              <p className="py-2 text-xs text-muted-foreground">Loading archived tasks...</p>
+              <p className="py-2 text-xs text-muted-foreground">Loading archived chats...</p>
             ) : null}
             <ul
               className={
@@ -1212,6 +1313,8 @@ export function DashboardPage({
                   <DashboardHistoryRow
                     key={threadVisitedKey(shell)}
                     shell={shell}
+                    onOpen={() => void openDashboardChat(shell)}
+                    opening={openingChat === threadVisitedKey(shell)}
                     spaceName={shellSpace(shell)?.name}
                     view={visibility}
                     now={now}
@@ -1245,7 +1348,7 @@ export function DashboardPage({
             {!history.length &&
             !(visibility === "archived" && (archive.isLoading || archive.error)) ? (
               <p className="py-6 text-xs text-muted-foreground">
-                No {visibility} tasks match these filters.
+                No {visibility} chats match these filters.
               </p>
             ) : null}
           </section>
@@ -1260,7 +1363,9 @@ export function DashboardPage({
                 : "@min-[640px]/dashboard:grid-cols-2 @min-[1000px]/dashboard:grid-cols-3",
             )}
             aria-label="Task board"
-            ref={boardRef}
+            ref={(node) => {
+              boardRef.current = node;
+            }}
           >
             <TaskShelf
               profileId={
@@ -1338,11 +1443,11 @@ export function DashboardPage({
                         ) : (
                           <p className="text-xs text-muted-foreground">
                             {activeFilters.length > 0
-                              ? "No matching tasks"
+                              ? "No matching chats"
                               : lane === "needs-you"
                                 ? "Nothing needs attention"
                                 : lane === "running"
-                                  ? "No active tasks"
+                                  ? "No active chats"
                                   : lane === "monitoring"
                                     ? "No background watchers"
                                     : "No new results"}
@@ -1393,7 +1498,7 @@ export function DashboardPage({
                 </section>
               ))
             ) : (
-              <p className="p-3 text-xs text-muted-foreground">No tasks match this view.</p>
+              <p className="p-3 text-xs text-muted-foreground">No chats match this view.</p>
             )}
             {groupBy === "state" && !allEntries.length && (
               <p
