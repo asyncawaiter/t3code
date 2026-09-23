@@ -760,6 +760,7 @@ export function DashboardPage({
         tasks={workItems.filter(
           (task) =>
             !task.item.deletedAt &&
+            task.item.status === "working" &&
             workItemChats(task.item, task.environmentId).some(
               (chat) =>
                 chat.environmentId === entry.shell.environmentId &&
@@ -796,6 +797,34 @@ export function DashboardPage({
     );
   }
 
+  const renderTasks = (section: "planned" | "history") => (
+    <TaskShelf
+      section={section}
+      profileId={
+        rawProfiles.find((owner) =>
+          (owner.spaces ?? []).some((space) => `${owner.id}:${space.id}` === effectiveSpaceFilter),
+        )?.id ?? activeProfile.id
+      }
+      environmentId={effectiveEnvironmentFilter}
+      projectKey={effectiveProjectFilter}
+      search={search}
+      spaceId={
+        effectiveSpaceFilter === "all"
+          ? undefined
+          : effectiveSpaceFilter === "root"
+            ? null
+            : rawProfiles
+                .flatMap((owner) =>
+                  (owner.spaces ?? []).map((space) => ({
+                    key: `${owner.id}:${space.id}`,
+                    id: space.id,
+                  })),
+                )
+                .find((space) => space.key === effectiveSpaceFilter)?.id
+      }
+    />
+  );
+
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="@container/dashboard flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
@@ -819,7 +848,7 @@ export function DashboardPage({
               </h1>
             </WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
-          <div className="no-drag ml-auto flex min-w-0 flex-wrap items-center gap-2">
+          <div className="no-drag flex min-w-0 flex-wrap items-center gap-2">
             <Button
               size="xs"
               variant="outline"
@@ -848,14 +877,16 @@ export function DashboardPage({
           </div>
         </WorkspacePageHeader>
         <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 pb-2">
-          <WorkspaceViews
-            navigationOnly
-            scope={{
-              profileId: selectedSpaceOwner?.id ?? activeProfile.id,
-              spaceId: selectedSpace?.id,
-              unsorted: effectiveSpaceFilter === "root",
-            }}
-          />
+          <div className="w-fit">
+            <WorkspaceViews
+              navigationOnly
+              scope={{
+                profileId: selectedSpaceOwner?.id ?? activeProfile.id,
+                spaceId: selectedSpace?.id,
+                unsorted: effectiveSpaceFilter === "root",
+              }}
+            />
+          </div>
           <Button
             size="xs"
             variant="ghost"
@@ -880,12 +911,17 @@ export function DashboardPage({
             Pull requests
           </Button>
         </div>
-        <div className="shrink-0 px-4 py-3" aria-label="Dashboard controls">
-          <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
-            <div className="grid gap-3 @min-[850px]/dashboard:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,2fr)]">
-              <fieldset className="min-w-0">
-                <legend className="sr-only">Scope</legend>
-                <div className="grid grid-cols-2 @min-[850px]/dashboard:grid-cols-1 gap-2">
+        <div
+          className="shrink-0 max-h-[45vh] overflow-y-auto px-4 py-3"
+          aria-label="Dashboard controls"
+        >
+          <div className="max-w-[60rem]">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] items-stretch gap-3">
+              <fieldset className="min-w-0 max-w-full rounded-lg border border-border/60 bg-muted/15 p-3">
+                <legend className="px-1 text-[11px] font-medium text-muted-foreground">
+                  Scope
+                </legend>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                   <div className="min-w-0 space-y-1">
                     <div className="text-[11px] leading-4 text-muted-foreground">Profile</div>
                     <Select
@@ -971,11 +1007,6 @@ export function DashboardPage({
                       </SelectPopup>
                     </Select>
                   </div>
-                </div>
-              </fieldset>
-              <fieldset className="min-w-0 border-t border-border/60 pt-3 @min-[850px]/dashboard:border-t-0 @min-[850px]/dashboard:border-l @min-[850px]/dashboard:pl-3 @min-[850px]/dashboard:pt-0">
-                <legend className="sr-only">Location</legend>
-                <div className="grid grid-cols-2 gap-2">
                   <div className="min-w-0 space-y-1">
                     <div className="text-[11px] leading-4 text-muted-foreground">Device</div>
                     <Select
@@ -1085,6 +1116,60 @@ export function DashboardPage({
                       </SelectPopup>
                     </Select>
                   </div>
+                </div>
+              </fieldset>
+              <fieldset className="min-w-0 max-w-full rounded-lg border border-border/60 bg-muted/15 p-3">
+                <legend className="px-1 text-[11px] font-medium text-muted-foreground">
+                  Match
+                </legend>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                  <div className="min-w-0 space-y-1">
+                    <div className="text-[11px] leading-4 text-muted-foreground">Provider</div>
+                    <Select
+                      value={effectiveProviderFilter}
+                      onValueChange={(value) => {
+                        setProviderFilter(value ?? "all");
+                        setProjectFilter("all");
+                      }}
+                    >
+                      <SelectTrigger
+                        size="xs"
+                        className="h-8 w-full min-w-0 sm:h-8 rounded-md border-border/70 bg-background shadow-none hover:bg-foreground/10"
+                        aria-label="Filter dashboard by provider"
+                      >
+                        <SelectValue>
+                          {effectiveProviderFilter === "all"
+                            ? "All providers"
+                            : selectedProvider
+                              ? (PROVIDER_DISPLAY_NAMES[selectedProvider.driverKind] ??
+                                selectedProvider.driverKind)
+                              : "Unknown provider"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup alignItemWithTrigger={false}>
+                        <SelectItem className="min-h-8 text-xs sm:text-xs" value="all">
+                          All providers
+                        </SelectItem>
+                        {providerOptions.map(([key, provider]) => (
+                          <SelectItem className="min-h-8 text-xs sm:text-xs" key={key} value={key}>
+                            <span className="flex items-center gap-1.5">
+                              {provider ? (
+                                <ProviderInstanceIcon
+                                  driverKind={provider.driverKind}
+                                  displayName={provider.displayName}
+                                  iconClassName="size-3"
+                                />
+                              ) : null}
+                              {provider
+                                ? (PROVIDER_DISPLAY_NAMES[provider.driverKind] ??
+                                  provider.driverKind)
+                                : "Unknown provider"}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                  </div>
                   <div className="min-w-0 space-y-1">
                     <div className="text-[11px] leading-4 text-muted-foreground">Branch</div>
                     <Input
@@ -1142,58 +1227,23 @@ export function DashboardPage({
                       </SelectPopup>
                     </Select>
                   </div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="text-[11px] leading-4 text-muted-foreground">Search</div>
+                    <Input
+                      size="compact"
+                      type="search"
+                      aria-label="Search dashboard"
+                      placeholder="Title or context"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      className="h-8 w-full min-w-0 border-border/60 bg-background shadow-none"
+                    />
+                  </div>
                 </div>
               </fieldset>
-              <fieldset className="min-w-0 border-t border-border/60 pt-3 @min-[850px]/dashboard:border-t-0 @min-[850px]/dashboard:border-l @min-[850px]/dashboard:pl-3 @min-[850px]/dashboard:pt-0">
-                <legend className="sr-only">View</legend>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="min-w-0 space-y-1">
-                    <div className="text-[11px] leading-4 text-muted-foreground">Provider</div>
-                    <Select
-                      value={effectiveProviderFilter}
-                      onValueChange={(value) => {
-                        setProviderFilter(value ?? "all");
-                        setProjectFilter("all");
-                      }}
-                    >
-                      <SelectTrigger
-                        size="xs"
-                        className="h-8 w-full min-w-0 sm:h-8 rounded-md border-border/70 bg-background shadow-none hover:bg-foreground/10"
-                        aria-label="Filter dashboard by provider"
-                      >
-                        <SelectValue>
-                          {effectiveProviderFilter === "all"
-                            ? "All providers"
-                            : selectedProvider
-                              ? (PROVIDER_DISPLAY_NAMES[selectedProvider.driverKind] ??
-                                selectedProvider.driverKind)
-                              : "Unknown provider"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectPopup alignItemWithTrigger={false}>
-                        <SelectItem className="min-h-8 text-xs sm:text-xs" value="all">
-                          All providers
-                        </SelectItem>
-                        {providerOptions.map(([key, provider]) => (
-                          <SelectItem className="min-h-8 text-xs sm:text-xs" key={key} value={key}>
-                            <span className="flex items-center gap-1.5">
-                              {provider ? (
-                                <ProviderInstanceIcon
-                                  driverKind={provider.driverKind}
-                                  displayName={provider.displayName}
-                                  iconClassName="size-3"
-                                />
-                              ) : null}
-                              {provider
-                                ? (PROVIDER_DISPLAY_NAMES[provider.driverKind] ??
-                                  provider.driverKind)
-                                : "Unknown provider"}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectPopup>
-                    </Select>
-                  </div>
+              <fieldset className="min-w-0 max-w-full rounded-lg border border-border/60 bg-muted/15 p-3">
+                <legend className="px-1 text-[11px] font-medium text-muted-foreground">View</legend>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                   <div className="min-w-0 space-y-1">
                     <div className="text-[11px] leading-4 text-muted-foreground">Status</div>
                     <Select
@@ -1260,29 +1310,18 @@ export function DashboardPage({
                     </Select>
                   </div>
                 </div>
+                <div className="mt-5 flex flex-wrap items-center gap-1">
+                  <Button
+                    size="xs"
+                    variant="ghost-muted"
+                    disabled={!activeFilters.length}
+                    onClick={resetFilters}
+                  >
+                    Reset filters
+                  </Button>
+                  <DashboardSavedViews current={currentView} onApply={applyView} />
+                </div>
               </fieldset>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/50 pt-2">
-              <Input
-                size="compact"
-                type="search"
-                aria-label="Search dashboard"
-                placeholder="Search tasks and chats..."
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                className="h-8 min-w-0 flex-1 border-transparent bg-transparent shadow-none sm:max-w-80"
-              />
-              <div className="ml-auto flex items-center gap-1">
-                <Button
-                  size="xs"
-                  variant="ghost-muted"
-                  disabled={!activeFilters.length}
-                  onClick={resetFilters}
-                >
-                  Reset filters
-                </Button>
-                <DashboardSavedViews current={currentView} onApply={applyView} />
-              </div>
             </div>
           </div>
         </div>
@@ -1326,7 +1365,7 @@ export function DashboardPage({
             <ul
               className={
                 history.length
-                  ? "overflow-hidden rounded-lg border border-border bg-card"
+                  ? "max-w-3xl overflow-hidden rounded-lg border border-border bg-card"
                   : undefined
               }
             >
@@ -1352,38 +1391,23 @@ export function DashboardPage({
               boardRef.current = node;
             }}
           >
-            <TaskShelf
-              profileId={
-                rawProfiles.find((owner) =>
-                  (owner.spaces ?? []).some(
-                    (space) => `${owner.id}:${space.id}` === effectiveSpaceFilter,
-                  ),
-                )?.id ?? activeProfile.id
-              }
-              environmentId={effectiveEnvironmentFilter}
-              projectKey={effectiveProjectFilter}
-              search={search}
-              spaceId={
-                effectiveSpaceFilter === "all"
-                  ? undefined
-                  : effectiveSpaceFilter === "root"
-                    ? null
-                    : rawProfiles
-                        .flatMap((owner) =>
-                          (owner.spaces ?? []).map((space) => ({
-                            key: `${owner.id}:${space.id}`,
-                            id: space.id,
-                          })),
-                        )
-                        .find((space) => space.key === effectiveSpaceFilter)?.id
-              }
-              visibleThreadKeys={allEntries.map(
-                (entry) => `${entry.shell.environmentId}:${entry.shell.id}`,
-              )}
-            />
-            <div className="col-span-full flex items-center gap-3 pt-1">
+            {renderTasks("planned")}
+            <div className="col-span-full flex flex-wrap items-center gap-3 pt-1">
               <h2 className="text-sm font-medium">Chat activity</h2>
-              <div className="h-px flex-1 bg-border/60" />
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {allEntries.length}
+              </span>
+              {groupBy === "state" &&
+                visibleLanes
+                  .filter((lane) => !filteredBoard.lanes[lane].length)
+                  .map((lane) => (
+                    <span
+                      key={lane}
+                      className="rounded-md border border-border/50 px-2 py-1 text-xs text-muted-foreground"
+                    >
+                      {LANE_TILE_LABELS[lane]} <span className="ml-1 tabular-nums">0</span>
+                    </span>
+                  ))}
             </div>
             {groupBy === "state" ? (
               <div
@@ -1391,62 +1415,41 @@ export function DashboardPage({
                 aria-label="Chat status columns"
                 tabIndex={0}
               >
-                <div className="grid grid-cols-[repeat(5,minmax(16rem,1fr))] items-start gap-3">
-                  {visibleLanes.map((lane) => {
-                    const entries = filteredBoard.lanes[lane];
-                    return (
-                      <section
-                        key={lane}
-                        aria-label={LANE_TILE_LABELS[lane]}
-                        className={cn(
-                          "flex min-w-0 flex-col rounded-xl border border-border/60 bg-muted/15 p-3",
-                          !allEntries.length && "py-2",
-                        )}
-                      >
-                        <div className="flex min-h-7 flex-wrap items-center gap-2">
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              lane === "needs-you"
-                                ? "bg-amber-500"
-                                : lane === "running"
-                                  ? "bg-sky-500"
-                                  : lane === "monitoring"
-                                    ? "bg-violet-500"
-                                    : lane === "idle"
-                                      ? "bg-muted-foreground/50"
-                                      : "bg-emerald-500",
-                            )}
-                          />
-                          <h2 className="text-[13px] font-semibold">{LANE_TILE_LABELS[lane]}</h2>
-                          <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
-                            {entries.length}
-                          </span>
-                        </div>
-                        {allEntries.length > 0 && (
-                          <div className="space-y-2 [&:not(:empty)]:mt-2">
-                            {entries.length ? (
-                              entries.map(renderCard)
-                            ) : (
-                              <p className="text-xs text-muted-foreground">
-                                {activeFilters.length > 0
-                                  ? "No matching chats"
-                                  : lane === "needs-you"
-                                    ? "Nothing needs attention"
-                                    : lane === "running"
-                                      ? "No running chats"
-                                      : lane === "monitoring"
-                                        ? "No background watchers"
-                                        : lane === "idle"
-                                          ? "No idle chats"
-                                          : "No new results"}
-                              </p>
-                            )}
+                <div className="grid auto-cols-[minmax(16rem,22rem)] grid-flow-col justify-start items-start gap-3">
+                  {visibleLanes
+                    .filter((lane) => filteredBoard.lanes[lane].length > 0)
+                    .map((lane) => {
+                      const entries = filteredBoard.lanes[lane];
+                      return (
+                        <section
+                          key={lane}
+                          aria-label={LANE_TILE_LABELS[lane]}
+                          className="flex min-w-0 flex-col rounded-lg border border-border/60 bg-muted/10 p-2.5"
+                        >
+                          <div className="flex min-h-7 flex-wrap items-center gap-2">
+                            <span
+                              className={cn(
+                                "size-1.5 rounded-full",
+                                lane === "needs-you"
+                                  ? "bg-amber-500"
+                                  : lane === "running"
+                                    ? "bg-sky-500"
+                                    : lane === "monitoring"
+                                      ? "bg-violet-500"
+                                      : lane === "idle"
+                                        ? "bg-muted-foreground/50"
+                                        : "bg-emerald-500",
+                              )}
+                            />
+                            <h2 className="text-[13px] font-semibold">{LANE_TILE_LABELS[lane]}</h2>
+                            <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                              {entries.length}
+                            </span>
                           </div>
-                        )}
-                      </section>
-                    );
-                  })}
+                          <div className="mt-2 space-y-2">{entries.map(renderCard)}</div>
+                        </section>
+                      );
+                    })}
                 </div>
               </div>
             ) : groupBy === "space" && allEntries.length > 0 ? (
@@ -1465,7 +1468,7 @@ export function DashboardPage({
                 return (
                   <section
                     key={key}
-                    className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-muted/15 p-3"
+                    className="flex min-w-0 flex-col rounded-lg border border-border/60 bg-muted/10 p-2.5"
                   >
                     <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-xs font-semibold">
                       {spaceOptions.find((space) => space.key === key)?.name ?? "Unsorted"}
@@ -1479,7 +1482,7 @@ export function DashboardPage({
               projectGroups.map((group) => (
                 <section
                   key={group.projectKey}
-                  className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-muted/15 p-3"
+                  className="flex min-w-0 flex-col rounded-lg border border-border/60 bg-muted/10 p-2.5"
                 >
                   <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-xs font-semibold">
                     {projectByKey.get(group.projectKey)?.title ?? "Unknown project"}
@@ -1501,10 +1504,11 @@ export function DashboardPage({
                   : "No active chats in this view."}
               </p>
             )}
+            {renderTasks("history")}
             <details
               open={settledExpanded}
               onToggle={(event) => setSettledExpanded(event.currentTarget.open)}
-              className="col-span-full rounded-xl border border-border/60 bg-muted/10"
+              className="col-span-full w-full max-w-2xl rounded-lg border border-border/60 bg-muted/10"
             >
               <summary className="cursor-pointer rounded-xl px-4 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
                 Settled{" "}

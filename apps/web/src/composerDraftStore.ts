@@ -1,5 +1,6 @@
 import { elementContextToPreviewAnnotation } from "./lib/elementContext";
 import {
+  TaskDraftRef,
   ElementContextDetails,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
@@ -227,6 +228,7 @@ const PersistedTerminalContextDraft = Schema.Struct({
 type PersistedTerminalContextDraft = typeof PersistedTerminalContextDraft.Type;
 
 const PersistedComposerThreadDraftState = Schema.Struct({
+  taskRefs: Schema.optionalKey(Schema.Array(TaskDraftRef)),
   prompt: Schema.String,
   attachments: Schema.Array(PersistedComposerImageAttachment),
   files: Schema.optionalKey(Schema.Array(PersistedComposerDraftFileAttachment)),
@@ -376,6 +378,7 @@ export type ComposerContextInsertionHandler = (
 const contextInsertionHandlers = new Map<string, ComposerContextInsertionHandler>();
 
 export interface ComposerThreadDraftState {
+  taskRefs?: readonly TaskDraftRef[];
   prompt: string;
   images: ComposerImageAttachment[];
   files: ComposerFileAttachment[];
@@ -570,6 +573,7 @@ interface ComposerDraftStoreState {
   finalizePromotedDraftThread: (threadRef: ComposerThreadTarget) => void;
   clearDraftThread: (threadRef: ComposerThreadTarget) => void;
   setStickyModelSelection: (modelSelection: ModelSelection | null | undefined) => void;
+  setTaskRefs: (threadRef: ComposerThreadTarget, refs: readonly TaskDraftRef[]) => void;
   setPrompt: (threadRef: ComposerThreadTarget, prompt: string) => void;
   setTerminalContexts: (threadRef: ComposerThreadTarget, contexts: TerminalContextDraft[]) => void;
   setModelSelection: (
@@ -2017,6 +2021,9 @@ function normalizePersistedDraftsByThreadId(
             })();
     nextDraftsByThreadKey[normalizedThreadKey] = {
       prompt,
+      ...(Array.isArray(draftCandidate.taskRefs)
+        ? { taskRefs: draftCandidate.taskRefs.filter(Schema.is(TaskDraftRef)) }
+        : {}),
       attachments,
       ...(files.length > 0 ? { files } : {}),
       ...(terminalContexts.length > 0 ? { terminalContexts } : {}),
@@ -2137,6 +2144,7 @@ export function partializeComposerDraftStoreState(
       continue;
     }
     const persistedDraft: DeepMutable<PersistedComposerThreadDraftState> = {
+      ...(draft.taskRefs?.length ? { taskRefs: [...draft.taskRefs] } : {}),
       prompt: draft.prompt,
       attachments: draft.persistedAttachments,
       ...(draft.files.length > 0
@@ -2445,6 +2453,7 @@ function toHydratedThreadDraft(
       ...(persistedDraft.previewAnnotations ?? []).map(previewAnnotationContextReference),
       ...files.map(fileContextReference),
     ]),
+    ...(persistedDraft.taskRefs?.length ? { taskRefs: persistedDraft.taskRefs } : {}),
     images: hydrateImagesFromPersisted(persistedDraft.attachments),
     files,
     nonPersistedImageIds: [],
@@ -2980,6 +2989,16 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
+        setTaskRefs: (threadRef, taskRefs) => {
+          const key = resolveComposerDraftKey(get(), threadRef);
+          if (!key) return;
+          set((state) => ({
+            draftsByThreadKey: {
+              ...state.draftsByThreadKey,
+              [key]: { ...(state.draftsByThreadKey[key] ?? createEmptyThreadDraft()), taskRefs },
+            },
+          }));
+        },
         setPrompt: (threadRef, prompt) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
@@ -2989,6 +3008,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
             const nextDraft: ComposerThreadDraftState = {
               ...existing,
+              taskRefs: prompt.trim() ? (existing.taskRefs ?? []) : [],
               prompt,
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
@@ -3994,6 +4014,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             const nextDraft: ComposerThreadDraftState = {
               ...current,
+              taskRefs: [],
               prompt: "",
               images: [],
               files: [],
@@ -4027,6 +4048,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             const nextDraft: ComposerThreadDraftState = {
               ...current,
+              taskRefs: [],
               prompt: ensureInlineContextReferences("", [
                 ...current.terminalContexts.map(terminalContextReference),
                 ...current.reviewComments.map(reviewCommentContextReference),

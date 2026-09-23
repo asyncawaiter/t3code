@@ -1,3 +1,4 @@
+import { TaskHandoffCoordinator } from "./taskHandoff";
 import { useEffect, useRef } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { profileSourceAtom } from "../../state/server";
@@ -184,5 +185,5 @@ export function TaskCaptureCoordinator() {
     check();
     return () => clearTimeout(timer);
   }, [tasks]);
-  return null;
+  return <TaskHandoffCoordinator />;
 }

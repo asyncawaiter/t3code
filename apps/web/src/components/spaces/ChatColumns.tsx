@@ -1,3 +1,5 @@
+import { isRecoveredChatBoard } from "./chatBoardMigration";
+import { DashboardReviewBar } from "../dashboard/DashboardReviewBar";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { releaseComposerDraftUploads } from "../../lib/composerDraftUploads";
 import { readLocalApi } from "../../localApi";
@@ -43,6 +45,7 @@ import {
   FolderIcon,
   LaptopIcon,
   Columns3Icon,
+  ChevronDownIcon,
 } from "lucide-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -77,6 +80,7 @@ type ColumnChat = Pick<
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "session"
+  | "latestTurn"
 > & { draftId?: DraftId };
 const ChatView = lazy(() => import("../ChatView"));
 const OptionalChatKey = Schema.NullOr(Schema.String);
@@ -198,6 +202,7 @@ export default function ChatColumns({
           hasPendingApprovals: false,
           hasPendingUserInput: false,
           session: null,
+          latestTurn: null,
           draftId: DraftId.make(draftId),
         })),
     ],
@@ -277,6 +282,7 @@ function BoardColumns({
     });
   };
   const saveProfiles = useSaveProfiles();
+  const [boardPickerOpen, setBoardPickerOpen] = useState(false);
   const [boardName, setBoardName] = useState("");
   const [naming, setNaming] = useState<"rename" | "new" | "duplicate" | null>(null);
   const [profileFilter, setProfileFilter] = useState("all");
@@ -441,28 +447,82 @@ function BoardColumns({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/25 p-1.5 text-xs text-muted-foreground">
-        <Select
-          value={state.board.id}
-          onValueChange={(value) => {
-            if (value) selectBoard(value);
-          }}
-        >
-          <SelectTrigger
-            size="xs"
-            aria-label="Columns board"
-            className="max-w-64 border-transparent bg-transparent font-medium text-foreground"
-          >
+        {state.boards.length > 1 ? (
+          <Popover open={boardPickerOpen} onOpenChange={setBoardPickerOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label="Choose a saved board"
+                  className="max-w-64"
+                />
+              }
+            >
+              <Columns3Icon className="size-3.5 shrink-0" />
+              <span className="truncate">{state.board.name}</span>
+              <ChevronDownIcon className="size-3 shrink-0" />
+            </PopoverTrigger>
+            <PopoverPopup align="start" className="w-72 max-h-96 overflow-y-auto p-2">
+              <div className="flex flex-col gap-1" aria-label="Saved boards">
+                {state.boards
+                  .filter((board) => !isRecoveredChatBoard(board))
+                  .map((board) => (
+                    <Button
+                      key={board.id}
+                      size="xs"
+                      variant={state.board.id === board.id ? "secondary" : "ghost"}
+                      className="justify-between"
+                      aria-pressed={state.board.id === board.id}
+                      onClick={() => {
+                        selectBoard(board.id);
+                        setBoardPickerOpen(false);
+                      }}
+                    >
+                      <span className="truncate">{board.name}</span>
+                      <span className="text-muted-foreground">
+                        {board.order.filter((key) => !board.hidden.includes(key)).length} chats
+                      </span>
+                    </Button>
+                  ))}
+              </div>
+              {state.boards.some((board) => isRecoveredChatBoard(board)) && (
+                <details className="mt-2 border-t border-border/60 pt-2">
+                  <summary className="cursor-pointer px-2 py-1 text-xs text-muted-foreground">
+                    Previous layouts
+                  </summary>
+                  <div className="mt-1 flex flex-col gap-1">
+                    {state.boards
+                      .filter((board) => isRecoveredChatBoard(board))
+                      .map((board) => (
+                        <Button
+                          key={board.id}
+                          size="xs"
+                          variant={state.board.id === board.id ? "secondary" : "ghost"}
+                          className="justify-between"
+                          aria-pressed={state.board.id === board.id}
+                          onClick={() => {
+                            selectBoard(board.id);
+                            setBoardPickerOpen(false);
+                          }}
+                        >
+                          <span className="truncate">{board.name.replace(/^Imported /, "")}</span>
+                          <span className="text-muted-foreground">
+                            {board.order.filter((key) => !board.hidden.includes(key)).length} chats
+                          </span>
+                        </Button>
+                      ))}
+                  </div>
+                </details>
+              )}
+            </PopoverPopup>
+          </Popover>
+        ) : (
+          <span className="flex items-center gap-1.5 px-2 font-medium text-foreground">
             <Columns3Icon className="size-3.5" />
-            <SelectValue>{state.board.name}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup alignItemWithTrigger={false}>
-            {state.boards.map((board) => (
-              <SelectItem key={board.id} value={board.id}>
-                {board.name}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+            {state.board.name}
+          </span>
+        )}
         <span className="shrink-0 tabular-nums">{selectedKeys.size} chats</span>
         <Popover
           open={naming !== null}
@@ -866,14 +926,15 @@ function BoardColumns({
                 <MenuTrigger
                   render={
                     <Button
-                      size="icon-xs"
+                      size="xs"
                       variant="ghost"
                       aria-label={`Column options for ${chat.title}`}
                       disabled={disabled}
                     />
                   }
                 >
-                  <MoreHorizontalIcon />
+                  Column
+                  <ChevronDownIcon className="size-3" />
                 </MenuTrigger>
                 <MenuPopup align="end">
                   {chat.draftId && (
@@ -1072,21 +1133,32 @@ function Column({
           >
             {chat.title}
           </button>
-          <span className="text-[10px] text-muted-foreground">
-            {!connected
-              ? "Offline"
-              : chat.hasPendingApprovals
-                ? "Approval needed"
-                : chat.hasPendingUserInput
-                  ? "Answer needed"
-                  : chat.session?.status === "running"
-                    ? "Running"
-                    : chat.archivedAt
-                      ? "Archived"
-                      : chat.settledOverride === "settled"
-                        ? "Settled"
-                        : "Idle"}
-          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            <DashboardReviewBar thread={chat} compact />
+            {(!connected ||
+              chat.hasPendingApprovals ||
+              chat.hasPendingUserInput ||
+              chat.session?.status === "running" ||
+              chat.archivedAt ||
+              chat.settledOverride === "settled" ||
+              chat.latestTurn?.state !== "completed") && (
+              <span className="text-[10px] text-muted-foreground">
+                {!connected
+                  ? "Offline"
+                  : chat.hasPendingApprovals
+                    ? "Approval needed"
+                    : chat.hasPendingUserInput
+                      ? "Answer needed"
+                      : chat.session?.status === "running"
+                        ? "Running"
+                        : chat.archivedAt
+                          ? "Archived"
+                          : chat.settledOverride === "settled"
+                            ? "Settled"
+                            : "Idle"}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-0.5">
           <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">

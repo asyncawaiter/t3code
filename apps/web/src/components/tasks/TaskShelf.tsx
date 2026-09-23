@@ -1,5 +1,5 @@
 import { useNowMinute } from "../../hooks/useNowMinute";
-import { workItemChats } from "@t3tools/contracts";
+import { workItemChats, workItemStage } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { useSaveWorkItem } from "../../workItems";
 import { toastManager } from "../ui/toast";
@@ -8,39 +8,25 @@ import { ClipboardListIcon, MoreHorizontalIcon } from "lucide-react";
 import { useWorkItems, openWorkItem, type LocatedWorkItem } from "../../workItems";
 import { useEnvironments } from "../../state/environments";
 
-const NO_THREADS: readonly string[] = [];
-
 export function TaskShelf({
+  section = "planned",
   profileId,
   spaceId,
   environmentId,
   projectKey,
   search = "",
-  visibleThreadKeys = NO_THREADS,
 }: {
+  section?: "planned" | "history";
   profileId?: string | null;
   spaceId?: string | null | undefined;
   environmentId?: string | null;
   projectKey?: string;
   search?: string;
-  visibleThreadKeys?: readonly string[];
 }) {
   const tasks = useWorkItems();
   const now = Date.parse(useNowMinute());
   const save = useSaveWorkItem();
   const { environments } = useEnvironments();
-  const shown = new Set(visibleThreadKeys);
-  const represented = new Set<string>();
-  for (const key of shown) {
-    for (const entry of tasks.filter(
-      (entry) =>
-        !entry.item.deletedAt &&
-        workItemChats(entry.item, entry.environmentId).some(
-          (chat) => `${chat.environmentId}:${chat.threadId}` === key,
-        ),
-    ))
-      represented.add(`${entry.environmentId}:${entry.item.id}`);
-  }
   const eligible = tasks.filter(
     ({ environmentId: device, item }) =>
       (!profileId || profileId === "all" || item.profileId === profileId) &&
@@ -49,8 +35,7 @@ export function TaskShelf({
       (!projectKey ||
         projectKey === "all" ||
         `${item.executionEnvironmentId ?? device}:${item.projectId}` === projectKey) &&
-      `${item.title} ${item.notes} ${item.brief}`.toLowerCase().includes(search.toLowerCase()) &&
-      !represented.has(`${device}:${item.id}`),
+      `${item.title} ${item.notes} ${item.brief}`.toLowerCase().includes(search.toLowerCase()),
   );
   const render = (task: LocatedWorkItem) => (
     <div
@@ -131,11 +116,19 @@ export function TaskShelf({
           </Menu>
         )}
       </div>
-      <span className="line-clamp-2 text-xs text-muted-foreground">
-        {task.item.preparation?.state === "failed"
-          ? "Brief preparation failed. Open to retry."
-          : task.item.brief || task.item.notes || "Add context when you have it."}
-      </span>
+      {(task.item.preparation?.state === "failed" ||
+        task.item.brief ||
+        task.item.notes !== task.item.title) && (
+        <span className="line-clamp-2 text-xs text-muted-foreground">
+          {task.item.preparation?.state === "failed"
+            ? "Brief preparation failed. Open to retry."
+            : task.item.brief ||
+              (task.item.notes.startsWith(`${task.item.title}\n`)
+                ? task.item.notes.slice(task.item.title.length).trim()
+                : task.item.notes) ||
+              "Add context when you have it."}
+        </span>
+      )}
       {task.item.remindAt && (
         <span className="text-xs text-muted-foreground">
           {Date.parse(task.item.remindAt) <= now
@@ -150,11 +143,12 @@ export function TaskShelf({
         </span>
       )}
       <span className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
-        <span className="capitalize">
-          {task.item.status}
-          {workItemChats(task.item, task.environmentId).length
-            ? ` · ${workItemChats(task.item, task.environmentId).length} linked`
-            : ""}
+        <span className="">
+          {task.item.status === "working" || task.item.status === "done"
+            ? workItemStage(task.item)
+            : workItemChats(task.item, task.environmentId).length
+              ? "Chat selected, not sent"
+              : ""}
         </span>
         <span>
           {task.item.executionEnvironmentId === null
@@ -167,45 +161,54 @@ export function TaskShelf({
       </span>
     </div>
   );
-  return (
-    <section
-      aria-label="Planned work"
-      className="col-span-full space-y-3 rounded-xl border border-border/70 bg-card/50 p-3"
-    >
-      <div className="flex items-center gap-2">
-        <ClipboardListIcon className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium">Planned work</h2>
-        {!eligible.some(({ item }) => !item.deletedAt && item.status !== "done") && (
-          <span className="ml-auto text-xs text-muted-foreground">No planned tasks</span>
-        )}
-      </div>
-      <div className="grid gap-2 empty:hidden sm:grid-cols-2 xl:grid-cols-3">
-        {eligible
-          .filter(({ item }) => !item.deletedAt && item.status !== "done")
-          .sort(
-            (a, b) =>
-              (a.item.priority ?? 0) - (b.item.priority ?? 0) ||
-              b.item.createdAt.localeCompare(a.item.createdAt),
-          )
-          .map(render)}
-      </div>
-      {eligible.some(({ item }) => !item.deletedAt && item.status === "done") && (
-        <details>
-          <summary className="cursor-pointer text-xs text-muted-foreground">
-            Completed tasks
+  const planned = eligible
+    .filter(({ item }) => !item.deletedAt && item.status !== "done" && item.status !== "working")
+    .sort(
+      (a, b) =>
+        (a.item.priority ?? 0) - (b.item.priority ?? 0) ||
+        b.item.createdAt.localeCompare(a.item.createdAt),
+    );
+  const history = eligible.filter(
+    ({ item }) => !item.deletedAt && (item.status === "done" || item.status === "working"),
+  );
+  const trash = eligible.filter(({ item }) => item.deletedAt);
+  const grid = "grid grid-cols-[repeat(auto-fit,minmax(min(100%,17rem),20rem))] gap-2";
+  if (section === "history")
+    return history.length || trash.length ? (
+      <section aria-label="Task history" className="col-span-full space-y-2 pt-2">
+        <details className="w-fit min-w-[min(100%,20rem)] max-w-full rounded-lg border border-border/60 bg-muted/10">
+          <summary className="cursor-pointer px-3 py-2.5 text-xs font-medium">
+            Task history <span className="ml-2 text-muted-foreground">{history.length}</span>
           </summary>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {eligible.filter(({ item }) => !item.deletedAt && item.status === "done").map(render)}
+          <div className="w-[min(64rem,100%)] space-y-2 border-t border-border/50 p-3">
+            <div className={grid}>
+              {history.sort((a, b) => b.item.updatedAt.localeCompare(a.item.updatedAt)).map(render)}
+            </div>
+            {trash.length > 0 && (
+              <details>
+                <summary className="cursor-pointer py-2 text-xs text-muted-foreground">
+                  Trash ({trash.length})
+                </summary>
+                <div className={grid}>{trash.map(render)}</div>
+              </details>
+            )}
           </div>
         </details>
-      )}
-      {eligible.some(({ item }) => item.deletedAt) && (
-        <details>
-          <summary className="cursor-pointer text-xs text-muted-foreground">Trash</summary>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {eligible.filter(({ item }) => item.deletedAt).map(render)}
-          </div>
-        </details>
+      </section>
+    ) : null;
+  return (
+    <section aria-label="Planned work" className="col-span-full space-y-2">
+      <div className="flex w-fit items-center gap-2">
+        <ClipboardListIcon className="size-3.5 text-muted-foreground" />
+        <h2 className="text-sm font-medium">Planned work</h2>
+        <span className="text-xs tabular-nums text-muted-foreground">{planned.length}</span>
+      </div>
+      {planned.length ? (
+        <div className={`${grid} max-h-64 overflow-y-auto pr-1`}>{planned.map(render)}</div>
+      ) : (
+        <p className="w-fit rounded-lg border border-dashed border-border/60 px-3 py-2.5 text-xs text-muted-foreground">
+          No tasks waiting to be picked up.
+        </p>
       )}
     </section>
   );

@@ -1,3 +1,4 @@
+import { TaskReviewActions } from "../tasks/TaskReviewActions";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { buildReviewDashboard, flattenBoardEntries } from "./DashboardPage.logic";
@@ -7,7 +8,7 @@ import { useThreadShells } from "../../state/entities";
 import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
 import { Button } from "../ui/button";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
-import { CheckCheckIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 
 export function DashboardReviewBar({
   thread,
@@ -35,6 +36,48 @@ export function DashboardReviewBar({
       ? thread.latestTurn.completedAt
       : null;
   if (!inQueue && !completion) return null;
+  if (compact) {
+    if (!completion) return null;
+    const reviewed = workflow.reviewed[key] === completion;
+    return (
+      <div className="flex shrink-0 items-center rounded-md border border-border/60 bg-background">
+        <Button
+          size="micro"
+          variant="ghost"
+          aria-pressed={reviewed}
+          title={
+            reviewed
+              ? "Return this result to Ready to review"
+              : "Mark this result reviewed. The chat stays open."
+          }
+          onClick={() => workflow.review(key, completion, reviewed)}
+        >
+          {reviewed ? "Reviewed" : "Mark reviewed"}
+        </Button>
+        <Menu>
+          <MenuTrigger
+            render={<Button size="icon-xs" variant="ghost" aria-label="Review actions" />}
+          >
+            <ChevronDownIcon className="size-3" />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            <MenuItem
+              disabled={workflow.kept[key] === completion}
+              onClick={() => workflow.review(key, completion, true)}
+            >
+              {workflow.kept[key] === completion ? "Kept for review" : "Keep for review"}
+            </MenuItem>
+            <TaskReviewActions
+              environmentId={thread.environmentId}
+              threadId={thread.id}
+              resultMessageId={thread.latestTurn?.assistantMessageId}
+              menu
+            />
+          </MenuPopup>
+        </Menu>
+      </div>
+    );
+  }
   const actionable = new Set(
     flattenBoardEntries(buildReviewDashboard(threads, new Date().toISOString(), workflow.reviewed))
       .filter(
@@ -52,42 +95,6 @@ export function DashboardReviewBar({
   );
   const index = workflow.triageQueue.indexOf(key);
   const next = remaining.find((item) => workflow.triageQueue.indexOf(item) > index) ?? remaining[0];
-  if (compact)
-    return (
-      <Menu>
-        <MenuTrigger render={<Button size="icon-xs" variant="ghost" aria-label="Review chat" />}>
-          <CheckCheckIcon />
-        </MenuTrigger>
-        <MenuPopup align="start">
-          {completion && (
-            <>
-              <MenuItem
-                disabled={workflow.kept[key] === completion}
-                onClick={() => workflow.review(key, completion, true)}
-              >
-                {workflow.kept[key] === completion ? "Kept for review" : "Keep for review"}
-              </MenuItem>
-              <MenuItem
-                disabled={workflow.reviewed[key] === completion}
-                onClick={() => workflow.review(key, completion, false)}
-              >
-                {workflow.reviewed[key] === completion ? "Reviewed" : "Mark reviewed"}
-              </MenuItem>
-            </>
-          )}
-          {inQueue && (
-            <MenuItem
-              disabled={!next}
-              onClick={() => {
-                if (next) openThread(next);
-              }}
-            >
-              Next item{remaining.length ? ` (${remaining.length})` : ""}
-            </MenuItem>
-          )}
-        </MenuPopup>
-      </Menu>
-    );
   return (
     <div
       className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/50 px-4 py-1.5 text-xs text-muted-foreground"
@@ -113,6 +120,13 @@ export function DashboardReviewBar({
           Back to dashboard
         </Button>
       ) : null}
+      {completion && (
+        <TaskReviewActions
+          environmentId={thread.environmentId}
+          threadId={thread.id}
+          resultMessageId={thread.latestTurn?.assistantMessageId}
+        />
+      )}
       {completion ? (
         <>
           <Button
@@ -143,7 +157,7 @@ export function DashboardReviewBar({
             if (next) openThread(next);
           }}
         >
-          Next item{remaining.length ? ` (${remaining.length})` : ""}
+          Next to review{remaining.length ? ` (${remaining.length})` : ""}
         </Button>
       ) : null}
     </div>

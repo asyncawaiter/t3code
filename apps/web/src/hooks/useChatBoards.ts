@@ -13,7 +13,12 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useLocalStorage } from "./useLocalStorage";
-import { readLegacyChatBoards } from "../components/spaces/chatBoardMigration";
+import {
+  readLegacyChatBoards,
+  visibleChatBoards,
+  chatBoardArrangement,
+  isRecoveredChatBoard,
+} from "../components/spaces/chatBoardMigration";
 
 const EMPTY: readonly ChatBoard[] = [];
 export function useChatBoards() {
@@ -30,10 +35,17 @@ export function useChatBoards() {
     Schema.String,
   );
   const persisted = source.config?.settings.chatBoards ?? cache;
-  const boards = persisted.some((board) => board.id === "default")
-    ? persisted
-    : [DEFAULT_CHAT_BOARD, ...persisted];
-  const board = boards.find((board) => board.id === selected) ?? boards[0]!;
+  const boards = visibleChatBoards(
+    persisted.some((board) => board.id === "default")
+      ? persisted
+      : [DEFAULT_CHAT_BOARD, ...persisted],
+  );
+  const previous = persisted.find((board) => board.id === selected);
+  const board =
+    boards.find((board) => board.id === selected) ??
+    (previous &&
+      boards.find((board) => chatBoardArrangement(board) === chatBoardArrangement(previous))) ??
+    boards.find((board) => board.id === "default")!;
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +114,13 @@ export function useChatBoards() {
     try {
       if (localStorage.getItem(marker)) return;
       const previous = readLegacyChatBoards(localStorage, source.profiles);
-      const missing = previous.filter((board) => !persisted.some((saved) => saved.id === board.id));
+      const missing = previous.filter(
+        (board) =>
+          !persisted.some(
+            (saved) =>
+              saved.id === board.id || chatBoardArrangement(saved) === chatBoardArrangement(board),
+          ),
+      );
       if (!missing.length) {
         localStorage.setItem(marker, "true");
         return;
@@ -138,6 +156,16 @@ export function useChatBoards() {
     pending,
     unavailable,
     error,
-    remove: (item: ChatBoard) => save([], [item]),
+    remove: (item: ChatBoard) =>
+      save(
+        [],
+        persisted.filter(
+          (saved) =>
+            saved.id === item.id ||
+            (isRecoveredChatBoard(item) &&
+              isRecoveredChatBoard(saved) &&
+              chatBoardArrangement(saved) === chatBoardArrangement(item)),
+        ),
+      ),
   };
 }

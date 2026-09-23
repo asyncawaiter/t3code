@@ -16,6 +16,7 @@ export function useOpenChatInColumns() {
     id: ThreadId;
     title?: string;
     previousKey?: string;
+    hash?: string;
     archivedAt?: string | null;
     settledOverride?: string | null;
   }) => {
@@ -43,6 +44,7 @@ export function useOpenChatInColumns() {
       params: { profileId: "all" },
       search: { view: "columns", space: undefined, unsorted: false, focus: key },
       state: { dashboardReturn },
+      ...(chat.hash ? { hash: chat.hash } : {}),
     });
     return true;
   };

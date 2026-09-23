@@ -2,6 +2,7 @@ import {
   CommandId,
   MessageId,
   workItemPrompt,
+  confirmWorkItemHandoff,
   workItemPreparationThread,
   type WorkItem,
 } from "@t3tools/contracts";
@@ -13,6 +14,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as Scope from "effect/Scope";
+import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
+import { ProjectionTurnRepositoryLive } from "../persistence/Layers/ProjectionTurns.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
@@ -35,6 +38,7 @@ export function preparationPrompt(task: WorkItem) {
 
 export const make = Effect.gen(function* () {
   const settings = yield* ServerSettingsService;
+  const turns = yield* ProjectionTurnRepository;
   const engine = yield* OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery;
   const environment = yield* ServerEnvironment;
@@ -43,7 +47,47 @@ export const make = Effect.gen(function* () {
   const sweep = Effect.fn("TaskPreparationReactor.sweep")(function* () {
     const tasks = (yield* settings.getSettings).workItems ?? [];
     const occupied = new Set<string>();
-    for (const task of tasks) {
+    for (const initialTask of tasks) {
+      let task = initialTask;
+      if (task.deletedAt) continue;
+      for (const handoff of task.handoffs ?? []) {
+        if (
+          handoff.environmentId !== environmentId ||
+          handoff.cancelledAt ||
+          handoff.resultMessageId
+        )
+          continue;
+        const sent = yield* snapshots.getTurnStartMessage({
+          threadId: handoff.threadId,
+          messageId: handoff.messageId,
+        });
+        if (Option.isNone(sent) || sent.value.message.role !== "user") continue;
+        let next = handoff.sentAt
+          ? task
+          : confirmWorkItemHandoff(task, handoff, sent.value.message.createdAt);
+        // User messages have no provider turn ID. The turn record owns that correlation.
+        const turn = (yield* turns.listByThreadId({ threadId: handoff.threadId })).find(
+          (entry) => entry.pendingMessageId === handoff.messageId && entry.state === "completed",
+        );
+        if (turn?.assistantMessageId)
+          next = {
+            ...next,
+            handoffs:
+              next.handoffs?.map((entry) =>
+                entry.messageId === handoff.messageId &&
+                entry.environmentId === handoff.environmentId
+                  ? { ...entry, resultMessageId: turn.assistantMessageId! }
+                  : entry,
+              ) ?? [],
+            updatedAt: DateTime.formatIso(yield* DateTime.now),
+          };
+        if (next !== task) {
+          const saved = yield* settings
+            .updateSettings({ workItems: [next] }, undefined, undefined, [task])
+            .pipe(Effect.result);
+          if (saved._tag === "Success") task = next;
+        }
+      }
       const preparation = task.preparation;
       if (task.deletedAt || !preparation || preparation.state === "failed") continue;
       const threadId = workItemPreparationThread(task);
@@ -207,4 +251,6 @@ export const make = Effect.gen(function* () {
   });
   return { start, drain: worker.drain, sweep };
 });
-export const layer = Layer.effect(TaskPreparationReactor, make);
+export const layer = Layer.effect(TaskPreparationReactor, make).pipe(
+  Layer.provide(ProjectionTurnRepositoryLive),
+);

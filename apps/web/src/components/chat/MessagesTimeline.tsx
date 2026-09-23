@@ -1,3 +1,4 @@
+import { TaskMessageLink } from "../tasks/TaskMessageLink";
 import { CompactionOutputViewer } from "./CompactionOutputViewer";
 import { ArrowUpIcon, ClockIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
@@ -2249,6 +2250,13 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             ))}
           </div>
         ) : null}
+        {ctx.threadRef && (
+          <TaskMessageLink
+            environmentId={ctx.activeThreadEnvironmentId}
+            threadId={ctx.threadRef.threadId}
+            messageId={row.message.id}
+          />
+        )}
         <div onCopyCapture={onBodyCopyCapture}>
           <CollapsibleUserMessageBody
             text={resolvedContext.text}

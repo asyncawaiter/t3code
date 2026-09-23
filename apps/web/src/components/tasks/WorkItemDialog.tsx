@@ -1,3 +1,6 @@
+import { prepareTaskDraft } from "./taskHandoff";
+import { useOpenChatInColumns } from "../../hooks/useOpenChatInColumns";
+import { workItemStage, returnWorkItemToPlanned } from "@t3tools/contracts";
 import { OUTSIDE_SPACES } from "../sidebar/Spaces.logic";
 import { assistantMessageHash } from "../../lib/assistantMessageNavigation";
 import { MessageId } from "@t3tools/contracts";
@@ -34,7 +37,6 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Checkbox } from "../ui/checkbox";
 import { TaskSelect } from "./TaskSelect";
-import { toastManager } from "../ui/toast";
 import { QuickTaskCapture } from "./QuickTaskCapture";
 import { TaskCaptureCoordinator } from "./TaskCaptureCoordinator";
 import { useTaskCaptures } from "./taskCaptureStorage";
@@ -73,7 +75,6 @@ const Draft = Schema.NullOr(
     launchThreadId: Schema.optionalKey(ThreadId),
   }),
 );
-const decodeStatus = Schema.decodeUnknownSync(WorkItem.fields.status);
 const decodeTask = Schema.decodeUnknownSync(WorkItem);
 
 export function WorkItemDialog() {
@@ -120,9 +121,11 @@ export function WorkItemDialog() {
 
 function TaskForm({ request }: { request: WorkItemRequest }) {
   const fileInput = useRef<HTMLInputElement>(null);
+  const destinationPanel = useRef<HTMLElement>(null);
   const busyRef = useRef(false);
   const [preview, setPreview] = useState<ExpandedImagePreview | null>(null);
   const navigate = useNavigate();
+  const openInColumns = useOpenChatInColumns();
   const { environments } = useEnvironments();
   const projects = useProjects();
   const threads = useThreadShells();
@@ -183,13 +186,20 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
         updatedAt: new Date().toISOString(),
       },
   );
-  const [preparationOpen, setPreparationOpen] = useState(
-    () => !!task.brief || !!task.threadId || !!task.preparation,
+  const [preparationOpen, setPreparationOpen] = useState(!!task.preparation);
+  const [destinationOpen, setDestinationOpen] = useState(false);
+  useEffect(() => {
+    if (destinationOpen) destinationPanel.current?.scrollIntoView({ block: "nearest" });
+  }, [destinationOpen]);
+  const [briefOpen, setBriefOpen] = useState(!!task.brief);
+  const [placementOpen, setPlacementOpen] = useState(false);
+  const [destinationKind, setDestinationKind] = useState<"new" | "existing">(
+    task.threadId ? "existing" : "new",
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [separate, setSeparate] = useState(draft?.separate ?? false);
-  const [nextThreadId] = useState(
+  const [nextThreadId, setNextThreadId] = useState(
     () => draft?.launchThreadId ?? ThreadId.make(`task-${randomUUID()}`),
   );
   const allTasks = useWorkItems();
@@ -218,7 +228,7 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
   const createWorktree = useAtomCommand(vcsEnvironment.createWorktree, { reportFailure: false });
   const profile = profiles.find((item) => item.id === task.profileId);
   const folders = taskFolders(projects, device, profile, task.spaceId);
-  const project = (task.threadId ? projects : folders).find(
+  const project = folders.find(
     (folder) => folder.environmentId === device && folder.id === task.projectId,
   );
   const linked = threads.find(
@@ -384,19 +394,30 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
               ...workItemChats(saved, storageDevice),
               { environmentId: device, threadId, purpose: "Work" },
             ],
-        status: saved.status === "parked" ? "ready" : saved.status,
+        status: saved.status,
         updatedAt: new Date().toISOString(),
       },
       saved,
     );
     setBase(saved);
     setTask(saved);
+    await prepareTaskDraft(
+      { environmentId: storageDevice, item: saved },
+      { environmentId: device, threadId },
+    );
+    if (
+      !(await openInColumns({
+        environmentId: device,
+        id: threadId,
+        title: linked?.title ?? saved.title,
+      }))
+    )
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId: device, threadId },
+      });
     setDraft(null);
     close();
-    await navigate({
-      to: "/$environmentId/$threadId",
-      params: { environmentId: device, threadId },
-    });
   }
 
   return (
@@ -473,86 +494,67 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
               Paste screenshots here or drop files into this form.
               {busy ? " Attaching or saving..." : ""}
             </p>
-            <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
-              <div className="grid min-w-0 grid-cols-2 gap-3">
-                <TaskSelect
-                  label="Profile"
-                  ariaLabel="Task profile"
-                  value={task.profileId ?? ""}
-                  onChange={(value) =>
-                    change({
-                      profileId: value || null,
-                      spaceId: null,
-                      projectId: null,
-                      threadId: null,
-                      chats: associated,
-                    })
-                  }
-                  options={[
-                    { value: "", label: "Unassigned" },
-                    ...profiles.map((p) => ({ value: p.id, label: p.name })),
-                  ]}
-                />
-                <TaskSelect
-                  label="Space"
-                  ariaLabel="Task space"
-                  value={task.spaceId ?? ""}
-                  disabled={!profile}
-                  onChange={(value) =>
-                    change({
-                      spaceId: value || null,
-                      projectId: null,
-                      threadId: null,
-                      chats: associated,
-                    })
-                  }
-                  options={[
-                    { value: "", label: "Unsorted" },
-                    ...(profile?.spaces ?? []).map((space) => ({
-                      value: space.id,
-                      label: space.name,
-                    })),
-                  ]}
-                />
-                <TaskSelect
-                  label="Device"
-                  ariaLabel="Task device"
-                  value={device ?? ""}
-                  disabled={false}
-                  onChange={(value) => {
-                    setDevice(value ? EnvironmentId.make(value) : null);
-                    change({ projectId: null, threadId: null, chats: associated });
-                  }}
-                  options={[
-                    { value: "", label: "Choose later" },
-                    ...environments.map((env) => ({
-                      value: env.environmentId,
-                      label: env.label,
-                      detail: env.connection.phase !== "connected" ? "Offline" : undefined,
-                    })),
-                  ]}
-                />
-                <TaskSelect
-                  label="Folder"
-                  ariaLabel="Task folder"
-                  value={project?.id ?? ""}
-                  disabled={!!task.threadId}
-                  onChange={(value) => change({ projectId: value ? ProjectId.make(value) : null })}
-                  options={[
-                    { value: "", label: "Choose later" },
-                    ...(task.threadId && project ? [project] : folders).map((folder) => ({
-                      value: folder.id,
-                      label: folder.title,
-                      detail: folder.workspaceRoot,
-                    })),
-                  ]}
-                />
+            <div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-2">
+              <div className="flex items-center gap-2 text-xs">
+                <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">
+                  {profile?.name ?? "Unassigned"} /{" "}
+                  {profile?.spaces?.find((space) => space.id === task.spaceId)?.name ?? "Unsorted"}
+                </span>
+                <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                  {workItemStage(task)}
+                </span>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-expanded={placementOpen}
+                  onClick={() => setPlacementOpen(!placementOpen)}
+                >
+                  Change
+                </Button>
               </div>
-              {project && (
-                <p className="flex min-w-0 items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                  <FolderIcon className="mt-0.5 size-3 shrink-0" />
-                  <span className="break-all font-mono">{project.workspaceRoot}</span>
-                </p>
+              {placementOpen && (
+                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border/50 pt-3">
+                  <TaskSelect
+                    label="Profile"
+                    ariaLabel="Task profile"
+                    value={task.profileId ?? ""}
+                    onChange={(value) =>
+                      change({
+                        profileId: value || null,
+                        spaceId: null,
+                        projectId: null,
+                        threadId: null,
+                        chats: associated,
+                      })
+                    }
+                    options={[
+                      { value: "", label: "Unassigned" },
+                      ...profiles.map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                  />
+                  <TaskSelect
+                    label="Space"
+                    ariaLabel="Task space"
+                    value={task.spaceId ?? ""}
+                    disabled={!profile}
+                    onChange={(value) =>
+                      change({
+                        spaceId: value || null,
+                        projectId: null,
+                        threadId: null,
+                        chats: associated,
+                      })
+                    }
+                    options={[
+                      { value: "", label: "Unsorted" },
+                      ...(profile?.spaces ?? []).map((space) => ({
+                        value: space.id,
+                        label: space.name,
+                      })),
+                    ]}
+                  />
+                </div>
               )}
             </div>
             <details
@@ -669,259 +671,473 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
                 ) : null}
               </div>
             </details>
-            {associated.length > 0 && (
-              <section className="space-y-2 rounded-lg border p-3">
-                <p className="text-xs font-medium">Working chats</p>
-                {associated.map((chat) => {
-                  const shell = threads.find(
-                    (thread) =>
-                      thread.environmentId === chat.environmentId && thread.id === chat.threadId,
-                  );
-                  return (
-                    <div
-                      key={`${chat.environmentId}:${chat.threadId}`}
-                      className="space-y-2 rounded-md bg-muted/30 p-2"
-                    >
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="min-w-0 flex-1 truncate text-left text-xs hover:underline"
-                          onClick={() => {
-                            close();
-                            void navigate({ to: "/$environmentId/$threadId", params: chat });
-                          }}
-                        >
-                          {shell?.title ?? "Chat unavailable"}
-                        </button>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {shell?.session?.status === "running"
-                            ? "Running"
-                            : shell?.latestTurn?.state === "completed"
-                              ? "Result available"
-                              : shell
-                                ? "Idle"
-                                : "Unavailable"}
-                        </span>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          aria-label="Unlink chat"
-                          onClick={() =>
-                            change({
-                              chats: associated.filter((entry) => entry !== chat),
-                              ...(task.threadId === chat.threadId && device === chat.environmentId
-                                ? { threadId: null }
-                                : {}),
-                            })
-                          }
-                        >
-                          <XIcon />
-                        </Button>
-                      </div>
-                      <Input
-                        aria-label="Chat purpose"
-                        placeholder="Purpose of this chat"
-                        value={chat.purpose}
-                        onChange={(event) =>
-                          change({
-                            chats: associated.map((entry) =>
-                              entry === chat ? { ...entry, purpose: event.target.value } : entry,
-                            ),
-                          })
-                        }
-                      />
-                      <Textarea
-                        aria-label="Chat result"
-                        placeholder="Result or conclusion to keep"
-                        value={chat.result ?? ""}
-                        maxLength={4000}
-                        onChange={(event) =>
-                          change({
-                            chats: associated.map((entry) =>
-                              entry === chat ? { ...entry, result: event.target.value } : entry,
-                            ),
-                          })
-                        }
-                      />
-                    </div>
-                  );
-                })}
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => {
-                    change({ chats: associated, threadId: null, projectId: null });
-                    setPreparationOpen(true);
-                  }}
-                >
-                  Add another chat
-                </Button>
-              </section>
-            )}
-            <details
-              open={preparationOpen}
-              onToggle={(event) => setPreparationOpen(event.currentTarget.open)}
-              className="group rounded-lg border border-border/60"
-            >
-              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-medium [&::-webkit-details-marker]:hidden">
-                <MessageSquareIcon className="size-3.5 text-muted-foreground" />
-                Chat preparation
-                <ChevronDownIcon className="ml-auto size-3.5 text-muted-foreground group-open:rotate-180" />
-              </summary>
-              <div className="space-y-3 border-t border-border/50 p-3">
-                <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">
-                  Handoff brief
+            {(task.brief || briefOpen) && (
+              <section className="space-y-2 rounded-lg border border-border/60 p-3">
+                <label className="grid gap-2 text-xs font-medium">
+                  Prepared context
                   <Textarea
                     aria-label="Handoff brief"
-                    className="[&_textarea]:min-h-20 [&_textarea]:max-h-40 [&_textarea]:font-normal"
-                    maxLength={32000}
-                    placeholder="Outcome, decisions, relevant files, questions, and first step."
                     value={task.brief}
-                    onChange={(e) => change({ brief: e.target.value })}
+                    maxLength={32000}
+                    className="[&_textarea]:min-h-24 [&_textarea]:max-h-48 [&_textarea]:font-normal"
+                    onChange={(event) => change({ brief: event.target.value })}
                   />
                 </label>
-                <TaskSelect
-                  label="Prepare brief in"
-                  ariaLabel="Preparation chat"
-                  value={
-                    task.preparationThreadId !== undefined
-                      ? (task.preparationThreadId ?? "")
-                      : task.source?.environmentId === storageDevice
-                        ? task.source.threadId
-                        : task.threadId && device === storageDevice
-                          ? task.threadId
+              </section>
+            )}
+            {!task.brief && !briefOpen && (
+              <Button size="xs" variant="ghost" onClick={() => setBriefOpen(true)}>
+                Write context yourself
+              </Button>
+            )}
+            <section className="rounded-lg border border-border/60">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="w-full justify-between px-3"
+                aria-expanded={preparationOpen}
+                onClick={() => setPreparationOpen(!preparationOpen)}
+              >
+                <span className="flex items-center gap-2">
+                  <MessageSquareIcon className="size-3.5" />
+                  Gather context from a chat
+                </span>
+                <ChevronDownIcon className={preparationOpen ? "size-3.5 rotate-180" : "size-3.5"} />
+              </Button>
+              {preparationOpen && (
+                <div className="space-y-3 border-t border-border/50 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Optional. Ask a chat that knows the background to prepare context for this task.
+                  </p>
+                  <TaskSelect
+                    label="Chat with background"
+                    ariaLabel="Preparation chat"
+                    value={
+                      task.preparationThreadId !== undefined
+                        ? (task.preparationThreadId ?? "")
+                        : task.source?.environmentId === storageDevice
+                          ? task.source.threadId
                           : ""
-                  }
-                  onChange={(value) =>
-                    change({ preparationThreadId: value ? ThreadId.make(value) : null })
-                  }
-                  options={[
-                    { value: "", label: "Choose a chat" },
-                    ...threads
-                      .filter((thread) => thread.environmentId === storageDevice)
-                      .map((thread) => ({ value: thread.id, label: thread.title })),
-                  ]}
-                />
-                {(task.preparationThreadId !== undefined
-                  ? task.preparationThreadId
-                  : task.source?.environmentId === storageDevice ||
-                    (task.threadId && device === storageDevice)) && (
+                    }
+                    onChange={(value) =>
+                      change({ preparationThreadId: value ? ThreadId.make(value) : null })
+                    }
+                    options={[
+                      { value: "", label: "Choose a chat" },
+                      ...threads
+                        .filter(
+                          (thread) => thread.environmentId === storageDevice && !thread.archivedAt,
+                        )
+                        .map((thread) => ({ value: thread.id, label: thread.title })),
+                    ]}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        task.preparation?.state === "running" ||
+                        !storageConnected ||
+                        !(task.preparationThreadId !== undefined
+                          ? task.preparationThreadId
+                          : task.source?.environmentId === storageDevice
+                            ? task.source.threadId
+                            : null)
+                      }
+                      onClick={() =>
+                        void run(async () => {
+                          await persist({
+                            ...task,
+                            preparation:
+                              task.preparation?.state === "queued"
+                                ? null
+                                : { requestedAt: new Date().toISOString(), state: "queued" },
+                          });
+                        })
+                      }
+                    >
+                      {task.preparation?.state === "queued"
+                        ? "Cancel preparation"
+                        : task.preparation?.state === "running"
+                          ? "Preparing context..."
+                          : "Prepare context"}
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">
+                      Starts a preparation turn, without implementing the task.
+                    </span>
+                  </div>
+                  {task.preparation && (
+                    <p role="status" className="text-xs text-muted-foreground">
+                      {task.preparation.state === "queued"
+                        ? "Waiting for the current turn to finish."
+                        : task.preparation.state === "running"
+                          ? "Preparing in the selected chat. The brief will appear here."
+                          : task.preparation.error}
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+            {destinationOpen && (
+              <section
+                className="space-y-3 rounded-lg border border-primary/25 bg-primary/5 p-3"
+                aria-label="Task destination"
+                ref={destinationPanel}
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium">Take this up</h3>
                   <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={task.preparation?.state === "running" || !storageConnected}
-                    onClick={() =>
-                      void run(async () => {
-                        await persist({
-                          ...task,
-                          preparation:
-                            task.preparation?.state === "queued"
-                              ? null
-                              : { requestedAt: new Date().toISOString(), state: "queued" },
-                        });
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label="Close destination"
+                    onClick={() => setDestinationOpen(false)}
+                  >
+                    <XIcon />
+                  </Button>
+                </div>
+                <div
+                  className="flex gap-1 rounded-lg bg-muted p-1"
+                  role="group"
+                  aria-label="Destination type"
+                >
+                  {(["new", "existing"] as const).map((kind) => (
+                    <Button
+                      key={kind}
+                      size="sm"
+                      variant={destinationKind === kind ? "secondary" : "ghost"}
+                      className="flex-1"
+                      aria-pressed={destinationKind === kind}
+                      onClick={() => {
+                        setDestinationKind(kind);
+                        if (kind === "new") setNextThreadId(ThreadId.make(randomUUID()));
+                        change({ threadId: null, chats: associated });
+                      }}
+                    >
+                      {kind === "new" ? "New chat" : "Existing chat"}
+                    </Button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <TaskSelect
+                    label="Device"
+                    ariaLabel="Task device"
+                    value={device ?? ""}
+                    disabled={false}
+                    onChange={(value) => {
+                      setDevice(value ? EnvironmentId.make(value) : null);
+                      change({ projectId: null, threadId: null, chats: associated });
+                    }}
+                    options={[
+                      { value: "", label: "Choose later" },
+                      ...environments.map((env) => ({
+                        value: env.environmentId,
+                        label: env.label,
+                        detail: env.connection.phase !== "connected" ? "Offline" : undefined,
+                      })),
+                    ]}
+                  />
+                  <TaskSelect
+                    label="Folder"
+                    ariaLabel="Task folder"
+                    value={project?.id ?? ""}
+                    onChange={(value) =>
+                      change({
+                        projectId: value ? ProjectId.make(value) : null,
+                        threadId: null,
+                        chats: associated,
                       })
                     }
-                  >
-                    {task.preparation?.state === "queued"
-                      ? "Cancel preparation"
-                      : task.preparation?.state === "running"
-                        ? "Preparing brief..."
-                        : "Prepare brief with agent"}
-                  </Button>
-                )}
-                {task.preparation && (
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    {task.preparation.state === "queued"
-                      ? "Queued after the current turn. You can cancel until it starts."
-                      : task.preparation.state === "running"
-                        ? "Preparing in the selected chat. Review the brief before starting work."
-                        : task.preparation.error}
-                  </p>
-                )}
-                {project && (
+                    options={[
+                      { value: "", label: "Choose later" },
+                      ...folders.map((folder) => ({
+                        value: folder.id,
+                        label: folder.title,
+                        detail: folder.workspaceRoot,
+                      })),
+                    ]}
+                  />
+                </div>
+                {destinationKind === "existing" && (
                   <TaskSelect
-                    label={task.threadId ? "Linked chat" : "Link an existing chat"}
-                    ariaLabel={task.threadId ? "Linked chat" : "Link existing chat"}
+                    label="Destination chat"
+                    ariaLabel="Destination chat"
                     value={task.threadId ?? ""}
                     onChange={(value) =>
                       change({ threadId: value ? ThreadId.make(value) : null, chats: associated })
                     }
                     options={[
-                      { value: "", label: "Create a new chat" },
+                      { value: "", label: "Choose a chat" },
                       ...threads
-                        .filter((t) => t.environmentId === device && t.projectId === task.projectId)
-                        .map((t) => ({ value: t.id, label: t.title })),
+                        .filter(
+                          (thread) =>
+                            thread.environmentId === device &&
+                            thread.projectId === project?.id &&
+                            !thread.archivedAt,
+                        )
+                        .map((thread) => ({ value: thread.id, label: thread.title })),
                     ]}
                   />
                 )}
-                {!task.threadId && (
+                {device && !folders.length && (
+                  <p className="text-xs text-muted-foreground">
+                    {task.spaceId
+                      ? "No folders are attached to this Space on this device. Add one using the Space tile's plus, or choose another device."
+                      : "No folders are available here on this device. Add a folder or choose another device."}
+                  </p>
+                )}
+                {task.projectId && !project && folders.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    The previous folder is outside this task's Space. Choose an available folder
+                    before continuing.
+                  </p>
+                )}
+                {project && (
+                  <p className="break-all font-mono text-[11px] text-muted-foreground">
+                    {project.workspaceRoot}
+                  </p>
+                )}
+                {destinationKind === "new" && (
                   <label className="flex items-center gap-2 text-xs">
                     <Checkbox checked={separate} onCheckedChange={setSeparate} />
                     Use a separate worktree
                   </label>
                 )}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!task.title.trim() || !project || !connected}
-                    onClick={() => void run(openChat)}
-                  >
-                    {task.threadId ? "Open chat" : "Save & create new chat"}
-                  </Button>
-                  <span className="text-[11px] text-muted-foreground">
-                    {project
-                      ? "Nothing starts until you send."
-                      : "Choose a folder to prepare a chat."}
-                  </span>
+                <p className="text-xs text-muted-foreground">
+                  Your request{task.brief ? ", prepared context" : ""}
+                  {task.attachments?.length
+                    ? ` and ${task.attachments.length} attachment${task.attachments.length === 1 ? "" : "s"}`
+                    : ""}{" "}
+                  will be placed in the composer. Review and send there.
+                </p>
+                <Button
+                  size="sm"
+                  disabled={
+                    !task.title.trim() ||
+                    !project ||
+                    !connected ||
+                    (destinationKind === "existing" && !task.threadId)
+                  }
+                  onClick={() => void run(openChat)}
+                >
+                  Review in chat
+                </Button>
+              </section>
+            )}
+            {(task.handoffs?.some((handoff) => handoff.sentAt) || associated.length > 0) && (
+              <details
+                className="rounded-lg border border-border/60"
+                open={task.status === "working" || task.status === "done"}
+              >
+                <summary className="cursor-pointer px-3 py-2.5 text-xs font-medium">
+                  Task history
+                </summary>
+                <div className="space-y-2 border-t border-border/50 p-3">
+                  {(task.handoffs ?? [])
+                    .filter((handoff) => handoff.sentAt)
+                    .map((handoff) => (
+                      <div key={handoff.messageId} className="flex items-start gap-2 text-xs">
+                        <MessageSquareIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <button
+                            className="max-w-full truncate text-left font-medium hover:underline"
+                            onClick={() =>
+                              void run(async () => {
+                                const hash = assistantMessageHash(handoff.messageId);
+                                if (
+                                  !(await openInColumns({
+                                    environmentId: handoff.environmentId,
+                                    id: handoff.threadId,
+                                    hash,
+                                  }))
+                                )
+                                  await navigate({
+                                    to: "/$environmentId/$threadId",
+                                    params: handoff,
+                                    hash,
+                                  });
+                                close();
+                              })
+                            }
+                          >
+                            {threads.find(
+                              (thread) =>
+                                thread.environmentId === handoff.environmentId &&
+                                thread.id === handoff.threadId,
+                            )?.title ?? "Open handoff"}
+                          </button>
+                          {handoff.resultMessageId && (
+                            <button
+                              className="ml-2 text-primary hover:underline"
+                              onClick={() =>
+                                void run(async () => {
+                                  const hash = assistantMessageHash(handoff.resultMessageId!);
+                                  if (
+                                    !(await openInColumns({
+                                      environmentId: handoff.environmentId,
+                                      id: handoff.threadId,
+                                      hash,
+                                    }))
+                                  )
+                                    await navigate({
+                                      to: "/$environmentId/$threadId",
+                                      params: handoff,
+                                      hash,
+                                    });
+                                  close();
+                                })
+                              }
+                            >
+                              View result
+                            </button>
+                          )}
+                          <p className="text-[11px] text-muted-foreground">
+                            Sent {new Date(handoff.sentAt!).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  {!task.handoffs?.some((handoff) => handoff.sentAt) && (
+                    <p className="text-xs text-muted-foreground">
+                      A chat was linked earlier. No tracked handoff has been sent.
+                    </p>
+                  )}
+                  {associated
+                    .filter(
+                      (chat) =>
+                        !task.handoffs?.some(
+                          (handoff) =>
+                            handoff.sentAt &&
+                            handoff.threadId === chat.threadId &&
+                            handoff.environmentId === chat.environmentId,
+                        ),
+                    )
+                    .map((chat) => (
+                      <Button
+                        key={`${chat.environmentId}:${chat.threadId}`}
+                        size="xs"
+                        variant="ghost"
+                        onClick={() =>
+                          void run(async () => {
+                            if (
+                              !(await openInColumns({
+                                environmentId: chat.environmentId,
+                                id: chat.threadId,
+                              }))
+                            )
+                              await navigate({ to: "/$environmentId/$threadId", params: chat });
+                            close();
+                          })
+                        }
+                      >
+                        {threads.find(
+                          (thread) =>
+                            thread.environmentId === chat.environmentId &&
+                            thread.id === chat.threadId,
+                        )?.title ?? "Linked chat"}
+                      </Button>
+                    ))}
+                  {task.status === "working" && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => {
+                        setDestinationOpen(true);
+                        setDestinationKind("new");
+                        setNextThreadId(ThreadId.make(randomUUID()));
+                        change({ chats: associated, threadId: null });
+                      }}
+                    >
+                      Continue in another chat
+                    </Button>
+                  )}
+                  {associated
+                    .filter((chat) => chat.result)
+                    .map((chat) => (
+                      <p
+                        key={`result-${chat.environmentId}-${chat.threadId}`}
+                        className="whitespace-pre-wrap text-xs text-muted-foreground"
+                      >
+                        {chat.result}
+                      </p>
+                    ))}
+                  {task.completedAt && (
+                    <p className="text-xs text-muted-foreground">
+                      Completed {new Date(task.completedAt).toLocaleString()}
+                    </p>
+                  )}
                 </div>
+              </details>
+            )}
+            <details className="rounded-lg border border-border/60">
+              <summary className="cursor-pointer px-3 py-2.5 text-xs text-muted-foreground">
+                Reminder and other actions
+              </summary>
+              <div className="space-y-3 border-t border-border/50 p-3">
+                <label className="grid gap-1.5 text-xs text-muted-foreground">
+                  Remind me
+                  <Input
+                    nativeInput
+                    type="datetime-local"
+                    aria-label="Task reminder"
+                    value={
+                      task.remindAt
+                        ? new Date(
+                            Date.parse(task.remindAt) -
+                              new Date(task.remindAt).getTimezoneOffset() * 60000,
+                          )
+                            .toISOString()
+                            .slice(0, 16)
+                        : ""
+                    }
+                    onChange={(event) =>
+                      change({
+                        remindAt: event.target.value
+                          ? new Date(event.target.value).toISOString()
+                          : null,
+                      })
+                    }
+                  />
+                  {task.remindAt && (
+                    <Button size="xs" variant="ghost" onClick={() => change({ remindAt: null })}>
+                      Clear reminder
+                    </Button>
+                  )}
+                  Reminders appear in T3 while it is open, or when you return.
+                </label>
+                {task.status !== "parked" && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() =>
+                      void run(async () => {
+                        await persist(returnWorkItemToPlanned(task, new Date().toISOString()));
+                        setDraft(null);
+                        close();
+                      })
+                    }
+                  >
+                    Return to planned
+                  </Button>
+                )}
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() =>
+                    void run(async () => {
+                      await persist({
+                        ...task,
+                        deletedAt: task.deletedAt ? null : new Date().toISOString(),
+                        preparation: null,
+                      });
+                      setDraft(null);
+                      close();
+                    })
+                  }
+                >
+                  {task.deletedAt ? "Restore task" : "Move to Trash"}
+                </Button>
               </div>
             </details>
-            <div className="w-36">
-              <TaskSelect
-                label="Status"
-                ariaLabel="Task status"
-                value={task.status}
-                onChange={(value) => change({ status: decodeStatus(value) })}
-                options={[
-                  { value: "parked", label: "Parked" },
-                  { value: "ready", label: "Ready" },
-                  { value: "working", label: "Working" },
-                  { value: "done", label: "Done" },
-                ]}
-              />
-            </div>
-            <label className="grid gap-1.5 text-xs text-muted-foreground">
-              Remind me
-              <Input
-                nativeInput
-                type="datetime-local"
-                aria-label="Task reminder"
-                value={
-                  task.remindAt
-                    ? new Date(
-                        Date.parse(task.remindAt) -
-                          new Date(task.remindAt).getTimezoneOffset() * 60000,
-                      )
-                        .toISOString()
-                        .slice(0, 16)
-                    : ""
-                }
-                onChange={(event) =>
-                  change({
-                    remindAt: event.target.value
-                      ? new Date(event.target.value).toISOString()
-                      : null,
-                  })
-                }
-              />
-              {task.remindAt && (
-                <Button size="xs" variant="ghost" onClick={() => change({ remindAt: null })}>
-                  Clear reminder
-                </Button>
-              )}
-              Reminders appear in T3 while it is open, or when you return.
-            </label>
             {!storageConnected && (
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Reconnect the task storage device to save changes. Your draft stays here.
@@ -949,52 +1165,70 @@ function TaskForm({ request }: { request: WorkItemRequest }) {
           >
             Close
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy || !storageConnected}
-            onClick={() =>
-              void run(async () => {
-                const deleted = await persist({
-                  ...task,
-                  deletedAt: task.deletedAt ? null : new Date().toISOString(),
-                  preparation: null,
-                });
-                close();
-                if (deleted.deletedAt)
-                  toastManager.add({
-                    title: "Task moved to Trash",
-                    description: "Linked chats are unchanged.",
-                    actionProps: {
-                      children: "Undo",
-                      onClick: () => {
-                        void save(
-                          storageDevice,
-                          { ...deleted, deletedAt: null, updatedAt: new Date().toISOString() },
-                          deleted,
-                        ).catch((cause) =>
-                          toastManager.add({ type: "error", title: String(cause) }),
-                        );
-                      },
-                    },
-                  });
-              })
-            }
-          >
-            {task.deletedAt ? "Restore task" : "Delete task"}
-          </Button>
-          <Button
-            size="sm"
-            disabled={busy || !task.title.trim() || !storageConnected}
-            onClick={() =>
-              void run(async () => {
-                await persist();
-                close();
-              })
-            }
-          >
-            {busy ? "Saving..." : "Save task"}
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            {!Equal.equals(task, base) && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || !task.title.trim() || !storageConnected}
+                onClick={() =>
+                  void run(async () => {
+                    await persist();
+                    setDraft(null);
+                  })
+                }
+              >
+                Save changes
+              </Button>
+            )}
+            {!task.deletedAt &&
+              (task.status === "working" ? (
+                <Button
+                  size="sm"
+                  disabled={busy || !storageConnected}
+                  onClick={() =>
+                    void run(async () => {
+                      await persist({
+                        ...task,
+                        status: "done",
+                        completedAt: new Date().toISOString(),
+                        preparation: null,
+                        remindAt: null,
+                      });
+                      setDraft(null);
+                      close();
+                    })
+                  }
+                >
+                  Complete task
+                </Button>
+              ) : task.status === "done" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || !storageConnected}
+                  onClick={() =>
+                    void run(async () => {
+                      await persist(returnWorkItemToPlanned(task, new Date().toISOString()));
+                      setDraft(null);
+                      close();
+                    })
+                  }
+                >
+                  Return to planned
+                </Button>
+              ) : (
+                !destinationOpen && (
+                  <Button
+                    size="sm"
+                    disabled={busy || !!task.deletedAt || !storageConnected}
+                    onClick={() => setDestinationOpen(true)}
+                  >
+                    Take this up
+                  </Button>
+                )
+              ))}
+          </div>
         </DialogFooter>
       </DialogPopup>
       {preview && <ExpandedImageDialog preview={preview} onClose={() => setPreview(null)} />}

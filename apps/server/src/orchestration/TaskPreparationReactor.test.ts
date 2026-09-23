@@ -2,6 +2,8 @@ import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
   MessageId,
+  TurnId,
+  CheckpointRef,
   ProjectId,
   ThreadId,
   ProviderInstanceId,
@@ -15,6 +17,10 @@ import * as Stream from "effect/Stream";
 import * as ServerConfig from "../config.ts";
 import { NodeServices } from "@effect/platform-node";
 import * as Layer from "effect/Layer";
+import {
+  ProjectionTurnRepository,
+  type ProjectionTurn,
+} from "../persistence/Services/ProjectionTurns.ts";
 import { make } from "./TaskPreparationReactor.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
@@ -67,8 +73,19 @@ it.effect("defers busy chats, honors cancellation, and dispatches preparation on
     const settings = yield* ServerSettingsService;
     let thread = { ...idle };
     const commands: OrchestrationCommand[] = [];
+    let turnRows: ProjectionTurn[] = [];
     const lookups: ThreadId[] = [];
     const reactor = yield* make.pipe(
+      Effect.provideService(ProjectionTurnRepository, {
+        listByThreadId: () => Effect.succeed(turnRows),
+        upsertByTurnId: () => Effect.die("unused"),
+        replacePendingTurnStart: () => Effect.die("unused"),
+        getPendingTurnStartByThreadId: () => Effect.die("unused"),
+        deletePendingTurnStartByThreadId: () => Effect.die("unused"),
+        getByTurnId: () => Effect.die("unused"),
+        clearCheckpointTurnConflict: () => Effect.die("unused"),
+        deleteByThreadId: () => Effect.die("unused"),
+      }),
       Effect.provideService(ServerEnvironment, {
         getEnvironmentId: Effect.succeed(environmentId),
         getDescriptor: Effect.die("unused"),
@@ -94,7 +111,12 @@ it.effect("defers busy chats, honors cancellation, and dispatches preparation on
         getFullThreadDiffContext: () => Effect.die("unused"),
         getThreadShellById: () => Effect.die("unused"),
         getThreadRuntimeContext: () => Effect.die("unused"),
-        getTurnStartMessage: () => Effect.die("unused"),
+        getTurnStartMessage: ({ messageId }) =>
+          Effect.succeed(
+            Option.fromNullishOr(thread.messages.find((message) => message.id === messageId)).pipe(
+              Option.map((message) => ({ message, hasOtherUserMessages: true })),
+            ),
+          ),
         getThreadDetailSnapshot: () => Effect.die("unused"),
         getThreadDetailById: (id) => {
           lookups.push(id);
@@ -191,6 +213,79 @@ it.effect("defers busy chats, honors cancellation, and dispatches preparation on
     yield* reactor.sweep();
     expect(lookups.at(-1)).toBe("replacement");
     expect(commands.at(-1)).toMatchObject({ type: "thread.turn.start", threadId: "replacement" });
+    const previous = (yield* settings.getSettings).workItems![0]!;
+    const handoff = {
+      environmentId,
+      threadId,
+      messageId: MessageId.make("actual-handoff"),
+      createdAt: now,
+    };
+    yield* settings.updateSettings(
+      { workItems: [{ ...previous, preparation: null, handoffs: [handoff] }] },
+      undefined,
+      undefined,
+      [previous],
+    );
+    thread = idle;
+    yield* reactor.sweep();
+    expect((yield* settings.getSettings).workItems![0]!.status).toBe("parked");
+    const turnId = TurnId.make("handoff-turn");
+    thread = {
+      ...idle,
+      messages: [
+        {
+          id: handoff.messageId,
+          role: "user",
+          text: "Task request",
+          createdAt: now,
+          updatedAt: now,
+          streaming: false,
+          turnId: null,
+          attachments: [],
+        },
+        {
+          id: MessageId.make("answer"),
+          role: "assistant",
+          text: "Result",
+          createdAt: now,
+          updatedAt: now,
+          streaming: false,
+          turnId,
+          attachments: [],
+        },
+      ],
+    };
+    yield* reactor.sweep();
+    expect((yield* settings.getSettings).workItems![0]!).toMatchObject({
+      status: "working",
+      handoffs: [{ sentAt: now }],
+    });
+    expect(
+      (yield* settings.getSettings).workItems![0]!.handoffs![0]!.resultMessageId,
+    ).toBeUndefined();
+    turnRows = [
+      {
+        threadId,
+        turnId,
+        pendingMessageId: handoff.messageId,
+        assistantMessageId: MessageId.make("answer"),
+        state: "completed",
+        requestedAt: now,
+        startedAt: now,
+        completedAt: now,
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.make("refs/test"),
+        checkpointStatus: "ready",
+        checkpointFiles: [],
+        sourceProposedPlanThreadId: null,
+        sourceProposedPlanId: null,
+      },
+    ];
+    yield* reactor.sweep();
+    expect((yield* settings.getSettings).workItems![0]!).toMatchObject({
+      status: "working",
+      handoffs: [{ resultMessageId: "answer" }],
+    });
   }).pipe(
     Effect.provide(
       Layer.merge(

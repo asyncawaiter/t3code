@@ -1,4 +1,5 @@
-import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
+import { workItemStage } from "@t3tools/contracts";
+import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
 import { openWorkItem, type LocatedWorkItem } from "../../workItems";
 import { useWorkflowState } from "../../workflowState";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -276,37 +277,25 @@ export const DashboardCard = memo(function DashboardCard({
                   {task.item.title}
                 </MenuItem>
               ))}
-              <MenuSeparator />
-              <MenuItem
-                onClick={() =>
-                  openWorkItem({
-                    environmentId,
-                    projectId: shell.projectId,
-                    source: { environmentId, threadId },
-                  })
-                }
-              >
-                Create task from this chat
-              </MenuItem>
             </MenuPopup>
           </Menu>
-        ) : (
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() =>
-              openWorkItem({
-                environmentId,
-                projectId: shell.projectId,
-                source: { environmentId, threadId },
-              })
-            }
-          >
-            Create task from this chat
-          </Button>
-        )}
+        ) : null}
+        <Button
+          size="xs"
+          variant="ghost"
+          aria-label="Create task from this chat"
+          onClick={() =>
+            openWorkItem({
+              environmentId,
+              projectId: shell.projectId,
+              source: { environmentId, threadId },
+            })
+          }
+        >
+          New task
+        </Button>
         {tasks.length === 1 && (
-          <span className="capitalize text-muted-foreground">{tasks[0]!.item.status}</span>
+          <span className="capitalize text-muted-foreground">{workItemStage(tasks[0]!.item)}</span>
         )}
       </div>
       <dl className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs">

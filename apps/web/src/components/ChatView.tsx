@@ -1,7 +1,7 @@
 import { useOpenChatInColumns } from "../hooks/useOpenChatInColumns";
 import { useContext } from "react";
 import { ChatPaneContext } from "./chat/ChatPaneContext";
-import { ChatTaskBar } from "./tasks/ChatTaskBar";
+import { useRegisterTaskHandoffs } from "./tasks/taskHandoff";
 import { openWorkItem } from "../workItems";
 import { DashboardReviewBar } from "./dashboard/DashboardReviewBar";
 import { inheritForkPlacement } from "@t3tools/client-runtime/state/profiles";
@@ -1531,6 +1531,7 @@ export default function ChatView(props: ChatViewProps) {
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   });
+  const registerTaskHandoffs = useRegisterTaskHandoffs();
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const createAttachmentAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
@@ -7295,9 +7296,14 @@ export default function ChatView(props: ChatViewProps) {
     const prompts = [promptRef.current, ...messages.map((message) => message.prompt)]
       .map((prompt) => prompt.trim())
       .filter((prompt) => prompt.length > 0);
+    const restoredTaskRefs = [
+      ...(useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.taskRefs ?? []),
+      ...messages.flatMap((message) => message.taskRefs ?? []),
+    ];
     const nextPrompt = prompts.join("\n\n");
     promptRef.current = nextPrompt;
     setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+    useComposerDraftStore.getState().setTaskRefs(composerDraftTarget, restoredTaskRefs);
     // The draft store silently drops attachments over the per-turn cap. Split
     // the overflow back into the queue so nothing is lost; the user can send
     // the first batch and the rest follows as a queued message.
@@ -7455,6 +7461,11 @@ export default function ChatView(props: ChatViewProps) {
       notifyDirectAnnotationAttached();
       return;
     }
+    const taskRefsForSend = directAnnotation
+      ? []
+      : queuedMessage
+        ? (queuedMessage.taskRefs ?? [])
+        : (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.taskRefs ?? []);
     const multipleModelSelections = queuedMessage ? null : sendCtx.multipleModelSelections;
     if (
       multipleModelSelections !== null &&
@@ -7731,6 +7742,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       useQueuedMessageStore.getState().enqueue(activeThreadKey, {
         prompt: promptForSend,
+        taskRefs: taskRefsForSend,
         images: [...composerImages],
         files: [...composerFiles],
         terminalContexts: [...composerTerminalContexts],
@@ -8055,15 +8067,30 @@ export default function ChatView(props: ChatViewProps) {
             clearedDraftSnapshot &&
           multipleModelSelectionsRef.current === submittedSelections;
         setThreadError(threadIdForSend, null);
+        const targetsForSend = multipleTargets.map((target) => ({
+          ...target,
+          threadId: newThreadId(),
+          messageId: newMessageId(),
+        }));
+        if (taskRefsForSend.length)
+          await registerTaskHandoffs(
+            taskRefsForSend,
+            targetsForSend.map((target) => ({
+              environmentId,
+              threadId: target.threadId,
+              messageId: target.messageId,
+              createdAt: messageCreatedAt,
+            })),
+          );
         const starts = Promise.all(
-          multipleTargets.map(async (target) => {
+          targetsForSend.map(async (target) => {
             const retryKey = JSON.stringify([
               routeThreadKey,
               target.selection.instanceId,
               target.selection.model,
             ]);
             const uncertainThreadId = uncertainMultipleSubmissionsRef.current.get(retryKey);
-            const targetThreadId = uncertainThreadId ?? newThreadId();
+            const targetThreadId = uncertainThreadId ?? target.threadId;
             let requestMayHaveStarted = false;
             try {
               if (uncertainThreadId) {
@@ -8080,7 +8107,7 @@ export default function ChatView(props: ChatViewProps) {
                 input: {
                   threadId: targetThreadId,
                   message: {
-                    messageId: newMessageId(),
+                    messageId: target.messageId,
                     role: "user",
                     text:
                       context && !supportsInlineMessageContext
@@ -8126,6 +8153,19 @@ export default function ChatView(props: ChatViewProps) {
                 }
                 throw error;
               }
+              if (taskRefsForSend.length)
+                void registerTaskHandoffs(
+                  taskRefsForSend,
+                  [
+                    {
+                      environmentId,
+                      threadId: targetThreadId,
+                      messageId: target.messageId,
+                      createdAt: messageCreatedAt,
+                    },
+                  ],
+                  true,
+                ).catch(() => {});
               await saveChildThreadPlacement(targetThreadId);
               startedCount += 1;
             } catch (error) {
@@ -8212,6 +8252,7 @@ export default function ChatView(props: ChatViewProps) {
           setMultipleModelSelections(failedSelections);
           if (clearedDraft) {
             setComposerDraftPrompt(composerDraftTarget, messageTextForSend);
+            useComposerDraftStore.getState().setTaskRefs(composerDraftTarget, taskRefsForSend);
             addComposerDraftImages(
               composerDraftTarget,
               composerImagesSnapshot.map(cloneComposerImageForRetry),
@@ -8427,6 +8468,19 @@ export default function ChatView(props: ChatViewProps) {
       failure = turnAttachmentsResult;
     }
 
+    if (failure === null && taskRefsForSend.length) {
+      const handoffResult = await settlePromise(() =>
+        registerTaskHandoffs(taskRefsForSend, [
+          {
+            environmentId,
+            threadId: threadIdForSend,
+            messageId: messageIdForSend,
+            createdAt: messageCreatedAt,
+          },
+        ]),
+      );
+      if (handoffResult._tag === "Failure") failure = handoffResult;
+    }
     let turnStartSucceeded = false;
     let backgroundDraftOpened = false;
     if (failure === null && turnAttachmentsResult._tag === "Success") {
@@ -8540,6 +8594,21 @@ export default function ChatView(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (taskRefsForSend.length) {
+          // The saved message identity also lets the coordinator retry after a disconnect.
+          void registerTaskHandoffs(
+            taskRefsForSend,
+            [
+              {
+                environmentId,
+                threadId: threadIdForSend,
+                messageId: messageIdForSend,
+                createdAt: messageCreatedAt,
+              },
+            ],
+            true,
+          ).catch(() => {});
+        }
         // The turn is under way and will spend quota, so that thread's limits
         // snapshot is stale. Uploads may have outlasted a navigation, so only
         // the sending thread's panel clears.
@@ -8632,6 +8701,7 @@ export default function ChatView(props: ChatViewProps) {
         composerFilesRef.current = composerFilesSnapshot;
         composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
         setComposerDraftPrompt(composerDraftTarget, messageTextForSend);
+        useComposerDraftStore.getState().setTaskRefs(composerDraftTarget, taskRefsForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         addComposerDraftFiles(composerDraftTarget, composerFilesSnapshot);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
@@ -9996,7 +10066,7 @@ export default function ChatView(props: ChatViewProps) {
                   <button
                     type="button"
                     aria-label="Create task from this chat"
-                    className="shrink-0 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                    className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
                     onClick={async () => {
                       try {
                         const selected = window.getSelection()?.toString();
@@ -10052,13 +10122,11 @@ export default function ChatView(props: ChatViewProps) {
                 }
               >
                 <ListPlusIcon className="size-4" />
+                {!reserveTitleBarControlInset && <span>New task</span>}
               </TooltipTrigger>
               <TooltipPopup>Create task from this chat</TooltipPopup>
             </Tooltip>
           }
-          {serverThread && !reserveTitleBarControlInset ? (
-            <DashboardReviewBar thread={serverThread} compact />
-          ) : null}
           <ChatHeader
             compact={!reserveTitleBarControlInset}
             {...(!supportsPullRequests || activeProjectRepository === null
@@ -10090,7 +10158,6 @@ export default function ChatView(props: ChatViewProps) {
           />
         </WorkspacePageHeader>
 
-        <ChatTaskBar environmentId={environmentId} threadId={threadId} />
         {serverThread && reserveTitleBarControlInset ? (
           <DashboardReviewBar thread={serverThread} />
         ) : null}

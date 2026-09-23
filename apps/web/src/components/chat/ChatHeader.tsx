@@ -13,7 +13,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { BookmarkIcon, ChevronDownIcon, EllipsisIcon, MessageSquareIcon } from "lucide-react";
+import { BookmarkIcon, ChevronDownIcon, EllipsisIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -366,6 +366,14 @@ export const ChatHeader = memo(function ChatHeader({
   );
   const headerActions = (
     <>
+      {compact && isServerThread && (
+        <MenuItem
+          onClick={() => toggleChatBookmark(`${activeThreadEnvironmentId}:${activeThreadId}`)}
+        >
+          <BookmarkIcon className={isBookmarked ? "fill-current text-amber-600" : undefined} />
+          {bookmarkLabel}
+        </MenuItem>
+      )}
       {compact && activeProject && (
         <MenuItem
           onClick={() => {
@@ -534,7 +542,7 @@ export const ChatHeader = memo(function ChatHeader({
               >
                 <h2 className="min-w-0">
                   {compact ? (
-                    <MessageSquareIcon className="size-4" />
+                    <span className="text-xs font-medium">Chat</span>
                   ) : (
                     <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
                   )}
@@ -542,7 +550,11 @@ export const ChatHeader = memo(function ChatHeader({
                 <ChevronDownIcon
                   aria-hidden
                   data-thread-title-chevron
-                  className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/thread-title:opacity-100 group-focus-visible/thread-title:opacity-100"
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground",
+                    !compact &&
+                      "opacity-0 transition-opacity group-hover/thread-title:opacity-100 group-focus-visible/thread-title:opacity-100",
+                  )}
                 />
               </TooltipTrigger>
               <TooltipPopup side="top">{compact ? "Chat actions" : activeThreadTitle}</TooltipPopup>
@@ -559,7 +571,7 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      {isServerThread ? (
+      {isServerThread && !compact ? (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -611,9 +623,22 @@ export const ChatHeader = memo(function ChatHeader({
                 ? undefined
                 : "hidden"
             }
-            render={<Button size="icon-sm" variant="ghost" aria-label="More header actions" />}
+            render={
+              <Button
+                size={compact ? "xs" : "icon-sm"}
+                variant="ghost"
+                aria-label={compact ? "Chat tools" : "More header actions"}
+              />
+            }
           >
-            <EllipsisIcon className="size-4" />
+            {compact ? (
+              <>
+                Tools
+                <ChevronDownIcon className="size-3" />
+              </>
+            ) : (
+              <EllipsisIcon className="size-4" />
+            )}
           </MenuTrigger>
           <div ref={mountInlineActions} className="contents" />
           <MenuPopup

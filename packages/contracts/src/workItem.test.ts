@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, ThreadId } from "./baseSchemas.ts";
+import { EnvironmentId, ThreadId, MessageId } from "./baseSchemas.ts";
 import * as Schema from "effect/Schema";
 import {
   WorkItem,
@@ -8,6 +8,10 @@ import {
   workItemChats,
   workItemPreparationThread,
   workItemTitle,
+  recordWorkItemHandoff,
+  confirmWorkItemHandoff,
+  returnWorkItemToPlanned,
+  workItemStage,
 } from "./workItem.ts";
 const decodeTask = Schema.decodeUnknownSync(WorkItem);
 const task = (id: string): WorkItem => ({
@@ -91,4 +95,33 @@ it("keeps execution independent from storage and allows a replacement preparatio
   expect(workItemPreparationThread({ ...item, preparationThreadId: null })).toBeNull();
   expect(workItemTitle("\n  Fix opening hours\nOriginal Slack message")).toBe("Fix opening hours");
   expect(workItemTitle("", 1)).toBe("Screenshot or file to review");
+});
+
+it("tracks accepted handoffs without treating chat links or turn completion as task completion", () => {
+  const handoff = {
+    environmentId: EnvironmentId.make("remote"),
+    threadId: ThreadId.make("worker"),
+    messageId: MessageId.make("send-1"),
+    createdAt: "2026-09-22T12:00:00.000Z",
+  };
+  const pending = recordWorkItemHandoff(task("handoff"), handoff);
+  expect(workItemStage(pending)).toBe("Planned");
+  expect(recordWorkItemHandoff(pending, handoff)).toBe(pending);
+  const accepted = confirmWorkItemHandoff(pending, handoff, handoff.createdAt);
+  expect(workItemStage(accepted)).toBe("In chat");
+  expect(accepted.handoffs?.[0]?.sentAt).toBe(handoff.createdAt);
+  expect(confirmWorkItemHandoff(accepted, handoff, handoff.createdAt)).toBe(accepted);
+  const cancelled = returnWorkItemToPlanned(pending, "2026-09-22T12:01:00.000Z");
+  expect(confirmWorkItemHandoff(cancelled, handoff, handoff.createdAt)).toBe(cancelled);
+  expect(returnWorkItemToPlanned(accepted, "2026-09-22T12:02:00.000Z").handoffs?.[0]?.sentAt).toBe(
+    handoff.createdAt,
+  );
+  expect(
+    confirmWorkItemHandoff({ ...pending, status: "done" }, handoff, handoff.createdAt).status,
+  ).toBe("done");
+  expect(() =>
+    recordWorkItemHandoff({ ...pending, deletedAt: handoff.createdAt }, handoff),
+  ).toThrow("Reopen");
+  const stale = { ...pending, handoffs: undefined };
+  expect(() => mergeWorkItems([pending], [stale], [{ ...stale, title: "Old client" }])).toThrow();
 });

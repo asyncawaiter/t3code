@@ -2,7 +2,24 @@ import { ChatAttachment, PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "./orchestrat
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { EnvironmentId, ThreadId, ProjectId } from "./baseSchemas.ts";
+import { EnvironmentId, ThreadId, ProjectId, MessageId } from "./baseSchemas.ts";
+
+export const TaskDraftRef = Schema.Struct({
+  environmentId: EnvironmentId,
+  taskId: TrimmedNonEmptyString,
+});
+export type TaskDraftRef = typeof TaskDraftRef.Type;
+
+export const WorkItemHandoff = Schema.Struct({
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  createdAt: IsoDateTime,
+  sentAt: Schema.optionalKey(IsoDateTime),
+  resultMessageId: Schema.optionalKey(MessageId),
+  cancelledAt: Schema.optionalKey(IsoDateTime),
+});
+export type WorkItemHandoff = typeof WorkItemHandoff.Type;
 
 export const WorkItem = Schema.Struct({
   id: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
@@ -35,6 +52,8 @@ export const WorkItem = Schema.Struct({
       }),
     ).check(Schema.isMaxLength(50)),
   ),
+  handoffs: Schema.optionalKey(Schema.Array(WorkItemHandoff).check(Schema.isMaxLength(100))),
+  completedAt: Schema.optionalKey(Schema.NullOr(IsoDateTime)),
   preparationThreadId: Schema.optionalKey(Schema.NullOr(ThreadId)),
   preparation: Schema.optional(
     Schema.NullOr(
@@ -77,6 +96,8 @@ export function mergeWorkItems(
       throw new Error("This task is in Trash. Reopen it before restoring.");
     if (existing?.chats && previous?.chats === undefined)
       throw new Error("Update this client before editing tasks with multiple chats.");
+    if (existing?.handoffs && previous?.handoffs === undefined)
+      throw new Error("Update this client before editing tasks with handoff history.");
     live.set(id, next);
   }
   const result = [...live.values()];
@@ -129,4 +150,72 @@ export function workItemPrompt(item: WorkItem) {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/** A linked chat is only a destination. Only an accepted handoff moves work out of Planned. */
+export function workItemStage(item: WorkItem) {
+  return item.status === "done" ? "Completed" : item.status === "working" ? "In chat" : "Planned";
+}
+
+export function recordWorkItemHandoff(item: WorkItem, handoff: WorkItemHandoff): WorkItem {
+  if (item.deletedAt || item.status === "done")
+    throw new Error("Reopen this task before sending it.");
+  if (
+    item.handoffs?.some(
+      (entry) =>
+        entry.messageId === handoff.messageId && entry.environmentId === handoff.environmentId,
+    )
+  )
+    return item;
+  if ((item.handoffs?.length ?? 0) >= 100)
+    throw new Error("This task has reached its handoff history limit.");
+  return {
+    ...item,
+    chats: item.chats?.some(
+      (chat) => chat.environmentId === handoff.environmentId && chat.threadId === handoff.threadId,
+    )
+      ? item.chats
+      : [
+          ...(item.chats ?? []),
+          { environmentId: handoff.environmentId, threadId: handoff.threadId, purpose: "Work" },
+        ],
+    handoffs: [...(item.handoffs ?? []), handoff],
+    updatedAt: item.updatedAt > handoff.createdAt ? item.updatedAt : handoff.createdAt,
+  };
+}
+
+export function confirmWorkItemHandoff(
+  item: WorkItem,
+  handoff: WorkItemHandoff,
+  sentAt: string,
+): WorkItem {
+  const current = item.handoffs?.find(
+    (entry) =>
+      entry.messageId === handoff.messageId && entry.environmentId === handoff.environmentId,
+  );
+  if (item.deletedAt || !current || current.sentAt || current.cancelledAt) return item;
+  return {
+    ...item,
+    status: item.status === "done" ? "done" : "working",
+    remindAt: null,
+    handoffs: (item.handoffs ?? []).map((entry) =>
+      entry.messageId === handoff.messageId && entry.environmentId === handoff.environmentId
+        ? { ...entry, sentAt }
+        : entry,
+    ),
+    updatedAt: item.updatedAt > sentAt ? item.updatedAt : sentAt,
+  };
+}
+
+export function returnWorkItemToPlanned(item: WorkItem, now: string): WorkItem {
+  return {
+    ...item,
+    status: "parked",
+    completedAt: null,
+    preparation: null,
+    handoffs: (item.handoffs ?? []).map((entry) =>
+      entry.sentAt ? entry : { ...entry, cancelledAt: now },
+    ),
+    updatedAt: now,
+  };
 }

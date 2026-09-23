@@ -3427,3 +3427,30 @@ describe("composerDraftStore attachment references", () => {
     );
   });
 });
+
+describe("task handoff drafts", () => {
+  beforeEach(resetComposerDraftStore);
+  afterEach(resetComposerDraftStore);
+  it("retains the task identity through editing and reload, then clears it with the draft", async () => {
+    await useComposerDraftStore.persist.clearStorage();
+    vi.useFakeTimers();
+    try {
+      const threadId = ThreadId.make("task-draft");
+      const target = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+      const refs = [{ environmentId: EnvironmentId.make("task-storage"), taskId: "captured-task" }];
+      useComposerDraftStore.getState().setPrompt(target, "Original request");
+      useComposerDraftStore.getState().setTaskRefs(target, refs);
+      useComposerDraftStore.getState().setPrompt(target, "Edited request");
+      await vi.advanceTimersByTimeAsync(300);
+      resetComposerDraftStore();
+      await useComposerDraftStore.persist.rehydrate();
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.taskRefs).toEqual(refs);
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("Edited request");
+      useComposerDraftStore.getState().clearComposerContent(target);
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.taskRefs ?? []).toEqual([]);
+    } finally {
+      await useComposerDraftStore.persist.clearStorage();
+      vi.useRealTimers();
+    }
+  });
+});
