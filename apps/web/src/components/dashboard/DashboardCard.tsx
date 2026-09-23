@@ -9,7 +9,7 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import type { EnvironmentMachineKind } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { GitBranchIcon, MonitorIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, GitBranchIcon, MonitorIcon } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 
 import { DASHBOARD_REASON_LABELS, isEscalated } from "@t3tools/client-runtime/state/dashboard";
@@ -59,6 +59,7 @@ const NO_TASKS: LocatedWorkItem[] = [];
 
 export const DashboardCard = memo(function DashboardCard({
   entry,
+  detailed = false,
   tasks = NO_TASKS,
   onOpen,
   opening = false,
@@ -72,6 +73,7 @@ export const DashboardCard = memo(function DashboardCard({
   deviceLabel,
   connected,
 }: {
+  detailed?: boolean;
   tasks?: LocatedWorkItem[] | undefined;
   onOpen: () => void;
   opening?: boolean;
@@ -86,6 +88,8 @@ export const DashboardCard = memo(function DashboardCard({
   readonly deviceLabel: string;
   readonly connected: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const showDetails = detailed || expanded;
   const navigate = useNavigate();
   const reviewed = useWorkflowState((s) => s.reviewed);
   const kept = useWorkflowState((s) => s.kept);
@@ -131,7 +135,12 @@ export const DashboardCard = memo(function DashboardCard({
     actions = <span className="text-xs text-muted-foreground">Archived</span>;
   } else if (!connected) {
     actions = (
-      <span className="text-xs text-muted-foreground">Offline, showing last known state</span>
+      <Tooltip>
+        <TooltipTrigger render={<span tabIndex={0} className="text-xs text-muted-foreground" />}>
+          Offline
+        </TooltipTrigger>
+        <TooltipPopup>Offline, showing last known state</TooltipPopup>
+      </Tooltip>
     );
   } else if (entry.reason === "pending-approval") {
     actions = (
@@ -190,7 +199,7 @@ export const DashboardCard = memo(function DashboardCard({
         }
       }}
       className={cn(
-        "group flex min-w-0 cursor-pointer flex-col gap-2.5 rounded-lg border border-border/70 bg-card p-3 text-xs outline-none hover:border-foreground/25 hover:bg-[color-mix(in_srgb,var(--sidebar-row-active)_18%,var(--card))] focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative flex min-w-0 cursor-pointer flex-col gap-1.5 rounded-lg border border-border/70 bg-card p-2.5 text-xs outline-none hover:border-foreground/25 hover:bg-[color-mix(in_srgb,var(--sidebar-row-active)_18%,var(--card))] focus-visible:ring-2 focus-visible:ring-ring",
         escalated && "ring-1 ring-amber-500/60 dark:ring-amber-400/50",
       )}
     >
@@ -203,9 +212,27 @@ export const DashboardCard = memo(function DashboardCard({
         {unread ? (
           <span aria-label="Unread" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
         ) : null}
-        <div className="line-clamp-2 min-w-0 text-sm font-medium leading-5 text-foreground">
+        <div className="line-clamp-2 min-w-0 flex-1 text-[13px] font-medium leading-[18px] text-foreground">
           {shell.title}
         </div>
+        {!detailed && (
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label={expanded ? "Collapse chat details" : "Expand chat details"}
+            aria-expanded={expanded}
+            onClick={(event) => {
+              event.stopPropagation();
+              setExpanded(!expanded);
+            }}
+          >
+            {expanded ? (
+              <ChevronUpIcon className="size-3.5" />
+            ) : (
+              <ChevronDownIcon className="size-3.5" />
+            )}
+          </Button>
+        )}
       </div>
       <div className="flex min-w-0 flex-col gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
@@ -262,7 +289,14 @@ export const DashboardCard = memo(function DashboardCard({
           ) : null}
         </div>
       </div>
-      <div className="flex items-center gap-2 text-xs" onClick={(event) => event.stopPropagation()}>
+      <div
+        className={cn(
+          "flex items-center gap-2 text-xs",
+          !showDetails &&
+            "absolute inset-x-1 bottom-1 z-10 rounded-md border border-border/60 bg-card px-1 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto [@media(hover:none)]:static [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
+        )}
+        onClick={(event) => event.stopPropagation()}
+      >
         {tasks.length ? (
           <Menu>
             <MenuTrigger render={<Button size="xs" variant="ghost" />}>
@@ -298,99 +332,144 @@ export const DashboardCard = memo(function DashboardCard({
           <span className="capitalize text-muted-foreground">{workItemStage(tasks[0]!.item)}</span>
         )}
       </div>
-      <dl className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs">
-        <dt className="text-[11px] text-muted-foreground">Space</dt>
-        <dd className="min-w-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={<span tabIndex={0} className="block truncate text-foreground/85" />}
-            >
-              {spaceName ?? "Unsorted"}
-            </TooltipTrigger>
-            <TooltipPopup>Space: {spaceName ?? "Unsorted"}</TooltipPopup>
-          </Tooltip>
-        </dd>
-        <dt className="text-[11px] text-muted-foreground">Project</dt>
-        <dd className="flex min-w-0 items-center gap-1.5 text-foreground/85">
-          <ProjectFavicon project={project} className="size-3.5 shrink-0" />
+      {showDetails ? (
+        <>
+          <dl className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs">
+            <dt className="text-[11px] text-muted-foreground">Space</dt>
+            <dd className="min-w-0">
+              <Tooltip>
+                <TooltipTrigger
+                  render={<span tabIndex={0} className="block truncate text-foreground/85" />}
+                >
+                  {spaceName ?? "Unsorted"}
+                </TooltipTrigger>
+                <TooltipPopup>Space: {spaceName ?? "Unsorted"}</TooltipPopup>
+              </Tooltip>
+            </dd>
+            <dt className="text-[11px] text-muted-foreground">Project</dt>
+            <dd className="flex min-w-0 items-center gap-1.5 text-foreground/85">
+              <ProjectFavicon project={project} className="size-3.5 shrink-0" />
+              <Tooltip>
+                <TooltipTrigger render={<span tabIndex={0} className="min-w-0 flex-1 truncate" />}>
+                  {project.title}
+                </TooltipTrigger>
+                <TooltipPopup>{project.title}</TooltipPopup>
+              </Tooltip>
+              {shell.branch ? (
+                <span className="flex min-w-0 max-w-[45%] items-center gap-1 text-[11px] text-muted-foreground">
+                  <GitBranchIcon className="size-3 shrink-0" />
+                  <span className="truncate">{shell.branch}</span>
+                </span>
+              ) : null}
+            </dd>
+            <dt className="text-[11px] text-muted-foreground">Path</dt>
+            <dd className="min-w-0">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      tabIndex={0}
+                      className="block truncate text-[11px] text-muted-foreground"
+                    />
+                  }
+                >
+                  {shell.worktreePath ?? project.workspaceRoot}
+                </TooltipTrigger>
+                <TooltipPopup className="break-all">
+                  {shell.worktreePath ?? project.workspaceRoot}
+                </TooltipPopup>
+              </Tooltip>
+            </dd>
+          </dl>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border/50 pt-2 text-xs text-muted-foreground">
+            <Tooltip>
+              <TooltipTrigger
+                render={<span tabIndex={0} className="flex min-w-0 flex-1 items-center gap-1.5" />}
+              >
+                {showMachineIcon && machineKind ? (
+                  <EnvironmentMachineIcon kind={machineKind} className="size-3.5 shrink-0" />
+                ) : (
+                  <MonitorIcon className="size-3.5 shrink-0" />
+                )}
+                <span className="truncate">{deviceLabel}</span>
+                {!connected ? (
+                  <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground" />
+                ) : null}
+              </TooltipTrigger>
+              <TooltipPopup>
+                {deviceLabel}
+                {!connected ? " · Offline, showing last known state" : ""}
+              </TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    tabIndex={0}
+                    className="ml-auto flex min-w-0 flex-1 justify-end items-center gap-1.5"
+                  />
+                }
+              >
+                {providerEntry ? (
+                  <ProviderInstanceIcon
+                    driverKind={providerEntry.driverKind}
+                    displayName={providerEntry.displayName}
+                    iconClassName="size-3.5 shrink-0"
+                  />
+                ) : null}
+                <span className="truncate">
+                  {providerEntry?.displayName ?? shell.modelSelection.model}
+                </span>
+              </TooltipTrigger>
+              <TooltipPopup>
+                <div>
+                  {providerEntry?.displayName ?? shell.modelSelection.instanceId} ·{" "}
+                  {shell.modelSelection.model}
+                </div>
+                <div>{providerEntry?.snapshot.auth.email ?? "Account details unavailable"}</div>
+              </TooltipPopup>
+            </Tooltip>
+          </div>
+        </>
+      ) : (
+        <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+          <ProjectFavicon project={project} className="size-3 shrink-0" />
           <Tooltip>
             <TooltipTrigger render={<span tabIndex={0} className="min-w-0 flex-1 truncate" />}>
-              {project.title}
+              {spaceName ?? "Unsorted"}
+              {project.title && project.title !== spaceName ? ` / ${project.title}` : ""}
             </TooltipTrigger>
-            <TooltipPopup>{project.title}</TooltipPopup>
-          </Tooltip>
-          {shell.branch ? (
-            <span className="flex min-w-0 max-w-[45%] items-center gap-1 text-[11px] text-muted-foreground">
-              <GitBranchIcon className="size-3 shrink-0" />
-              <span className="truncate">{shell.branch}</span>
-            </span>
-          ) : null}
-        </dd>
-        <dt className="text-[11px] text-muted-foreground">Path</dt>
-        <dd className="min-w-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span tabIndex={0} className="block truncate text-[11px] text-muted-foreground" />
-              }
-            >
-              {shell.worktreePath ?? project.workspaceRoot}
-            </TooltipTrigger>
-            <TooltipPopup className="break-all">
-              {shell.worktreePath ?? project.workspaceRoot}
+            <TooltipPopup>
+              <div>
+                {spaceName ?? "Unsorted"} / {project.title}
+              </div>
+              <div>{deviceLabel}</div>
+              <div className="break-all">{shell.worktreePath ?? project.workspaceRoot}</div>
             </TooltipPopup>
           </Tooltip>
-        </dd>
-      </dl>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border/50 pt-2 text-xs text-muted-foreground">
-        <Tooltip>
-          <TooltipTrigger
-            render={<span tabIndex={0} className="flex min-w-0 flex-1 items-center gap-1.5" />}
-          >
-            {showMachineIcon && machineKind ? (
-              <EnvironmentMachineIcon kind={machineKind} className="size-3.5 shrink-0" />
-            ) : (
-              <MonitorIcon className="size-3.5 shrink-0" />
-            )}
-            <span className="truncate">{deviceLabel}</span>
-            {!connected ? (
-              <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground" />
-            ) : null}
-          </TooltipTrigger>
-          <TooltipPopup>
-            {deviceLabel}
-            {!connected ? " · Offline, showing last known state" : ""}
-          </TooltipPopup>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                tabIndex={0}
-                className="ml-auto flex min-w-0 flex-1 justify-end items-center gap-1.5"
-              />
-            }
-          >
-            {providerEntry ? (
-              <ProviderInstanceIcon
-                driverKind={providerEntry.driverKind}
-                displayName={providerEntry.displayName}
-                iconClassName="size-3.5 shrink-0"
-              />
-            ) : null}
-            <span className="truncate">
-              {providerEntry?.displayName ?? shell.modelSelection.model}
-            </span>
-          </TooltipTrigger>
-          <TooltipPopup>
-            <div>
-              {providerEntry?.displayName ?? shell.modelSelection.instanceId} ·{" "}
-              {shell.modelSelection.model}
-            </div>
-            <div>{providerEntry?.snapshot.auth.email ?? "Account details unavailable"}</div>
-          </TooltipPopup>
-        </Tooltip>
-      </div>
+          {providerEntry && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    tabIndex={0}
+                    aria-label={`${providerEntry.displayName} on ${deviceLabel}`}
+                  />
+                }
+              >
+                <ProviderInstanceIcon
+                  driverKind={providerEntry.driverKind}
+                  displayName={providerEntry.displayName}
+                  iconClassName="size-3.5 shrink-0"
+                />
+              </TooltipTrigger>
+              <TooltipPopup>
+                {providerEntry.displayName} / {deviceLabel}
+              </TooltipPopup>
+            </Tooltip>
+          )}
+        </div>
+      )}
     </div>
   );
 });

@@ -51,9 +51,7 @@ export function dashboardProjectKey(environmentId: EnvironmentId, projectId: Pro
 }
 
 /**
- * Flattens lanes in priority order. Each lane keeps buildDashboard's own
- * sort (needs-you longest-wait-first, the rest most-recent-first), so the
- * result is already "lane priority then since" ordered.
+ * Flattens lanes in priority order, preserving each lane's display order.
  */
 export function flattenBoardEntries(board: DashboardBoard): ReadonlyArray<DashboardBoardEntry> {
   return DASHBOARD_LANE_ORDER.flatMap((lane) => board.lanes[lane]);
@@ -279,11 +277,23 @@ export function buildReviewDashboard(
     lanes[entry.lane].push(entry);
   }
   for (const lane of DASHBOARD_LANE_ORDER) {
-    lanes[lane].sort((a, b) =>
-      lane === "needs-you"
-        ? Date.parse(a.since) - Date.parse(b.since)
-        : Date.parse(b.since) - Date.parse(a.since),
-    );
+    lanes[lane].sort((a, b) => {
+      if (lane === "running" || lane === "monitoring") {
+        // Streaming updates and reconnects must not shuffle agents being monitored.
+        return (
+          a.shell.createdAt.localeCompare(b.shell.createdAt) ||
+          scopedThreadKey(scopeThreadRef(a.shell.environmentId, a.shell.id)).localeCompare(
+            scopedThreadKey(scopeThreadRef(b.shell.environmentId, b.shell.id)),
+          )
+        );
+      }
+      if (lane === "needs-you") {
+        const attention = (entry: DashboardBoardEntry) =>
+          entry.reason === "pending-approval" || entry.reason === "awaiting-input" ? 0 : 1;
+        return attention(a) - attention(b) || Date.parse(a.since) - Date.parse(b.since);
+      }
+      return Date.parse(b.since) - Date.parse(a.since);
+    });
   }
   return {
     lanes,

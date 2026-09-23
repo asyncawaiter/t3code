@@ -1,10 +1,25 @@
+import { useState, useRef, useLayoutEffect } from "react";
+import { TaskForm } from "./WorkItemDialog";
+import { QuickTaskCapture } from "./QuickTaskCapture";
+import { usePrimarySettings } from "../../hooks/useSettings";
+import { ProfileDot } from "../sidebar/ProfileStrip";
+import { filterTaskShelfItems, groupTasksBySpace } from "./TaskShelf.logic";
+import * as Schema from "effect/Schema";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { workItemChats, workItemStage } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { useSaveWorkItem } from "../../workItems";
 import { toastManager } from "../ui/toast";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
-import { ClipboardListIcon, MoreHorizontalIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  XIcon,
+  ChevronRightIcon,
+  ClipboardListIcon,
+  MoreHorizontalIcon,
+} from "lucide-react";
 import { useWorkItems, openWorkItem, type LocatedWorkItem } from "../../workItems";
 import { useEnvironments } from "../../state/environments";
 
@@ -15,6 +30,7 @@ export function TaskShelf({
   environmentId,
   projectKey,
   search = "",
+  query = "",
 }: {
   section?: "planned" | "history";
   profileId?: string | null;
@@ -22,104 +38,130 @@ export function TaskShelf({
   environmentId?: string | null;
   projectKey?: string;
   search?: string;
+  query?: string;
 }) {
+  const [collapsed, setCollapsed] = useLocalStorage(
+    "t3.dashboard.plannedCollapsed",
+    false,
+    Schema.Boolean,
+  );
+  const [selectedSpace, setSelectedSpace] = useState<string | null>(null);
+  const [editorBusy, setEditorBusy] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const strip = useRef<HTMLDivElement>(null);
+  const expandedCard = useRef<HTMLElement>(null);
+  const [overflow, setOverflow] = useState(false);
+  const taskKey = (task: LocatedWorkItem) => `${task.environmentId}:${task.item.id}`;
+  const showTask = (task: LocatedWorkItem) =>
+    section === "history" ? openWorkItem(task) : setExpanded(taskKey(task));
   const tasks = useWorkItems();
   const now = Date.parse(useNowMinute());
   const save = useSaveWorkItem();
   const { environments } = useEnvironments();
-  const eligible = tasks.filter(
-    ({ environmentId: device, item }) =>
-      (!profileId || profileId === "all" || item.profileId === profileId) &&
-      (spaceId === undefined || item.spaceId === spaceId) &&
-      (!environmentId || (item.executionEnvironmentId ?? device) === environmentId) &&
-      (!projectKey ||
-        projectKey === "all" ||
-        `${item.executionEnvironmentId ?? device}:${item.projectId}` === projectKey) &&
-      `${item.title} ${item.notes} ${item.brief}`.toLowerCase().includes(search.toLowerCase()),
-  );
-  const render = (task: LocatedWorkItem) => (
-    <div
-      key={`${task.environmentId}:${task.item.id}`}
-      className="flex min-w-0 flex-col gap-1 rounded-lg border border-border/70 bg-card p-3 text-left hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <div className="flex items-start gap-2">
-        <button
-          type="button"
-          onClick={() => openWorkItem(task)}
-          className="line-clamp-2 min-w-0 flex-1 text-left text-sm font-medium hover:underline"
-        >
-          {task.item.title}
-        </button>
-        {!task.localCaptureId && (
-          <Menu>
-            <MenuTrigger
-              render={<Button size="icon-xs" variant="ghost" aria-label="Task actions" />}
-            >
-              <MoreHorizontalIcon />
-            </MenuTrigger>
-            <MenuPopup align="end">
-              <MenuItem onClick={() => openWorkItem(task)}>Task details</MenuItem>
-              {!task.item.deletedAt && (
-                <MenuItem
-                  onClick={() => {
-                    void save(
-                      task.environmentId,
-                      {
-                        ...task.item,
-                        priority: Math.min(0, ...tasks.map(({ item }) => item.priority ?? 0)) - 1,
-                        updatedAt: new Date().toISOString(),
-                      },
-                      task.item,
-                    ).catch((cause) => toastManager.add({ type: "error", title: String(cause) }));
-                  }}
-                >
-                  Move to top
-                </MenuItem>
-              )}
+  const profiles = usePrimarySettings((settings) => settings.profiles);
+  const eligible = filterTaskShelfItems(tasks, {
+    profileId,
+    spaceId,
+    environmentId,
+    projectKey,
+    search,
+    query,
+  });
+  const renderActions = (task: LocatedWorkItem) => (
+    <>
+      {!task.localCaptureId && (
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                disabled={editorBusy}
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Task actions"
+              />
+            }
+          >
+            <MoreHorizontalIcon />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            <MenuItem onClick={() => showTask(task)}>Task details</MenuItem>
+            {!task.item.deletedAt && (
               <MenuItem
                 onClick={() => {
                   void save(
                     task.environmentId,
                     {
                       ...task.item,
-                      deletedAt: task.item.deletedAt ? null : new Date().toISOString(),
-                      preparation: null,
+                      priority: Math.min(0, ...tasks.map(({ item }) => item.priority ?? 0)) - 1,
                       updatedAt: new Date().toISOString(),
                     },
                     task.item,
-                  )
-                    .then((saved) => {
-                      if (saved.deletedAt)
-                        toastManager.add({
-                          title: "Task moved to Trash",
-                          description: "Linked chats are unchanged.",
-                          actionProps: {
-                            children: "Undo",
-                            onClick: () => {
-                              void save(
-                                task.environmentId,
-                                { ...saved, deletedAt: null, updatedAt: new Date().toISOString() },
-                                saved,
-                              ).catch((cause) =>
-                                toastManager.add({ type: "error", title: String(cause) }),
-                              );
-                            },
-                          },
-                        });
-                    })
-                    .catch((cause) => toastManager.add({ type: "error", title: String(cause) }));
+                  ).catch((cause) => toastManager.add({ type: "error", title: String(cause) }));
                 }}
               >
-                {task.item.deletedAt ? "Restore task" : "Delete task"}
+                Move to top
               </MenuItem>
-            </MenuPopup>
-          </Menu>
-        )}
+            )}
+            <MenuItem
+              onClick={() => {
+                void save(
+                  task.environmentId,
+                  {
+                    ...task.item,
+                    deletedAt: task.item.deletedAt ? null : new Date().toISOString(),
+                    preparation: null,
+                    updatedAt: new Date().toISOString(),
+                  },
+                  task.item,
+                )
+                  .then((saved) => {
+                    if (saved.deletedAt)
+                      toastManager.add({
+                        title: "Task moved to Trash",
+                        description: "Linked chats are unchanged.",
+                        actionProps: {
+                          children: "Undo",
+                          onClick: () => {
+                            void save(
+                              task.environmentId,
+                              { ...saved, deletedAt: null, updatedAt: new Date().toISOString() },
+                              saved,
+                            ).catch((cause) =>
+                              toastManager.add({ type: "error", title: String(cause) }),
+                            );
+                          },
+                        },
+                      });
+                  })
+                  .catch((cause) => toastManager.add({ type: "error", title: String(cause) }));
+              }}
+            >
+              {task.item.deletedAt ? "Restore task" : "Delete task"}
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
+      )}
+    </>
+  );
+  const render = (task: LocatedWorkItem) => (
+    <div
+      key={`${task.environmentId}:${task.item.id}`}
+      className="flex min-w-0 flex-col gap-1 border-b border-border/50 px-3 py-2 text-left last:border-b-0 hover:bg-accent/30"
+    >
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={() => showTask(task)}
+          className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-medium leading-[18px] hover:underline"
+        >
+          {task.item.title}
+        </button>
+        {renderActions(task)}
       </div>
       {(task.item.preparation?.state === "failed" ||
         task.item.brief ||
         task.item.notes !== task.item.title) && (
-        <span className="line-clamp-2 text-xs text-muted-foreground">
+        <span className="line-clamp-1 text-xs text-muted-foreground">
           {task.item.preparation?.state === "failed"
             ? "Brief preparation failed. Open to retry."
             : task.item.brief ||
@@ -142,23 +184,30 @@ export function TaskShelf({
             (task.localDraft ? "Draft on this device" : "Saved locally, waiting to sync")}
         </span>
       )}
-      <span className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
-        <span className="">
-          {task.item.status === "working" || task.item.status === "done"
-            ? workItemStage(task.item)
-            : workItemChats(task.item, task.environmentId).length
-              ? "Chat selected, not sent"
-              : ""}
+      {!task.item.deletedAt &&
+        section === "planned" &&
+        workItemChats(task.item, task.environmentId).length > 0 && (
+          <span className="text-[10px] text-muted-foreground">Chat selected, not sent</span>
+        )}
+      {section === "history" && (
+        <span className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+          <span className="">
+            {task.item.status === "working" || task.item.status === "done"
+              ? workItemStage(task.item)
+              : workItemChats(task.item, task.environmentId).length
+                ? "Chat selected, not sent"
+                : ""}
+          </span>
+          <span>
+            {task.item.executionEnvironmentId === null
+              ? "Folder later"
+              : (environments.find(
+                  (env) =>
+                    env.environmentId === (task.item.executionEnvironmentId ?? task.environmentId),
+                )?.label ?? "Offline device")}
+          </span>
         </span>
-        <span>
-          {task.item.executionEnvironmentId === null
-            ? "Folder later"
-            : (environments.find(
-                (env) =>
-                  env.environmentId === (task.item.executionEnvironmentId ?? task.environmentId),
-              )?.label ?? "Offline device")}
-        </span>
-      </span>
+      )}
     </div>
   );
   const planned = eligible
@@ -172,44 +221,225 @@ export function TaskShelf({
     ({ item }) => !item.deletedAt && (item.status === "done" || item.status === "working"),
   );
   const trash = eligible.filter(({ item }) => item.deletedAt);
-  const grid = "grid grid-cols-[repeat(auto-fit,minmax(min(100%,17rem),20rem))] gap-2";
+  const groups = groupTasksBySpace(planned, profiles);
+  const activeGroup =
+    spaceId === undefined ? groups.find((group) => group.key === selectedSpace) : undefined;
+  const shown = activeGroup?.tasks ?? planned;
+  useLayoutEffect(() => {
+    const node = strip.current;
+    if (!node) return;
+    const observer = new ResizeObserver(() => setOverflow(node.scrollWidth > node.clientWidth + 1));
+    observer.observe(node);
+    for (const child of node.children) observer.observe(child);
+    setOverflow(node.scrollWidth > node.clientWidth + 1);
+    const card = expandedCard.current;
+    if (card) {
+      const left = card.offsetLeft - node.offsetLeft;
+      if (left < node.scrollLeft) node.scrollLeft = left;
+      else if (left + card.offsetWidth > node.scrollLeft + node.clientWidth)
+        node.scrollLeft = Math.min(left, left + card.offsetWidth - node.clientWidth);
+    }
+    return () => observer.disconnect();
+  }, [expanded, selectedSpace, collapsed, shown.length]);
   if (section === "history")
-    return history.length || trash.length ? (
-      <section aria-label="Task history" className="col-span-full space-y-2 pt-2">
-        <details className="w-fit min-w-[min(100%,20rem)] max-w-full rounded-lg border border-border/60 bg-muted/10">
-          <summary className="cursor-pointer px-3 py-2.5 text-xs font-medium">
-            Task history <span className="ml-2 text-muted-foreground">{history.length}</span>
+    return (
+      <section aria-label="Task history" className="space-y-3">
+        <div className="divide-y divide-border/60">
+          {history.sort((a, b) => b.item.updatedAt.localeCompare(a.item.updatedAt)).map(render)}
+        </div>
+        {!history.length && (
+          <p className="p-3 text-xs text-muted-foreground">No tasks match this history.</p>
+        )}
+        <details className="border-t border-border/60">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium">
+            Trash ({trash.length})
           </summary>
-          <div className="w-[min(64rem,100%)] space-y-2 border-t border-border/50 p-3">
-            <div className={grid}>
-              {history.sort((a, b) => b.item.updatedAt.localeCompare(a.item.updatedAt)).map(render)}
-            </div>
-            {trash.length > 0 && (
-              <details>
-                <summary className="cursor-pointer py-2 text-xs text-muted-foreground">
-                  Trash ({trash.length})
-                </summary>
-                <div className={grid}>{trash.map(render)}</div>
-              </details>
-            )}
-          </div>
+          {trash.length ? (
+            trash.map(render)
+          ) : (
+            <p className="px-3 py-2 text-xs text-muted-foreground">Trash is empty.</p>
+          )}
         </details>
       </section>
-    ) : null;
+    );
   return (
-    <section aria-label="Planned work" className="col-span-full space-y-2">
-      <div className="flex w-fit items-center gap-2">
-        <ClipboardListIcon className="size-3.5 text-muted-foreground" />
-        <h2 className="text-sm font-medium">Planned work</h2>
-        <span className="text-xs tabular-nums text-muted-foreground">{planned.length}</span>
+    <section aria-label="Planned work" className="shrink-0 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <h2>
+          <button
+            type="button"
+            disabled={editorBusy}
+            onClick={() => setCollapsed(!collapsed)}
+            aria-expanded={!collapsed}
+            className="flex items-center gap-2 rounded py-1 text-sm focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {collapsed ? (
+              <ChevronRightIcon className="size-3.5" />
+            ) : (
+              <ChevronDownIcon className="size-3.5" />
+            )}
+            <ClipboardListIcon className="size-3.5 text-muted-foreground" />
+            <span className="text-sm font-medium">Planned work</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{planned.length}</span>
+          </button>
+        </h2>
       </div>
-      {planned.length ? (
-        <div className={`${grid} max-h-64 overflow-y-auto pr-1`}>{planned.map(render)}</div>
-      ) : (
-        <p className="w-fit rounded-lg border border-dashed border-border/60 px-3 py-2.5 text-xs text-muted-foreground">
-          No tasks waiting to be picked up.
-        </p>
-      )}
+      {!collapsed &&
+        (planned.length ? (
+          <>
+            <div className="flex min-w-0 items-center gap-2">
+              {spaceId === undefined && (
+                <div
+                  role="group"
+                  aria-label="Filter planned tasks by Space"
+                  className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:thin]"
+                >
+                  <Button
+                    size="xs"
+                    variant={!activeGroup ? "secondary" : "ghost-muted"}
+                    disabled={editorBusy}
+                    aria-pressed={!activeGroup}
+                    onClick={() => {
+                      setSelectedSpace(null);
+                      setExpanded(null);
+                    }}
+                  >
+                    All {planned.length}
+                  </Button>
+                  {groups.map((group) => (
+                    <Button
+                      key={group.key}
+                      size="xs"
+                      variant={activeGroup?.key === group.key ? "secondary" : "ghost-muted"}
+                      disabled={editorBusy}
+                      aria-pressed={activeGroup?.key === group.key}
+                      onClick={() => {
+                        setSelectedSpace(group.key);
+                        setExpanded(null);
+                      }}
+                    >
+                      {group.color && <ProfileDot color={group.color} />}
+                      {!profileId || profileId === "all"
+                        ? `${group.profileName} / ${group.spaceName}`
+                        : group.spaceName}{" "}
+                      {group.tasks.length}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {overflow && (
+                <div className="ml-auto flex gap-1">
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label="Previous tasks"
+                    onClick={() => strip.current?.scrollBy({ left: -300 })}
+                  >
+                    <ChevronLeftIcon />
+                  </Button>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label="Next tasks"
+                    onClick={() => strip.current?.scrollBy({ left: 300 })}
+                  >
+                    <ChevronRightIcon />
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div
+              ref={strip}
+              role="region"
+              aria-label="Planned task cards"
+              tabIndex={0}
+              className="relative flex h-56 min-w-0 gap-2 overflow-x-auto overflow-y-hidden pb-2 [scrollbar-width:thin]"
+            >
+              {shown.map((task) => {
+                const key = taskKey(task);
+                const isExpanded = expanded === key;
+                const group = groups.find((group) => group.tasks.includes(task));
+                return (
+                  <article
+                    key={key}
+                    ref={isExpanded ? expandedCard : undefined}
+                    aria-label={task.item.title}
+                    className={`flex h-full shrink-0 overflow-hidden rounded-xl border bg-card ${isExpanded ? "w-[min(64rem,100%)] border-primary/40 ring-1 ring-primary/10" : "w-64 border-border/60"}`}
+                  >
+                    <div
+                      className={`flex min-w-0 flex-col ${isExpanded ? "w-56 shrink-0 border-r border-border/60" : "w-full"}`}
+                    >
+                      <button
+                        type="button"
+                        aria-label={`${isExpanded ? "Collapse" : "Expand"} task: ${task.item.title}`}
+                        disabled={editorBusy}
+                        aria-expanded={isExpanded}
+                        className="flex min-h-0 flex-1 flex-col gap-3 p-3 text-left outline-none hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        onClick={() => setExpanded(isExpanded ? null : key)}
+                      >
+                        {!activeGroup && spaceId === undefined && (
+                          <span className="flex max-w-full items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                            {group?.color && <ProfileDot color={group.color} />}
+                            {group?.spaceName ?? "Unsorted"}
+                          </span>
+                        )}
+                        <span className="line-clamp-3 text-[13px] font-medium leading-5">
+                          {task.item.title}
+                        </span>
+                        <span className="line-clamp-3 text-xs leading-5 text-muted-foreground">
+                          {task.item.brief ||
+                            (task.item.notes === task.item.title ? "" : task.item.notes)}
+                        </span>
+                        <span className="mt-auto flex w-full items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                          <span>
+                            {task.syncError ??
+                              (task.localCaptureId
+                                ? "Saved on this device"
+                                : task.item.remindAt && Date.parse(task.item.remindAt) <= now
+                                  ? "Reminder due"
+                                  : task.item.preparation?.state === "failed"
+                                    ? "Preparation failed"
+                                    : task.item.attachments?.length
+                                      ? `${task.item.attachments.length} attachment${task.item.attachments.length === 1 ? "" : "s"}`
+                                      : "")}
+                          </span>
+                          {isExpanded ? (
+                            <XIcon className="size-3.5 shrink-0" />
+                          ) : (
+                            <ChevronRightIcon className="size-3.5 shrink-0" />
+                          )}
+                        </span>
+                      </button>
+                      <div className="flex h-7 shrink-0 justify-end px-2">
+                        {renderActions(task)}
+                      </div>
+                    </div>
+                    {isExpanded && (
+                      <div className="min-w-0 flex-1">
+                        {task.localCaptureId ? (
+                          <div className="h-full overflow-y-auto p-3">
+                            <QuickTaskCapture request={task} onSaved={() => setExpanded(null)} />
+                          </div>
+                        ) : (
+                          <TaskForm
+                            inline
+                            request={task}
+                            onClose={() => setExpanded(null)}
+                            onBusyChange={setEditorBusy}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <p className="w-fit rounded-lg border border-dashed border-border/60 px-3 py-2.5 text-xs text-muted-foreground">
+            No tasks waiting to be picked up.
+          </p>
+        ))}
     </section>
   );
 }

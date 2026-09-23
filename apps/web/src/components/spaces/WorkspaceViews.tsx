@@ -101,7 +101,7 @@ export function WorkspaceViews({
               ["folders", "Folders", FolderOpenIcon],
             ] as const
           )
-            .filter(([key]) => key !== "overview" || location.pathname !== "/dashboard")
+            .filter(([key]) => key !== "overview" || view !== "overview")
             .map(([key, label, Icon]) => (
               <Button
                 key={key}

@@ -53,7 +53,7 @@ export function DashboardHistoryRow({
         <div className="truncate text-[13px] font-medium">
           {opening ? "Opening..." : shell.title}
         </div>
-        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+        <div className="mt-1 flex min-w-0 items-center gap-x-2 overflow-hidden text-[11px] text-muted-foreground">
           <Tooltip>
             <TooltipTrigger render={<span className="max-w-40 truncate" />}>
               {projectTitle}
@@ -61,12 +61,12 @@ export function DashboardHistoryRow({
             </TooltipTrigger>
             <TooltipPopup>{projectCwd}</TooltipPopup>
           </Tooltip>
-          <span>
+          <span className="min-w-0 truncate">
             {deviceLabel}
             {connected ? "" : " (offline)"}
           </span>
           {provider ? (
-            <span className="inline-flex items-center gap-1">
+            <span className="inline-flex shrink-0 items-center gap-1">
               <ProviderInstanceIcon
                 driverKind={provider.driverKind}
                 displayName={provider.displayName}
@@ -88,7 +88,7 @@ export function DashboardHistoryRow({
           ) : null}
         </div>
       </button>
-      <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+      <div className="flex shrink-0 flex-col items-end gap-1">
         <Tooltip>
           <TooltipTrigger render={<span className="text-[11px] text-muted-foreground" />}>
             {time}

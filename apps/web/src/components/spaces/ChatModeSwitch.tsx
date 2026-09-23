@@ -5,7 +5,6 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { Button } from "../ui/button";
 import {
   isColumnsLocation,
-  isDashboardLocation,
   useChatMode,
   useColumnNavigation,
   ChatReturnLocation,
@@ -16,7 +15,6 @@ export function ChatModeSwitch() {
   const location = useLocation();
   const navigate = useNavigate();
   const columns = isColumnsLocation(location.pathname, location.searchStr);
-  const dashboard = isDashboardLocation(location.pathname, location.searchStr);
   const [mode, setMode] = useChatMode();
   const selectedColumns = columns || mode === "columns";
   const openBoard = () =>
@@ -31,14 +29,29 @@ export function ChatModeSwitch() {
     ChatReturnLocation,
   );
   const choosing = useColumnNavigation((state) => state.choosing);
+  function openChat() {
+    useUiStateStore.getState().setActiveProfileId(lastChat.profileId);
+    useUiStateStore.setState((state) =>
+      selectSidebarSpace(state, lastChat.profileId ?? "all", lastChat.space),
+    );
+    void navigate({
+      href:
+        lastChat.href.startsWith("/") &&
+        !lastChat.href.startsWith("//") &&
+        !lastChat.href.startsWith("/spaces/")
+          ? lastChat.href
+          : "/dashboard",
+    });
+  }
+  function changeMode(value: string) {
+    if (value !== "chat" && value !== "columns") return;
+    setMode(value);
+    useColumnNavigation.setState({ choosing: false });
+    if (value === "columns") openBoard();
+    else openChat();
+  }
   return (
     <div className="ml-auto flex shrink-0 items-center gap-2 no-drag">
-      {dashboard && mode === "columns" && (
-        <Button size="xs" variant="ghost" onClick={openBoard}>
-          Open board
-        </Button>
-      )}
-      {dashboard && <span className="text-xs text-muted-foreground">Open chats in</span>}
       {columns && (
         <Button
           size="xs"
@@ -52,47 +65,28 @@ export function ChatModeSwitch() {
         </Button>
       )}
       <div
-        aria-label={dashboard ? "Open chats in" : "Chat layout"}
         role="group"
-        className="flex items-center rounded-lg border border-border/60 bg-muted/40 p-0.5"
+        aria-label="Workspace mode"
+        className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-0.5"
       >
         {(
           [
-            [false, "Chat", MessageSquareIcon],
-            [true, "Columns", Columns3Icon],
+            ["chat", "Chat", MessageSquareIcon],
+            ["columns", "Columns", Columns3Icon],
           ] as const
-        ).map(([isColumns, label, Icon]) => (
+        ).map(([value, label, Icon]) => (
           <Button
-            key={label}
+            key={value}
             size="xs"
             variant="ghost"
-            aria-pressed={selectedColumns === isColumns}
+            aria-label={`Open ${label} workspace`}
+            aria-pressed={selectedColumns === (value === "columns")}
+            onClick={() => changeMode(value)}
             className={
-              selectedColumns === isColumns
+              selectedColumns === (value === "columns")
                 ? "bg-background text-foreground shadow-xs ring-1 ring-border/60"
                 : "text-muted-foreground"
             }
-            onClick={() => {
-              if ((dashboard || columns) && selectedColumns === isColumns) return;
-              setMode(isColumns ? "columns" : "chat");
-              if (dashboard) return;
-              useColumnNavigation.setState({ choosing: false });
-              if (isColumns) openBoard();
-              else {
-                useUiStateStore.getState().setActiveProfileId(lastChat.profileId);
-                useUiStateStore.setState((state) =>
-                  selectSidebarSpace(state, lastChat.profileId ?? "all", lastChat.space),
-                );
-                void navigate({
-                  href:
-                    lastChat.href.startsWith("/") &&
-                    !lastChat.href.startsWith("//") &&
-                    !lastChat.href.startsWith("/spaces/")
-                      ? lastChat.href
-                      : "/dashboard",
-                });
-              }
-            }}
           >
             <Icon className="size-3.5" />
             {label}

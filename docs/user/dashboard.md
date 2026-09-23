@@ -33,7 +33,7 @@ These lists include older results and chats without a completed turn. Snoozed ta
 return time, soonest first, with **Unsnooze**. Settled tasks offer **Unsettle** and archived tasks
 have **Restore**, both sorted most recent first. The last turn status is secondary information,
 not a lane. Restoring an archive preserves any settlement or snooze still on that chat.
-Unsent drafts remain in their composer. The **Settled** section below the active lanes shows its count and expands into a compact list. Opening a settled chat does not unsettle it. The section starts expanded when there are only settled chats, and remembers your choice.
+Unsent drafts remain in their composer. Settled, Snoozed, and Task history shortcuts beside Chat activity open a searchable side drawer. Its heading switches categories, including Archived. Opening a chat does not change its settlement, snooze, or archive status.
 
 ## Board and filters
 

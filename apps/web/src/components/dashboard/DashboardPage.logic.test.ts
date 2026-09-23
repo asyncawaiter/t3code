@@ -394,3 +394,59 @@ describe("active chat lifecycle", () => {
     ).toBe("failed");
   });
 });
+
+it("keeps twenty agents in stable lanes while updates arrive and prioritizes requests", () => {
+  const now = "2026-09-22T12:00:00Z";
+  const agents = Array.from({ length: 20 }, (_, index) =>
+    shell({
+      id: ThreadId.make(`agent-${index.toString().padStart(2, "0")}`),
+      backgroundLiveness: index < 10 ? "working" : "monitoring",
+      updatedAt: `2026-09-22T11:${index.toString().padStart(2, "0")}:00Z`,
+    }),
+  );
+  const before = buildReviewDashboard(agents, now, {});
+  const after = buildReviewDashboard(
+    agents.toReversed().map((agent) => ({ ...agent, updatedAt: now })),
+    now,
+    {},
+  );
+  expect(before.counts.running).toBe(10);
+  expect(before.counts.monitoring).toBe(10);
+  for (const lane of ["running", "monitoring"] as const) {
+    expect(after.lanes[lane].map((entry) => entry.shell.id)).toEqual(
+      before.lanes[lane].map((entry) => entry.shell.id),
+    );
+  }
+  const requests = buildReviewDashboard(
+    [
+      shell({
+        id: ThreadId.make("failed"),
+        latestTurn: {
+          turnId: "failed",
+          state: "error",
+          requestedAt: now,
+          startedAt: now,
+          completedAt: "2026-09-22T09:00:00Z",
+          assistantMessageId: null,
+        } as EnvironmentThreadShell["latestTurn"],
+      }),
+      shell({
+        id: ThreadId.make("approval"),
+        hasPendingApprovals: true,
+        updatedAt: "2026-09-22T11:00:00Z",
+      }),
+      shell({
+        id: ThreadId.make("question"),
+        hasPendingUserInput: true,
+        updatedAt: "2026-09-22T10:00:00Z",
+      }),
+    ],
+    now,
+    {},
+  );
+  expect(requests.lanes["needs-you"].map((entry) => entry.shell.id)).toEqual([
+    "question",
+    "approval",
+    "failed",
+  ]);
+});
