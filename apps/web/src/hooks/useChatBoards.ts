@@ -13,12 +13,6 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useLocalStorage } from "./useLocalStorage";
-import {
-  readLegacyChatBoards,
-  visibleChatBoards,
-  chatBoardArrangement,
-  isRecoveredChatBoard,
-} from "../components/spaces/chatBoardMigration";
 
 const EMPTY: readonly ChatBoard[] = [];
 export function useChatBoards(boardId?: string) {
@@ -35,17 +29,15 @@ export function useChatBoards(boardId?: string) {
     Schema.String,
   );
   const persisted = source.config?.settings.chatBoards ?? cache;
-  const boards = visibleChatBoards(
-    persisted.some((board) => board.id === "default")
-      ? persisted
-      : [DEFAULT_CHAT_BOARD, ...persisted],
+  const savedBoards = persisted.filter(
+    (board) => !(board.id.startsWith("import-") && board.name.startsWith("Imported ")),
   );
+  const boards = savedBoards.some((board) => board.id === "default")
+    ? savedBoards
+    : [DEFAULT_CHAT_BOARD, ...savedBoards];
   const activeId = boardId ?? selected;
-  const previous = persisted.find((board) => board.id === activeId);
   const board =
     boards.find((board) => board.id === activeId) ??
-    (previous &&
-      boards.find((board) => chatBoardArrangement(board) === chatBoardArrangement(previous))) ??
     boards.find((board) => board.id === "default")!;
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
@@ -107,41 +99,6 @@ export function useChatBoards(boardId?: string) {
     },
     [persist, setCache, source.sourceId, source.config, unavailable],
   );
-  const imported = useRef<string | null>(null);
-  useEffect(() => {
-    if (unavailable || !source.sourceId || imported.current === source.sourceId) return;
-    imported.current = source.sourceId;
-    const marker = `t3.columns-imported.${source.sourceId}`;
-    try {
-      if (localStorage.getItem(marker)) return;
-      const previous = readLegacyChatBoards(localStorage, source.profiles);
-      const missing = previous.filter(
-        (board) =>
-          !persisted.some(
-            (saved) =>
-              saved.id === board.id || chatBoardArrangement(saved) === chatBoardArrangement(board),
-          ),
-      );
-      if (!missing.length) {
-        localStorage.setItem(marker, "true");
-        return;
-      }
-      void Promise.resolve()
-        .then(() => save(missing, []))
-        .then((saved) => {
-          if (saved) localStorage.setItem(marker, "true");
-        })
-        .catch(() =>
-          setError(
-            "Previous boards are safe locally, but the import could not be recorded. Reopen Columns to retry.",
-          ),
-        );
-    } catch {
-      setError(
-        "Previous boards could not be imported. Their original local settings have been kept.",
-      );
-    }
-  }, [unavailable, source.sourceId, source.profiles, persisted, save]);
   const update = (next: ChatBoard) =>
     save(
       [next],
@@ -160,13 +117,7 @@ export function useChatBoards(boardId?: string) {
     remove: (item: ChatBoard) =>
       save(
         [],
-        persisted.filter(
-          (saved) =>
-            saved.id === item.id ||
-            (isRecoveredChatBoard(item) &&
-              isRecoveredChatBoard(saved) &&
-              chatBoardArrangement(saved) === chatBoardArrangement(item)),
-        ),
+        persisted.filter((saved) => saved.id === item.id),
       ),
   };
 }

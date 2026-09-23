@@ -26,7 +26,6 @@ import {
   DialogFooter,
   DialogDescription,
 } from "../ui/dialog";
-import { isRecoveredChatBoard } from "./chatBoardMigration";
 import { DashboardReviewBar } from "../dashboard/DashboardReviewBar";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { releaseComposerDraftUploads } from "../../lib/composerDraftUploads";
@@ -710,8 +709,7 @@ function BoardColumns({
       <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/25 p-1.5 text-xs text-muted-foreground">
         {!scope && (
           <>
-            {state.boards.filter((board) => !isRecoveredChatBoard(board)).length > 1 ||
-            isRecoveredChatBoard(state.board) ? (
+            {state.boards.length > 1 ? (
               <Popover open={boardPickerOpen} onOpenChange={setBoardPickerOpen}>
                 <PopoverTrigger
                   render={
@@ -724,47 +722,39 @@ function BoardColumns({
                   }
                 >
                   <Columns3Icon className="size-3.5 shrink-0" />
-                  <span className="truncate">
-                    {state.board.name.replace(/^Imported /, "Recovered: ")}
-                  </span>
+                  <span className="truncate">{state.board.name}</span>
                   <ChevronDownIcon className="size-3 shrink-0" />
                 </PopoverTrigger>
                 <PopoverPopup align="start" className="w-64 max-h-80 overflow-y-auto p-1">
                   <div className="flex flex-col gap-1" aria-label="Saved boards">
-                    {state.boards
-                      .filter(
-                        (board) => !isRecoveredChatBoard(board) || board.id === state.board.id,
-                      )
-                      .map((board) => (
-                        <Button
-                          key={board.id}
-                          size="xs"
-                          variant={state.board.id === board.id ? "secondary" : "ghost"}
-                          className="h-8 justify-between rounded-sm px-2 text-xs"
-                          aria-pressed={state.board.id === board.id}
-                          onClick={() => {
-                            selectBoard(board.id);
-                            setBoardPickerOpen(false);
-                          }}
-                        >
-                          <span className="truncate">
-                            {board.name.replace(/^Imported /, "Recovered: ")}
-                          </span>
-                          <span className="text-muted-foreground">
-                            {board.order.filter((key) => !board.hidden.includes(key)).length}{" "}
-                            {board.order.filter((key) => !board.hidden.includes(key)).length === 1
-                              ? "chat"
-                              : "chats"}
-                          </span>
-                        </Button>
-                      ))}
+                    {state.boards.map((board) => (
+                      <Button
+                        key={board.id}
+                        size="xs"
+                        variant={state.board.id === board.id ? "secondary" : "ghost"}
+                        className="h-8 justify-between rounded-sm px-2 text-xs"
+                        aria-pressed={state.board.id === board.id}
+                        onClick={() => {
+                          selectBoard(board.id);
+                          setBoardPickerOpen(false);
+                        }}
+                      >
+                        <span className="truncate">{board.name}</span>
+                        <span className="text-muted-foreground">
+                          {board.order.filter((key) => !board.hidden.includes(key)).length}{" "}
+                          {board.order.filter((key) => !board.hidden.includes(key)).length === 1
+                            ? "chat"
+                            : "chats"}
+                        </span>
+                      </Button>
+                    ))}
                   </div>
                 </PopoverPopup>
               </Popover>
             ) : (
               <span className="flex items-center gap-1.5 px-2 font-medium text-foreground">
                 <Columns3Icon className="size-3.5" />
-                {state.board.name.replace(/^Imported /, "Recovered: ")}
+                {state.board.name}
               </span>
             )}
             <span className="shrink-0 tabular-nums">{selectedKeys.size} chats</span>
@@ -862,45 +852,6 @@ function BoardColumns({
                       </Button>
                     </div>
                   </form>
-                  {state.boards.some((board) => isRecoveredChatBoard(board)) && (
-                    <details className="mt-3 border-t border-border/60 pt-3">
-                      <summary className="cursor-pointer px-2 py-1 text-xs text-muted-foreground">
-                        Recover an old layout
-                      </summary>
-                      <p className="px-2 py-2 text-xs text-muted-foreground">
-                        Saved from the old space-based columns. Open one to inspect or rename it.
-                        Your current board is kept.
-                      </p>
-                      <div className="mt-1 max-h-48 overflow-y-auto flex flex-col gap-1">
-                        {state.boards
-                          .filter((board) => isRecoveredChatBoard(board))
-                          .map((board) => (
-                            <Button
-                              key={board.id}
-                              size="xs"
-                              variant={state.board.id === board.id ? "secondary" : "ghost"}
-                              className="h-8 justify-between rounded-sm px-2 text-xs"
-                              aria-pressed={state.board.id === board.id}
-                              onClick={() => {
-                                selectBoard(board.id);
-                                setBoardPickerOpen(false);
-                              }}
-                            >
-                              <span className="truncate">
-                                {board.name.replace(/^Imported /, "")}
-                              </span>
-                              <span className="text-muted-foreground">
-                                {board.order.filter((key) => !board.hidden.includes(key)).length}{" "}
-                                {board.order.filter((key) => !board.hidden.includes(key)).length ===
-                                1
-                                  ? "chat"
-                                  : "chats"}
-                              </span>
-                            </Button>
-                          ))}
-                      </div>
-                    </details>
-                  )}
                 </DialogPanel>
               </DialogPopup>
             </Dialog>

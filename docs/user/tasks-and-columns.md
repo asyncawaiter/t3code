@@ -46,7 +46,7 @@ Drag the grip beside a column title to reorder columns. Focus the grip and press
 
 Start with one board named Columns. Use **Manage** to rename it, create another board, duplicate an arrangement, or delete an extra board. Board names, selected chats, order, and individual widths are saved on the shared profile source and update on connected clients. Both clients and the shared source need a version that supports shared boards. Reconnect the source to edit an arrangement while it is offline. Conflicting edits to the same board are rejected so another device's changes are not overwritten.
 
-Older device-local arrangements are available under **Recover an old layout** in **Manage**. Empty and duplicate imports are omitted without deleting the original records. Rename a recovered layout to keep it among your saved boards. The selected board, reading positions, and unsent drafts remain local to each client.
+The selected board, reading positions, and unsent drafts remain local to each client.
 
 Drag each column's right edge to resize it independently. You can also focus the resize edge and use the arrow keys. Double-click an edge to restore its default width, or use **Reset widths** to reset every column. Smaller windows scroll horizontally without changing saved widths. Expand one chat and return to the board afterward. Use **New task** in a chat to capture more work, even when that chat already has a task. The column menu lets you reorder chats or keep a chat on the board after you settle it. Keeping a column does not pin the chat in the sidebar. Unavailable chats retain their place until their device reconnects.
 
@@ -70,7 +70,7 @@ menus and profile options remain available. Hover over **Boards** to choose a cu
 
 Columns use a compact header with direct review controls. **Actions** contains conversation and workspace commands: rename, pin, snooze, settle, archive, project actions, editors, Git, and linked task actions. This menu uses the app appearance on Mac and web. New task remains available beside these controls.
 
-Use **Manage** beside the board name to rename, duplicate, or create a board. Arrangements recovered from the old Space-based system are under **Recover an old layout** in Manage; opening one preserves your current board. Add existing chat opens a searchable dialog. Its folder choices follow the selected profile, Space, and device.
+Use **Manage** beside the board name to rename, duplicate, or create a board. Add existing chat opens a searchable dialog. Its folder choices follow the selected profile, Space, and device.
 
 Column headers show labeled profile, space, project, device, branch, and workspace path details. Click a saved chat title to rename it; Enter saves and Escape cancels. Bookmark and Open folder are direct toolbar buttons. Opening folders is available on the local device. The Pin in Chat sidebar menu controls sidebar pin visibility (global, profile, or space); it does not change the saved selection or order of a Columns board.
 

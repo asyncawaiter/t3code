@@ -4,7 +4,6 @@ import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
 import { useEnvironments } from "../../state/environments";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { useChatBoards } from "../../hooks/useChatBoards";
-import { isRecoveredChatBoard } from "./chatBoardMigration";
 import { spaceColumnsNavigation } from "./columnNavigation";
 import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
 import { Input } from "../ui/input";
@@ -116,7 +115,7 @@ export function ColumnsRail() {
   return (
     <aside
       aria-label="Columns navigation"
-      className="flex w-18 shrink-0 flex-col items-center gap-2 border-r border-sidebar-border bg-sidebar px-1.5 pb-3 pt-[var(--workspace-topbar-height)]"
+      className="relative flex w-18 shrink-0 flex-col items-center gap-2 bg-sidebar px-1.5 pb-3 pt-[var(--workspace-topbar-height)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-[var(--workspace-topbar-height)] before:bg-background after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:top-[var(--workspace-topbar-height)] after:w-px after:bg-sidebar-border"
     >
       <Tooltip>
         <TooltipTrigger
@@ -159,13 +158,14 @@ export function ColumnsRail() {
                 size="icon"
                 variant="ghost"
                 aria-label="Focus saved chat"
+                className="size-14 sm:size-14"
                 onClick={() => {
                   openThread(bookmark);
                 }}
               />
             }
           >
-            <LocateFixedIcon className="size-4" />
+            <LocateFixedIcon className="size-6" />
           </TooltipTrigger>
           <TooltipPopup side="right">Focus saved chat</TooltipPopup>
         </Tooltip>
@@ -277,22 +277,20 @@ export function ColumnsRail() {
             </form>
           )}
           <div className="max-h-80 overflow-y-auto">
-            {boards.boards
-              .filter((board) => !isRecoveredChatBoard(board))
-              .map((board) => (
-                <Button
-                  key={board.id}
-                  size="sm"
-                  variant={boards.board.id === board.id ? "secondary" : "ghost"}
-                  className="w-full justify-between"
-                  onClick={() => visitBoard(board.id)}
-                >
-                  <span className="truncate">{board.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {board.order.filter((key) => !board.hidden.includes(key)).length}
-                  </span>
-                </Button>
-              ))}
+            {boards.boards.map((board) => (
+              <Button
+                key={board.id}
+                size="sm"
+                variant={boards.board.id === board.id ? "secondary" : "ghost"}
+                className="w-full justify-between"
+                onClick={() => visitBoard(board.id)}
+              >
+                <span className="truncate">{board.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {board.order.filter((key) => !board.hidden.includes(key)).length}
+                </span>
+              </Button>
+            ))}
           </div>
           {(boards.error || boards.unavailable) && (
             <p role="status" className="mt-2 px-2 text-xs text-muted-foreground">

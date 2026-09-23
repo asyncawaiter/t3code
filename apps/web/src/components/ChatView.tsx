@@ -10044,13 +10044,14 @@ export default function ChatView(props: ChatViewProps) {
         {/* Top bar */}
         <WorkspacePageHeader
           data-chat-header
+          embedded={!reserveTitleBarControlInset}
           workspaceViews={reserveTitleBarControlInset}
           electron={isElectron}
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
           className={cn(
             "relative bg-background",
             !reserveTitleBarControlInset &&
-              "h-10 min-h-10 gap-1 border-b border-border/60 bg-muted/15 px-2 sm:px-2",
+              "h-10 min-h-10 gap-1 border-b border-border/60 bg-muted/15 px-3 sm:px-3",
           )}
         >
           {isElectron && reserveTitleBarControlInset && rightPanelControlsAtRoot ? (
