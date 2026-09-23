@@ -1,3 +1,5 @@
+import { useOpenChatInColumns } from "../hooks/useOpenChatInColumns";
+import { useChatMode } from "./spaces/columnNavigation";
 import { spaceDeviceDefaults } from "@t3tools/contracts";
 import { spaceProjectKeys } from "./sidebar/Spaces.logic";
 import type { ModelFavorite } from "@t3tools/contracts";
@@ -48,6 +50,8 @@ export function ChatCreationDialog() {
 
 function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const navigate = useNavigate();
+  const [chatMode] = useChatMode();
+  const openInColumns = useOpenChatInColumns();
   const projects = useProjects();
   const { environments } = useEnvironments();
   const profiles = usePrimarySettings((settings) => settings.profiles);
@@ -238,7 +242,8 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
           throw new Error("This draft changed while saving. Reopen its location to continue.");
         // Open the affected draft before remapping: remapping can remove an empty
         // draft currently on screen, whose route would otherwise redirect home.
-        await navigate({ to: "/draft/$draftId", params: { draftId: request.draftId } });
+        if (chatMode !== "columns")
+          await navigate({ to: "/draft/$draftId", params: { draftId: request.draftId } });
         store.setDraftThreadContext(request.draftId, { environmentSelection: "manual" });
         if (draft.projectId !== project.id || draft.environmentId !== project.environmentId) {
           store.setLogicalProjectDraftThreadId(
@@ -260,6 +265,12 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
             explicit: true,
             replaceOptions: true,
           });
+        await openInColumns({
+          environmentId: project.environmentId,
+          id: draft.threadId,
+          title: "New chat",
+          previousKey: oldKey,
+        });
       } else {
         const locationKey = `${projectKey}:${profileId}:${spaceId}`;
         const opened =

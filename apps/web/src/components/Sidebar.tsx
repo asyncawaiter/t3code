@@ -121,7 +121,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useReducer,
@@ -222,12 +221,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProfileDot, ProfileStrip } from "./sidebar/ProfileStrip";
-import {
-  INITIAL_PROFILE_SWIPE_STATE,
-  INITIAL_NATIVE_PROFILE_SWIPE_STATE,
-  reduceProfileSwipe,
-  reduceNativeProfileSwipe,
-} from "./sidebar/profileSwipe";
+import { useProfileSwipe } from "./sidebar/useProfileSwipe";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
@@ -5382,72 +5376,18 @@ export default function Sidebar() {
       window.removeEventListener("pagehide", saveScroll);
     };
   }, [activeProfile.id]);
-  const onScrollGesture =
-    typeof window === "undefined" ? undefined : window.desktopBridge?.onScrollGesture;
-  const canSwipeProfiles = resolvedProfiles.length > 1;
-  const switchProfileFromSwipe = useEffectEvent((direction: "next" | "previous") => {
-    if (resolvedProfiles.length <= 1) return;
-    const ui = useUiStateStore.getState();
-    const nextId = nextProfileId(resolvedProfiles, ui.activeProfileId ?? ALL_PROFILE_ID, direction);
-    setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
-  });
-  useEffect(() => {
-    const node = sidebarSwipeRef.current;
-    if (!node || !canSwipeProfiles) return;
-
-    if (onScrollGesture) {
-      let state = INITIAL_NATIVE_PROFILE_SWIPE_STATE;
-      let lastWheelInside = false;
-      let startedInside = false;
-      const reset = () => {
-        state = INITIAL_NATIVE_PROFILE_SWIPE_STATE;
-        lastWheelInside = startedInside = false;
-      };
-      const onWheel = (event: WheelEvent) => {
-        lastWheelInside =
-          event.target instanceof Node && node.contains(event.target) && !event.ctrlKey;
-        if (!lastWheelInside || !startedInside) return;
-        const result = reduceNativeProfileSwipe(state, {
-          type: "wheel",
-          deltaX: event.deltaX,
-          deltaY: event.deltaY,
-        });
-        state = result.state;
-        if (result.fire) switchProfileFromSwipe(result.fire);
-      };
-      const unsubscribe = onScrollGesture((phase) => {
-        // Chromium sends begin after the first wheel event. Latch its origin
-        // so a gesture started in the chat cannot switch profiles on entering the sidebar.
-        startedInside = phase === "begin" && lastWheelInside;
-        state = reduceNativeProfileSwipe(state, { type: phase }).state;
-      });
-      // Cancelling wheel events suppresses Chromium's gesture boundaries.
-      // CSS contains horizontal overflow; vertical scrolling stays native.
-      window.addEventListener("wheel", onWheel, { capture: true, passive: true });
-      window.addEventListener("blur", reset);
-      return () => {
-        unsubscribe();
-        window.removeEventListener("wheel", onWheel, { capture: true });
-        window.removeEventListener("blur", reset);
-      };
-    }
-
-    let state = INITIAL_PROFILE_SWIPE_STATE;
-    const onWheel = (event: WheelEvent) => {
-      if (event.ctrlKey) return;
-      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) event.preventDefault();
-      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
-      const result = reduceProfileSwipe(state, {
-        deltaX: event.deltaX * scale,
-        deltaY: event.deltaY * scale,
-        timestamp: event.timeStamp,
-      });
-      state = result.state;
-      if (result.fire) switchProfileFromSwipe(result.fire);
-    };
-    node.addEventListener("wheel", onWheel, { capture: true, passive: false });
-    return () => node.removeEventListener("wheel", onWheel, { capture: true });
-  }, [onScrollGesture, canSwipeProfiles]);
+  const onScrollGesture = useProfileSwipe(
+    sidebarSwipeRef,
+    resolvedProfiles.length > 1,
+    (direction) => {
+      const nextId = nextProfileId(
+        resolvedProfiles,
+        useUiStateStore.getState().activeProfileId ?? ALL_PROFILE_ID,
+        direction,
+      );
+      setActiveProfileId(nextId === ALL_PROFILE_ID ? null : nextId);
+    },
+  );
 
   // One-shot slide when the active profile changes, played imperatively so
   // switching profiles doesn't remount (and lose scroll position, DOM focus,

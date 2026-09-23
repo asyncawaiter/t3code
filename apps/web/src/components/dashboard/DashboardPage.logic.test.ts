@@ -5,12 +5,12 @@ import { indexProfileSpaces } from "@t3tools/contracts";
 import { filterDashboardSpace } from "./DashboardPage.logic";
 import type { OrchestrationThreadShell } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
-import type { DashboardBoard } from "@t3tools/client-runtime/state/dashboard";
+import type { DashboardBoard } from "./DashboardPage.logic";
+import type { DashboardEntry } from "@t3tools/client-runtime/state/dashboard";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   filterDashboardGit,
   deriveDashboardScope,
-  dropReviewedDoneEntries,
   filterBoardByEnvironment,
   filterEntriesByEnvironment,
   filterEntriesByLane,
@@ -46,7 +46,7 @@ function shell(overrides: Partial<EnvironmentThreadShell> = {}): EnvironmentThre
 }
 
 function entry(
-  overrides: Partial<DashboardBoardEntry> & { shell: EnvironmentThreadShell },
+  overrides: Partial<DashboardEntry<EnvironmentThreadShell>> & { shell: EnvironmentThreadShell },
 ): DashboardBoardEntry {
   return {
     lane: "needs-you",
@@ -64,9 +64,9 @@ describe("flattenBoardEntries", () => {
       reason: "working",
       shell: shell({ id: "t2" as OrchestrationThreadShell["id"] }),
     });
-    const board: DashboardBoard<EnvironmentThreadShell> = {
-      lanes: { "needs-you": [needsYou], running: [running], monitoring: [], done: [] },
-      counts: { "needs-you": 1, running: 1, monitoring: 0, done: 0 },
+    const board: DashboardBoard = {
+      lanes: { "needs-you": [needsYou], running: [running], monitoring: [], done: [], idle: [] },
+      counts: { "needs-you": 1, running: 1, monitoring: 0, done: 0, idle: 0 },
     };
     expect(flattenBoardEntries(board)).toEqual([needsYou, running]);
   });
@@ -132,73 +132,36 @@ describe("filterBoardByEnvironment", () => {
         id: "t-b" as OrchestrationThreadShell["id"],
       }),
     });
-    const board: DashboardBoard<EnvironmentThreadShell> = {
-      lanes: { "needs-you": [envA1, envB], running: [envA2], monitoring: [], done: [] },
-      counts: { "needs-you": 2, running: 1, monitoring: 0, done: 0 },
+    const board: DashboardBoard = {
+      lanes: { "needs-you": [envA1, envB], running: [envA2], monitoring: [], done: [], idle: [] },
+      counts: { "needs-you": 2, running: 1, monitoring: 0, done: 0, idle: 0 },
     };
     const filtered = filterBoardByEnvironment(
       board,
       "env-a" as EnvironmentThreadShell["environmentId"],
     );
     expect(filtered.lanes["needs-you"]).toEqual([envA1]);
-    expect(filtered.counts).toEqual({ "needs-you": 1, running: 1, monitoring: 0, done: 0 });
+    expect(filtered.counts).toEqual({
+      "needs-you": 1,
+      running: 1,
+      monitoring: 0,
+      done: 0,
+      idle: 0,
+    });
   });
 
   it("passes the board through unchanged for a null environment", () => {
-    const board: DashboardBoard<EnvironmentThreadShell> = {
-      lanes: { "needs-you": [entry({ shell: shell() })], running: [], monitoring: [], done: [] },
-      counts: { "needs-you": 1, running: 0, monitoring: 0, done: 0 },
+    const board: DashboardBoard = {
+      lanes: {
+        "needs-you": [entry({ shell: shell() })],
+        running: [],
+        monitoring: [],
+        done: [],
+        idle: [],
+      },
+      counts: { "needs-you": 1, running: 0, monitoring: 0, done: 0, idle: 0 },
     };
     expect(filterBoardByEnvironment(board, null)).toBe(board);
-  });
-});
-
-describe("dropReviewedDoneEntries", () => {
-  const keyForShell = (s: EnvironmentThreadShell) => s.id;
-
-  it("drops only the explicitly reviewed completion; a new result stays visible", () => {
-    const seen = entry({
-      lane: "done",
-      reason: "completed",
-      since: "2026-09-04T10:00:00.000Z",
-      shell: shell({ id: "seen" as OrchestrationThreadShell["id"] }),
-    });
-    const unseen = entry({
-      lane: "done",
-      reason: "completed",
-      since: "2026-09-04T12:00:00.000Z",
-      shell: shell({ id: "unseen" as OrchestrationThreadShell["id"] }),
-    });
-    const neverVisited = entry({
-      lane: "done",
-      reason: "completed",
-      since: "2026-09-04T09:00:00.000Z",
-      shell: shell({ id: "never-visited" as OrchestrationThreadShell["id"] }),
-    });
-    const board: DashboardBoard<EnvironmentThreadShell> = {
-      lanes: { "needs-you": [], running: [], monitoring: [], done: [seen, unseen, neverVisited] },
-      counts: { "needs-you": 0, running: 0, monitoring: 0, done: 3 },
-    };
-    const result = dropReviewedDoneEntries(
-      board,
-      { seen: "2026-09-04T10:00:00.000Z", unseen: "2026-09-04T11:00:00.000Z" },
-      keyForShell,
-    );
-    expect(result.lanes.done).toEqual([unseen, neverVisited]);
-    expect(result.counts.done).toBe(2);
-  });
-
-  it("leaves other lanes untouched", () => {
-    const runningEntry = entry({
-      lane: "running",
-      reason: "working",
-      shell: shell({ id: "r1" as OrchestrationThreadShell["id"] }),
-    });
-    const board: DashboardBoard<EnvironmentThreadShell> = {
-      lanes: { "needs-you": [], running: [runningEntry], monitoring: [], done: [] },
-      counts: { "needs-you": 0, running: 1, monitoring: 0, done: 0 },
-    };
-    expect(dropReviewedDoneEntries(board, {}, keyForShell).lanes.running).toEqual([runningEntry]);
   });
 });
 
@@ -354,9 +317,10 @@ it("space scope includes archived threads, isolates devices, and handles root pl
   expect(filterDashboardSpace([first], new Map(), "root")).toEqual([first]);
 });
 
-it("keeps an old result for review but never resurrects replaced or settled work", () => {
+describe("active chat lifecycle", () => {
+  const now = "2026-09-22T12:00:00Z";
   const completedAt = "2026-09-01T10:00:00Z";
-  const task = shell({
+  const completed = shell({
     latestTurn: {
       turnId: "old",
       state: "completed",
@@ -366,15 +330,67 @@ it("keeps an old result for review but never resurrects replaced or settled work
       assistantMessageId: null,
     } as EnvironmentThreadShell["latestTurn"],
   });
-  const key = scopedThreadKey(scopeThreadRef(task.environmentId, task.id));
-  const kept = { [key]: completedAt };
-  expect(buildReviewDashboard([task], "2026-09-15T12:00:00Z", {}).counts.done).toBe(0);
-  expect(buildReviewDashboard([task], "2026-09-15T12:00:00Z", kept).counts.done).toBe(1);
-  expect(
-    buildReviewDashboard([{ ...task, settledOverride: "settled" }], "2026-09-15T12:00:00Z", kept)
-      .counts.done,
-  ).toBe(0);
-  expect(
-    buildReviewDashboard([{ ...task, latestTurn: null }], "2026-09-15T12:00:00Z", kept).counts.done,
-  ).toBe(0);
+  const key = scopedThreadKey(scopeThreadRef(completed.environmentId, completed.id));
+  const reviewed = { [key]: completedAt };
+
+  it("keeps old results until reviewed, then exposes them in Idle with ordinary idle chats", () => {
+    expect(buildReviewDashboard([completed], now, {}).lanes.done[0]?.since).toBe(completedAt);
+    const board = buildReviewDashboard(
+      [completed, shell({ id: ThreadId.make("empty") })],
+      now,
+      reviewed,
+    );
+    expect(board.counts.done).toBe(0);
+    expect(board.counts.idle).toBe(2);
+    expect(board.lanes.idle.map((item) => item.reason)).toEqual(["idle", "reviewed"]);
+    expect(buildReviewDashboard([completed], now, { [key]: "older-completion" }).counts.done).toBe(
+      1,
+    );
+  });
+
+  it("resumes into Running and keeps settled, archived, and snoozed chats out of active lanes", () => {
+    expect(
+      buildReviewDashboard(
+        [
+          {
+            ...completed,
+            latestTurn: { ...completed.latestTurn!, state: "running", completedAt: null },
+          },
+        ],
+        now,
+        reviewed,
+      ).counts.running,
+    ).toBe(1);
+    for (const changes of [
+      { settledOverride: "settled" as const, hasPendingApprovals: true },
+      { archivedAt: now },
+      { snoozedUntil: "2026-09-23T12:00:00Z" },
+    ])
+      expect(
+        flattenBoardEntries(buildReviewDashboard([{ ...completed, ...changes }], now, reviewed)),
+      ).toEqual([]);
+    expect(
+      buildReviewDashboard([{ ...completed, snoozedUntil: "2026-09-21T12:00:00Z" }], now, {}).counts
+        .done,
+    ).toBe(1);
+  });
+
+  it("prioritizes requests and liveness over a reviewed completion", () => {
+    for (const changes of [{ hasPendingApprovals: true }, { hasPendingUserInput: true }]) {
+      expect(
+        buildReviewDashboard([{ ...completed, ...changes }], now, reviewed).counts["needs-you"],
+      ).toBe(1);
+    }
+    expect(
+      buildReviewDashboard([{ ...completed, backgroundLiveness: "monitoring" }], now, reviewed)
+        .counts.monitoring,
+    ).toBe(1);
+    expect(
+      buildReviewDashboard(
+        [{ ...completed, latestTurn: { ...completed.latestTurn!, state: "error" } }],
+        now,
+        {},
+      ).lanes["needs-you"][0]?.reason,
+    ).toBe("failed");
+  });
 });

@@ -30,6 +30,8 @@ const REASON_COLOR_CLASS: Record<DashboardBoardEntry["reason"], string> = {
   working: "text-sky-600 dark:text-sky-300/80 bg-sky-500/10",
   connecting: "text-sky-600 dark:text-sky-300/80 bg-sky-500/10",
   monitoring: "text-sky-600 dark:text-sky-300/80 bg-sky-500/10",
+  idle: "text-muted-foreground bg-muted-foreground/10",
+  reviewed: "text-muted-foreground bg-muted-foreground/10",
   completed: "text-emerald-600 dark:text-emerald-300/90 bg-emerald-500/10",
   failed: "text-destructive bg-destructive/10",
   interrupted: "text-muted-foreground bg-muted-foreground/10",
@@ -46,6 +48,7 @@ function dashboardTimeLabel(entry: DashboardBoardEntry, nowMs: number): string {
       return elapsed === "just now" ? "Running" : `Running ${elapsed}`;
     case "monitoring":
       return elapsed === "just now" ? "Since just now" : `Since ${elapsed}`;
+    case "idle":
     case "done":
       return formatRelativeTimeLabel(entry.since);
   }
@@ -94,7 +97,7 @@ export const DashboardCard = memo(function DashboardCard({
     shell.linkedPullRequest,
   );
   const nowMs = Date.parse(now);
-  const escalated = isEscalated(entry, now);
+  const escalated = entry.lane !== "idle" && isEscalated(entry, now);
 
   const openThread = useCallback(() => {
     if (!opening) onOpen();
@@ -153,7 +156,7 @@ export const DashboardCard = memo(function DashboardCard({
         Stop
       </Button>
     );
-  } else if (entry.lane === "done") {
+  } else if (entry.lane === "done" || entry.reason === "reviewed") {
     const key = scopedThreadKey(scopeThreadRef(environmentId, threadId));
     const isReviewed = reviewed[key] === entry.since;
     actions = (
@@ -211,7 +214,11 @@ export const DashboardCard = memo(function DashboardCard({
               REASON_COLOR_CLASS[entry.reason],
             )}
           >
-            {DASHBOARD_REASON_LABELS[entry.reason]}
+            {entry.reason === "idle"
+              ? "Idle"
+              : entry.reason === "reviewed"
+                ? "Reviewed"
+                : DASHBOARD_REASON_LABELS[entry.reason]}
           </span>
           <span className="shrink-0">{dashboardTimeLabel(entry, nowMs)}</span>
           {entry.lane === "done" &&

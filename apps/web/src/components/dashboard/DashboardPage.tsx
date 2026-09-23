@@ -36,7 +36,10 @@ import {
   scopedProjectKey,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import { dashboardHistory, type DashboardLane } from "@t3tools/client-runtime/state/dashboard";
+import {
+  dashboardHistory,
+  type DashboardHistoryView,
+} from "@t3tools/client-runtime/state/dashboard";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   PROVIDER_DISPLAY_NAMES,
@@ -70,7 +73,7 @@ import {
   deriveDashboardScope,
   DASHBOARD_LANE_ORDER,
   dashboardProjectKey,
-  dropReviewedDoneEntries,
+  type DashboardLane,
   flattenBoardEntries,
   groupEntriesByProject,
   type DashboardBoardEntry,
@@ -94,6 +97,7 @@ const LANE_TILE_LABELS: Record<DashboardLane, string> = {
   running: "Running",
   monitoring: "Monitoring",
   done: "Ready to review",
+  idle: "Idle",
 };
 
 function useNow(): string {
@@ -355,11 +359,6 @@ export function DashboardPage({
     "all",
     Schema.String,
   );
-  const [showRecent, setShowRecent] = useLocalStorage(
-    `${storageScope}.showRecent`,
-    false,
-    Schema.Boolean,
-  );
   const [environmentFilter, setEnvironmentFilter] = useLocalStorage(
     `${storageScope}.device`,
     null,
@@ -428,26 +427,28 @@ export function DashboardPage({
     [matchingShells, branchFilter, prFilter],
   );
   const reviewed = useWorkflowState((s) => s.reviewed);
-  const kept = useWorkflowState((s) => s.kept);
-  const board = useMemo(() => buildReviewDashboard(gitShells, now, kept), [gitShells, now, kept]);
+  const filteredBoard = useMemo(
+    () => buildReviewDashboard(gitShells, now, reviewed),
+    [gitShells, now, reviewed],
+  );
+  const settled = useMemo(() => dashboardHistory(gitShells, now, "settled"), [gitShells, now]);
+  const [settledExpanded, setSettledExpanded] = useLocalStorage(
+    `${storageScope}.settledExpanded`,
+    settled.length > 0 && DASHBOARD_LANE_ORDER.every((lane) => filteredBoard.counts[lane] === 0),
+    Schema.Boolean,
+  );
   const history = useMemo(
     () => (visibility === "active" ? [] : dashboardHistory(gitShells, now, visibility)),
     [gitShells, now, visibility],
   );
 
   const threadLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
-  const unseenBoard = useMemo(
-    () => dropReviewedDoneEntries(board, reviewed, threadVisitedKey),
-    [board, reviewed],
-  );
-
   const [groupBy, setGroupBy] = useLocalStorage(
     `${storageScope}.group`,
     "state",
     DashboardGroupSchema,
   );
   const showMachineIcon = environments.length > 1;
-  const filteredBoard = showRecent ? board : unseenBoard;
   const environmentByKind = useMemo(
     () => new Map(environments.map((environment) => [environment.environmentId, environment])),
     [environments],
@@ -461,17 +462,35 @@ export function DashboardPage({
       !key ||
       focusedReturn.current === key ||
       (!allEntries.some((entry) => threadVisitedKey(entry.shell) === key) &&
-        !history.some((shell) => threadVisitedKey(shell) === key))
+        !history.some((shell) => threadVisitedKey(shell) === key) &&
+        !settled.some((shell) => threadVisitedKey(shell) === key))
     )
       return;
+    if (
+      visibility === "active" &&
+      settled.some((shell) => threadVisitedKey(shell) === key) &&
+      !settledExpanded
+    ) {
+      setSettledExpanded(true);
+      return;
+    }
     const card = boardRef.current?.querySelector<HTMLElement>(
       `[data-dashboard-chat-key="${CSS.escape(key)}"]`,
     );
     if (card) {
       card.focus({ preventScroll: true });
+      card.scrollIntoView({ block: "nearest", inline: "nearest" });
       focusedReturn.current = key;
     }
-  }, [location.state.dashboardFocusKey, allEntries, history]);
+  }, [
+    location.state.dashboardFocusKey,
+    allEntries,
+    history,
+    settled,
+    visibility,
+    settledExpanded,
+    setSettledExpanded,
+  ]);
   const projectGroups = useMemo(() => groupEntriesByProject(allEntries), [allEntries]);
   const visibleLanes = DASHBOARD_LANE_ORDER;
 
@@ -531,7 +550,7 @@ export function DashboardPage({
     pr: prFilter,
     visibility,
     group: groupBy,
-    recent: showRecent,
+    recent: false,
   };
   function applyView(view: DashboardView) {
     const profile = resolvedProfiles.find((item) => item.id === view.profileId);
@@ -593,7 +612,6 @@ export function DashboardPage({
       setLocalStorageItem(`${key}.pr`, view.pr, DashboardPrSchema);
       setLocalStorageItem(`${key}.visibility`, view.visibility, DashboardVisibilitySchema);
       setLocalStorageItem(`${key}.group`, view.group, DashboardGroupSchema);
-      setLocalStorageItem(`${key}.showRecent`, view.recent, Schema.Boolean);
       setLocalStorageItem(`${key}.scroll`, 0, Schema.Finite);
       if (key !== storageScope) {
         setScope(profile.id === ALL_PROFILE_ID ? null : profile.id, view.space);
@@ -609,7 +627,6 @@ export function DashboardPage({
     setPrFilter(view.pr);
     setVisibility(view.visibility);
     setGroupBy(view.group);
-    setShowRecent(view.recent);
     if (boardRef.current) boardRef.current.scrollTop = 0;
   }
   function resetFilters() {
@@ -620,31 +637,44 @@ export function DashboardPage({
     setBranchFilter("");
     setPrFilter("all");
   }
-  const resultsControl = (
-    <Select
-      disabled={visibility !== "active"}
-      value={showRecent ? "recent" : "unreviewed"}
-      onValueChange={(value) => {
-        if (value) setShowRecent(value === "recent");
-      }}
-    >
-      <SelectTrigger
-        size="xs"
-        className="h-8 w-full min-w-0 sm:h-8 rounded-md border-border/70 bg-background shadow-none hover:bg-foreground/10"
-        aria-label="Results to show"
-      >
-        <SelectValue>{showRecent ? "Recent 24h" : "Unreviewed results"}</SelectValue>
-      </SelectTrigger>
-      <SelectPopup alignItemWithTrigger={false}>
-        <SelectItem className="min-h-7 text-xs sm:text-xs" value="unreviewed">
-          Unreviewed results
-        </SelectItem>
-        <SelectItem className="min-h-7 text-xs sm:text-xs" value="recent">
-          Recent 24h
-        </SelectItem>
-      </SelectPopup>
-    </Select>
-  );
+  function renderHistoryRow(shell: EnvironmentThreadShell, view: DashboardHistoryView) {
+    const project = projectByKey.get(dashboardProjectKey(shell.environmentId, shell.projectId));
+    const environment = environmentByKind.get(shell.environmentId);
+    return (
+      <DashboardHistoryRow
+        key={threadVisitedKey(shell)}
+        shell={shell}
+        onOpen={() => void openDashboardChat(shell)}
+        opening={openingChat === threadVisitedKey(shell)}
+        spaceName={shellSpace(shell)?.name}
+        view={view}
+        now={now}
+        projectTitle={project?.title ?? "Unknown project"}
+        projectCwd={project?.workspaceRoot ?? ""}
+        deviceLabel={environment?.label ?? "Unknown device"}
+        connected={environment?.connection.phase === "connected"}
+        provider={providers
+          .get(shell.environmentId)
+          ?.get(shell.session?.providerInstanceId ?? shell.modelSelection.instanceId)}
+        onRestore={async () => {
+          const target = scopeThreadRef(shell.environmentId, shell.id);
+          const result = await (view === "archived"
+            ? unarchiveThread(target)
+            : view === "settled"
+              ? unsettleThread(target)
+              : unsnoozeThread(target));
+          if (result._tag !== "Success" && !isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add({
+              type: "error",
+              title: "Could not update task",
+              description: error instanceof Error ? error.message : "Please try again.",
+            });
+          }
+        }}
+      />
+    );
+  }
 
   async function openDashboardChat(shell: EnvironmentThreadShell) {
     if (opening.current) return;
@@ -1195,10 +1225,6 @@ export function DashboardPage({
                     </Select>
                   </div>
                   <div className="min-w-0 space-y-1">
-                    <div className="text-[11px] leading-4 text-muted-foreground">Results</div>
-                    {resultsControl}
-                  </div>
-                  <div className="min-w-0 space-y-1">
                     <div className="text-[11px] leading-4 text-muted-foreground">Group by</div>
                     <Select
                       disabled={visibility !== "active"}
@@ -1304,46 +1330,7 @@ export function DashboardPage({
                   : undefined
               }
             >
-              {history.map((shell) => {
-                const project = projectByKey.get(
-                  dashboardProjectKey(shell.environmentId, shell.projectId),
-                );
-                const environment = environmentByKind.get(shell.environmentId);
-                return (
-                  <DashboardHistoryRow
-                    key={threadVisitedKey(shell)}
-                    shell={shell}
-                    onOpen={() => void openDashboardChat(shell)}
-                    opening={openingChat === threadVisitedKey(shell)}
-                    spaceName={shellSpace(shell)?.name}
-                    view={visibility}
-                    now={now}
-                    projectTitle={project?.title ?? "Unknown project"}
-                    projectCwd={project?.workspaceRoot ?? ""}
-                    deviceLabel={environment?.label ?? "Unknown device"}
-                    connected={environment?.connection.phase === "connected"}
-                    provider={providers
-                      .get(shell.environmentId)
-                      ?.get(shell.session?.providerInstanceId ?? shell.modelSelection.instanceId)}
-                    onRestore={async () => {
-                      const target = scopeThreadRef(shell.environmentId, shell.id);
-                      const result = await (visibility === "archived"
-                        ? unarchiveThread(target)
-                        : visibility === "settled"
-                          ? unsettleThread(target)
-                          : unsnoozeThread(target));
-                      if (result._tag !== "Success" && !isAtomCommandInterrupted(result)) {
-                        const error = squashAtomCommandFailure(result);
-                        toastManager.add({
-                          type: "error",
-                          title: "Could not update task",
-                          description: error instanceof Error ? error.message : "Please try again.",
-                        });
-                      }
-                    }}
-                  />
-                );
-              })}
+              {history.map((shell) => renderHistoryRow(shell, visibility))}
             </ul>
             {!history.length &&
             !(visibility === "archived" && (archive.isLoading || archive.error)) ? (
@@ -1355,11 +1342,9 @@ export function DashboardPage({
         ) : (
           <div
             className={cn(
-              "grid min-h-0 flex-1 content-start items-start gap-3 overflow-y-auto p-4",
+              "grid min-h-0 flex-1 auto-rows-max content-start items-start gap-3 overflow-y-auto p-4",
               groupBy === "state"
-                ? allEntries.length
-                  ? "@min-[1120px]/dashboard:grid-cols-4"
-                  : "@min-[500px]/dashboard:grid-cols-2 @min-[850px]/dashboard:grid-cols-4"
+                ? "grid-cols-1"
                 : "@min-[640px]/dashboard:grid-cols-2 @min-[1000px]/dashboard:grid-cols-3",
             )}
             aria-label="Task board"
@@ -1401,63 +1386,69 @@ export function DashboardPage({
               <div className="h-px flex-1 bg-border/60" />
             </div>
             {groupBy === "state" ? (
-              visibleLanes.map((lane) => {
-                const entries = filteredBoard.lanes[lane];
-                return (
-                  <section
-                    key={lane}
-                    aria-label={LANE_TILE_LABELS[lane]}
-                    className={cn(
-                      "flex min-w-0 flex-col rounded-xl border border-border/60 bg-muted/15 p-3",
-                      !allEntries.length && "py-2",
-                    )}
-                  >
-                    <div className="flex min-h-7 flex-wrap items-center gap-2">
-                      <span
+              <div
+                className="col-span-full min-w-0 overflow-x-auto pb-2"
+                aria-label="Chat status columns"
+                tabIndex={0}
+              >
+                <div className="grid grid-cols-[repeat(5,minmax(16rem,1fr))] items-start gap-3">
+                  {visibleLanes.map((lane) => {
+                    const entries = filteredBoard.lanes[lane];
+                    return (
+                      <section
+                        key={lane}
+                        aria-label={LANE_TILE_LABELS[lane]}
                         className={cn(
-                          "size-1.5 rounded-full",
-                          lane === "needs-you"
-                            ? "bg-amber-500"
-                            : lane === "running"
-                              ? "bg-sky-500"
-                              : lane === "monitoring"
-                                ? "bg-violet-500"
-                                : "bg-emerald-500",
+                          "flex min-w-0 flex-col rounded-xl border border-border/60 bg-muted/15 p-3",
+                          !allEntries.length && "py-2",
                         )}
-                      />
-                      <h2 className="text-[13px] font-semibold">
-                        {lane === "done"
-                          ? showRecent
-                            ? "Recent results"
-                            : "Ready to review"
-                          : LANE_TILE_LABELS[lane]}
-                      </h2>
-                      <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
-                        {entries.length}
-                      </span>
-                    </div>
-                    {allEntries.length > 0 && (
-                      <div className="space-y-2 [&:not(:empty)]:mt-2">
-                        {entries.length ? (
-                          entries.map(renderCard)
-                        ) : (
-                          <p className="text-xs text-muted-foreground">
-                            {activeFilters.length > 0
-                              ? "No matching chats"
-                              : lane === "needs-you"
-                                ? "Nothing needs attention"
+                      >
+                        <div className="flex min-h-7 flex-wrap items-center gap-2">
+                          <span
+                            className={cn(
+                              "size-1.5 rounded-full",
+                              lane === "needs-you"
+                                ? "bg-amber-500"
                                 : lane === "running"
-                                  ? "No active chats"
+                                  ? "bg-sky-500"
                                   : lane === "monitoring"
-                                    ? "No background watchers"
-                                    : "No new results"}
-                          </p>
+                                    ? "bg-violet-500"
+                                    : lane === "idle"
+                                      ? "bg-muted-foreground/50"
+                                      : "bg-emerald-500",
+                            )}
+                          />
+                          <h2 className="text-[13px] font-semibold">{LANE_TILE_LABELS[lane]}</h2>
+                          <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                            {entries.length}
+                          </span>
+                        </div>
+                        {allEntries.length > 0 && (
+                          <div className="space-y-2 [&:not(:empty)]:mt-2">
+                            {entries.length ? (
+                              entries.map(renderCard)
+                            ) : (
+                              <p className="text-xs text-muted-foreground">
+                                {activeFilters.length > 0
+                                  ? "No matching chats"
+                                  : lane === "needs-you"
+                                    ? "Nothing needs attention"
+                                    : lane === "running"
+                                      ? "No running chats"
+                                      : lane === "monitoring"
+                                        ? "No background watchers"
+                                        : lane === "idle"
+                                          ? "No idle chats"
+                                          : "No new results"}
+                              </p>
+                            )}
+                          </div>
                         )}
-                      </div>
-                    )}
-                  </section>
-                );
-              })
+                      </section>
+                    );
+                  })}
+                </div>
+              </div>
             ) : groupBy === "space" && allEntries.length > 0 ? (
               [
                 ...new Set(
@@ -1507,9 +1498,30 @@ export function DashboardPage({
               >
                 {activeFilters.length
                   ? "No chats match these filters. Adjust them or reset filters above."
-                  : "No chats need attention, are running, or have results waiting for review."}
+                  : "No active chats in this view."}
               </p>
             )}
+            <details
+              open={settledExpanded}
+              onToggle={(event) => setSettledExpanded(event.currentTarget.open)}
+              className="col-span-full rounded-xl border border-border/60 bg-muted/10"
+            >
+              <summary className="cursor-pointer rounded-xl px-4 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
+                Settled{" "}
+                <span className="ml-1 text-xs tabular-nums text-muted-foreground">
+                  {settled.length}
+                </span>
+              </summary>
+              {settled.length ? (
+                <ul className="border-t border-border/60">
+                  {settled.map((shell) => renderHistoryRow(shell, "settled"))}
+                </ul>
+              ) : (
+                <p className="px-4 pb-3 text-xs text-muted-foreground">
+                  No settled chats match this view.
+                </p>
+              )}
+            </details>
           </div>
         )}
       </div>

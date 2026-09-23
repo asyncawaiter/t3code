@@ -1,3 +1,4 @@
+import { useOpenChatInColumns } from "../hooks/useOpenChatInColumns";
 import { COMMAND_PALETTE_META_ICON_CLASS, CommandPaletteMetaDot } from "./ThreadCommandSubtitle";
 ("use client");
 
@@ -722,6 +723,7 @@ function OpenCommandPaletteDialog(props: {
 }) {
   const navigate = useNavigate();
   const openWorkflowThread = useWorkflowNavigation();
+  const openInColumns = useOpenChatInColumns();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
   const [query, setQuery] = useState(openIntent?.kind === "search" ? openIntent.query : "");
@@ -1244,6 +1246,7 @@ function OpenCommandPaletteDialog(props: {
             clientSettings.sidebarThreadSortOrder,
           );
       if (latestThread) {
+        if (await openInColumns(latestThread)) return;
         await navigate({
           to: "/$environmentId/$threadId",
           params: buildThreadRouteParams(
@@ -1259,6 +1262,7 @@ function OpenCommandPaletteDialog(props: {
       clientSettings.sidebarThreadSortOrder,
       handleNewThread,
       navigate,
+      openInColumns,
       projectGroupByTargetKey,
       threads,
     ],
@@ -1359,6 +1363,7 @@ function OpenCommandPaletteDialog(props: {
             : undefined;
         },
         runThread: async (thread) => {
+          if (await openInColumns(thread)) return;
           await navigate({
             to: "/$environmentId/$threadId",
             params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
@@ -1369,6 +1374,7 @@ function OpenCommandPaletteDialog(props: {
       activeThreadId,
       clientSettings.sidebarThreadSortOrder,
       navigate,
+      openInColumns,
       projectByKey,
       projectEnvironmentLocationById,
       projectTitleById,
@@ -2230,6 +2236,7 @@ function OpenCommandPaletteDialog(props: {
             query: linkedThreadSearch.query,
             icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
             runThread: async (thread) => {
+              if (await openInColumns(thread)) return;
               await navigate({
                 to: "/$environmentId/$threadId",
                 params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
@@ -2310,6 +2317,7 @@ function OpenCommandPaletteDialog(props: {
           clientSettings.sidebarThreadSortOrder,
         );
         if (latestThread && latestThread.settledOverride !== "settled") {
+          if (await openInColumns(latestThread)) return;
           await navigate({
             to: "/$environmentId/$threadId",
             params: buildThreadRouteParams(
@@ -2405,6 +2413,7 @@ function OpenCommandPaletteDialog(props: {
       createProject,
       environments,
       navigate,
+      openInColumns,
       primaryEnvironmentId,
       primarySettingsLoaded,
       providers,

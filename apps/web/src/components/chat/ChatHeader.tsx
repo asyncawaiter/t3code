@@ -1,5 +1,6 @@
 import { useUiStateStore } from "../../uiStateStore";
 import {
+  moveThreadsToSpace,
   type EnvironmentId,
   type EditorId,
   type ProjectScript,
@@ -12,7 +13,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { BookmarkIcon, ChevronDownIcon, EllipsisIcon } from "lucide-react";
+import { BookmarkIcon, ChevronDownIcon, EllipsisIcon, MessageSquareIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -52,9 +53,13 @@ import {
 import { cn } from "~/lib/utils";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { Button } from "../ui/button";
-import { Menu, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+
+import { ThreadSpaceDialog } from "../sidebar/ThreadSpaceDialog";
+import { useSaveProfiles } from "../../hooks/useProfileSync";
 
 interface ChatHeaderProps {
+  compact?: boolean;
   activeThreadEnvironmentId: EnvironmentId;
   activeThreadId: ThreadId;
   draftId?: DraftId;
@@ -125,6 +130,7 @@ export function shouldShowOpenInPicker(input: {
 }
 
 export const ChatHeader = memo(function ChatHeader({
+  compact = false,
   activeThreadEnvironmentId,
   activeThreadId,
   draftId,
@@ -173,7 +179,9 @@ export const ChatHeader = memo(function ChatHeader({
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
-  const actionsCollapsed = isMobile || isNarrowHeader;
+  const actionsCollapsed = compact || isMobile || isNarrowHeader;
+  const [assigningSpace, setAssigningSpace] = useState(false);
+  const saveProfiles = useSaveProfiles();
   const [actionsOpen, setActionsOpen] = useState(false);
   const [actionsContainer] = useState(() => {
     const container = document.createElement("div");
@@ -358,6 +366,26 @@ export const ChatHeader = memo(function ChatHeader({
   );
   const headerActions = (
     <>
+      {compact && activeProject && (
+        <MenuItem
+          onClick={() => {
+            setActionsOpen(false);
+            onNewThreadInProject();
+          }}
+        >
+          New chat in this folder
+        </MenuItem>
+      )}
+      {isServerThread && actionsCollapsed && (
+        <MenuItem
+          onClick={() => {
+            setActionsOpen(false);
+            setAssigningSpace(true);
+          }}
+        >
+          Move to space
+        </MenuItem>
+      )}
       {activeProjectScripts && (
         <>
           <ProjectScriptsControl
@@ -405,6 +433,41 @@ export const ChatHeader = memo(function ChatHeader({
       className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
       onContextMenu={handleHeaderContextMenu}
     >
+      {assigningSpace && activeProject && (
+        <ThreadSpaceDialog
+          threads={[
+            {
+              threadKey: `${activeThreadEnvironmentId}:${activeThreadId}`,
+              projectKey: `${activeThreadEnvironmentId}:${activeProject.id}`,
+            },
+          ]}
+          onClose={() => setAssigningSpace(false)}
+          onMove={(profileId, spaceId) => {
+            void saveProfiles((profiles) =>
+              profiles.map((profile) =>
+                profile.id === profileId
+                  ? moveThreadsToSpace(
+                      profile,
+                      [
+                        {
+                          threadKey: `${activeThreadEnvironmentId}:${activeThreadId}`,
+                          projectKey: `${activeThreadEnvironmentId}:${activeProject.id}`,
+                        },
+                      ],
+                      spaceId,
+                    )
+                  : profile,
+              ),
+            ).catch((error: unknown) =>
+              toastManager.add({
+                type: "error",
+                title: "Could not move chat",
+                description: error instanceof Error ? error.message : "Try again.",
+              }),
+            );
+          }}
+        />
+      )}
       <WorkspaceBreadcrumb
         ariaLabel="Thread breadcrumb"
         className="flex-1 overflow-clip [overflow-clip-margin:2px]"
@@ -412,7 +475,7 @@ export const ChatHeader = memo(function ChatHeader({
         {/* The project always leads the header: knowing which project a
             thread lives in is priority zero, and the thread title alone
             doesn't answer it. */}
-        {activeProject ? (
+        {activeProject && !compact ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
               <Tooltip>
@@ -470,7 +533,11 @@ export const ChatHeader = memo(function ChatHeader({
                 }
               >
                 <h2 className="min-w-0">
-                  <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
+                  {compact ? (
+                    <MessageSquareIcon className="size-4" />
+                  ) : (
+                    <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
+                  )}
                 </h2>
                 <ChevronDownIcon
                   aria-hidden
@@ -478,7 +545,7 @@ export const ChatHeader = memo(function ChatHeader({
                   className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/thread-title:opacity-100 group-focus-visible/thread-title:opacity-100"
                 />
               </TooltipTrigger>
-              <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
+              <TooltipPopup side="top">{compact ? "Chat actions" : activeThreadTitle}</TooltipPopup>
             </Tooltip>
           ) : (
             <Tooltip>
@@ -537,7 +604,10 @@ export const ChatHeader = memo(function ChatHeader({
           <MenuTrigger
             className={
               actionsCollapsed &&
-              (activeProjectScripts || showOpenInPicker || (activeProjectName && gitCwd))
+              (isServerThread ||
+                activeProjectScripts ||
+                showOpenInPicker ||
+                (activeProjectName && gitCwd))
                 ? undefined
                 : "hidden"
             }

@@ -36,7 +36,7 @@ export function DashboardHistoryRow({
   opening: boolean;
 }) {
   const [pending, setPending] = useState(false);
-  const action = view === "archived" ? "Restore" : view === "settled" ? "Reopen" : "Unsnooze";
+  const action = view === "archived" ? "Restore" : view === "settled" ? "Unsettle" : "Unsnooze";
   const time =
     view === "snoozed"
       ? `Returns in ${snoozeWakeLabel(shell.snoozedUntil!, { now })}`

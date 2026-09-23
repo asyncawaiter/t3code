@@ -1,4 +1,4 @@
-import { buildDashboard, classifyDashboardThread } from "@t3tools/client-runtime/state/dashboard";
+import { classifyDashboardThread } from "@t3tools/client-runtime/state/dashboard";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { indexProfileSpaces } from "@t3tools/contracts";
 import type { ProviderInstanceEntry } from "../../providerInstances";
@@ -7,9 +7,8 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
  * DashboardPage.tsx so ordering rules are unit-testable without rendering.
  */
 import type {
-  DashboardBoard,
   DashboardEntry,
-  DashboardLane,
+  DashboardLane as RuntimeDashboardLane,
 } from "@t3tools/client-runtime/state/dashboard";
 import type {
   EnvironmentProject,
@@ -17,7 +16,19 @@ import type {
 } from "@t3tools/client-runtime/state/models";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 
-export type DashboardBoardEntry = DashboardEntry<EnvironmentThreadShell>;
+export type DashboardLane = RuntimeDashboardLane | "idle";
+export type DashboardBoardEntry =
+  | DashboardEntry<EnvironmentThreadShell>
+  | {
+      shell: EnvironmentThreadShell;
+      lane: "idle";
+      reason: "idle" | "reviewed";
+      since: string;
+    };
+export interface DashboardBoard {
+  lanes: Record<DashboardLane, ReadonlyArray<DashboardBoardEntry>>;
+  counts: Record<DashboardLane, number>;
+}
 
 /** Lane render order: most urgent first, mirrors the sidebar status priority. */
 export const DASHBOARD_LANE_ORDER: ReadonlyArray<DashboardLane> = [
@@ -25,6 +36,7 @@ export const DASHBOARD_LANE_ORDER: ReadonlyArray<DashboardLane> = [
   "running",
   "monitoring",
   "done",
+  "idle",
 ];
 
 export interface DashboardProjectGroup {
@@ -43,9 +55,7 @@ export function dashboardProjectKey(environmentId: EnvironmentId, projectId: Pro
  * sort (needs-you longest-wait-first, the rest most-recent-first), so the
  * result is already "lane priority then since" ordered.
  */
-export function flattenBoardEntries(
-  board: DashboardBoard<EnvironmentThreadShell>,
-): ReadonlyArray<DashboardBoardEntry> {
+export function flattenBoardEntries(board: DashboardBoard): ReadonlyArray<DashboardBoardEntry> {
   return DASHBOARD_LANE_ORDER.flatMap((lane) => board.lanes[lane]);
 }
 
@@ -71,9 +81,9 @@ export function filterEntriesByEnvironment(
  * agree with what actually renders.
  */
 export function filterBoardByEnvironment(
-  board: DashboardBoard<EnvironmentThreadShell>,
+  board: DashboardBoard,
   environmentId: EnvironmentId | null,
-): DashboardBoard<EnvironmentThreadShell> {
+): DashboardBoard {
   if (environmentId === null) return board;
   const lanes = Object.fromEntries(
     DASHBOARD_LANE_ORDER.map((lane) => [
@@ -85,24 +95,6 @@ export function filterBoardByEnvironment(
     DASHBOARD_LANE_ORDER.map((lane) => [lane, lanes[lane].length]),
   ) as Record<DashboardLane, number>;
   return { lanes, counts };
-}
-
-/**
- * Drops explicitly reviewed completions. Opening a chat does not review it.
- * Other lanes are untouched.
- */
-export function dropReviewedDoneEntries(
-  board: DashboardBoard<EnvironmentThreadShell>,
-  reviewed: Readonly<Record<string, string>>,
-  keyForShell: (shell: EnvironmentThreadShell) => string,
-): DashboardBoard<EnvironmentThreadShell> {
-  const done = board.lanes.done.filter(
-    (entry) => reviewed[keyForShell(entry.shell)] !== entry.since,
-  );
-  return {
-    lanes: { ...board.lanes, done },
-    counts: { ...board.counts, done: done.length },
-  };
 }
 
 /**
@@ -255,31 +247,52 @@ export function filterDashboardSpace(
   });
 }
 
-/** Kept results remain in review beyond the usual 24-hour window, until a new turn replaces them. */
+/** Active chats stay reachable until explicitly settled, archived, or snoozed. */
 export function buildReviewDashboard(
   shells: ReadonlyArray<EnvironmentThreadShell>,
   now: string,
-  kept: Readonly<Record<string, string>>,
-) {
-  const board = buildDashboard(shells, now);
-  const existing = new Set(
-    flattenBoardEntries(board).map((entry) =>
-      scopedThreadKey(scopeThreadRef(entry.shell.environmentId, entry.shell.id)),
-    ),
-  );
-  const retained = shells.flatMap((shell) => {
+  reviewed: Readonly<Record<string, string>>,
+): DashboardBoard {
+  const lanes: Record<DashboardLane, DashboardBoardEntry[]> = {
+    "needs-you": [],
+    running: [],
+    monitoring: [],
+    done: [],
+    idle: [],
+  };
+  for (const shell of shells) {
+    if (shell.archivedAt !== null || shell.settledOverride === "settled") continue;
+    let entry: DashboardBoardEntry | null = classifyDashboardThread(shell, now);
+    if (!entry && shell.snoozedUntil && Date.parse(shell.snoozedUntil) > Date.parse(now)) continue;
+    // Reuse provider state priority without the mobile dashboard's completion expiry.
+    if (!entry && shell.latestTurn?.completedAt) {
+      entry = classifyDashboardThread(
+        { ...shell, snoozedUntil: null },
+        shell.latestTurn.completedAt,
+      );
+    }
     const key = scopedThreadKey(scopeThreadRef(shell.environmentId, shell.id));
-    const completion = kept[key];
-    if (
-      !completion ||
-      existing.has(key) ||
-      shell.latestTurn?.completedAt !== completion ||
-      (shell.snoozedUntil && Date.parse(shell.snoozedUntil) > Date.parse(now))
-    )
-      return [];
-    const entry = classifyDashboardThread(shell, completion);
-    return entry?.lane === "done" ? [entry] : [];
-  });
-  const done = [...board.lanes.done, ...retained];
-  return { lanes: { ...board.lanes, done }, counts: { ...board.counts, done: done.length } };
+    if (entry?.lane === "done" && reviewed[key] === entry.since) {
+      entry = { ...entry, lane: "idle", reason: "reviewed" };
+    }
+    entry ??= { shell, lane: "idle", reason: "idle", since: shell.updatedAt };
+    lanes[entry.lane].push(entry);
+  }
+  for (const lane of DASHBOARD_LANE_ORDER) {
+    lanes[lane].sort((a, b) =>
+      lane === "needs-you"
+        ? Date.parse(a.since) - Date.parse(b.since)
+        : Date.parse(b.since) - Date.parse(a.since),
+    );
+  }
+  return {
+    lanes,
+    counts: {
+      "needs-you": lanes["needs-you"].length,
+      running: lanes.running.length,
+      monitoring: lanes.monitoring.length,
+      done: lanes.done.length,
+      idle: lanes.idle.length,
+    },
+  };
 }

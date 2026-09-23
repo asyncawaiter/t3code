@@ -30,6 +30,10 @@ Global, profile, and Space dashboards remember your preferred chat mode on this 
 
 **Columns** opens the same independent workspace from any profile or Space. Use **Choose chats** to filter by profile, Space, device, or folder, then select conversations. Changing these filters never removes existing selections. Enable **Show settled chats** to add a reference conversation. Mixing chats never changes their assignment.
 
+The column toolbar provides the same chat actions, scoped pins, snooze, settlement, renaming, bookmarks, Git actions, folder tools, and scripts as Chat mode. Review actions are available beside task capture. Workspace tools open in a drawer at narrow column widths, so they do not squeeze the conversation. Task capture preserves selected text or the composer's draft and attachments.
+
+The rail includes chat and message search, saved-chat focus, pull requests, usage, settings, and Account and T3 Connect. Search results, new chats from Space shortcuts, and forked chats open on your selected board when Columns is active. The existing arrangement stays intact. A draft's column menu also offers **Move draft** and **Discard draft**.
+
 **New chat** creates an editable draft directly on the board using the usual folder and device picker. Nothing is sent until you submit a message. Unsent drafts are local to this client; another device can open the conversation once it has been started.
 
 Start with one board named Columns. Use its menu to rename it, create another board, duplicate an arrangement, or delete an extra board. Board names, selected chats, order, and individual widths are saved on the shared profile source and update on connected clients. Both clients and the shared source need a version that supports shared boards. Reconnect the source to edit an arrangement while it is offline. Conflicting edits to the same board are rejected so another device's changes are not overwritten.
@@ -47,3 +51,9 @@ Quick capture, local screenshot recovery, Trash, and multiple working chats are 
 Click a profile to open its **Profile overview**, including all its Spaces and Unsorted chats. The Profile overview button above the Space tiles returns to this view. Click a Space to open its **Space overview**; the same button stays available beside Folders and Columns while reading chats. These overview entries clear narrower filters for their scope. **All chats** filters the sidebar list without changing the main view. The permanent Global dashboard button in the sidebar, or Cmd+Shift+H on macOS, opens all profiles and Spaces and clears device, folder, provider, search, and Git narrowing. Saved views remain available. Scope, device, folder, provider, and Git filters remain visible; saved views preserve combinations you reuse.
 
 **Folders** shows associated folders, instruction file lists, and checkout state directly. Select an instruction file to read it. Paths and scope distinguish parent, folder-level, and nested instructions. Branch graphs and the device's file manager remain available from each folder.
+
+In Columns mode, **Profiles and spaces** opens a floating navigator with the same profile strip
+and Space tile grid as Chat mode. Swipe horizontally to browse profiles without changing the
+board. Choose **Profile overview** or a Space tile to visit its dashboard. Tile plus buttons
+support quick task capture and per-device chat folders, including creating a folder. Space
+menus and profile options remain available. Escape or clicking outside closes the navigator.

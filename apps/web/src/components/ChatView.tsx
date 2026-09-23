@@ -1,3 +1,4 @@
+import { useOpenChatInColumns } from "../hooks/useOpenChatInColumns";
 import { useContext } from "react";
 import { ChatPaneContext } from "./chat/ChatPaneContext";
 import { ChatTaskBar } from "./tasks/ChatTaskBar";
@@ -1610,6 +1611,21 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
+  const openInColumns = useOpenChatInColumns();
+  const openCreatedThread = async (id: ThreadId) => {
+    try {
+      if (await openInColumns({ environmentId, id })) return;
+      await navigate({ to: "/$environmentId/$threadId", params: { environmentId, threadId: id } });
+    } catch (error) {
+      // The child is already durable. A board/navigation failure must not delete it.
+      toastManager.add({
+        type: "error",
+        title: "Chat created, but could not be opened",
+        description:
+          error instanceof Error ? error.message : "Find it in the dashboard and try again.",
+      });
+    }
+  };
   const citationLocation = useLocation({
     select: (location) => ({
       href: location.href,
@@ -1775,7 +1791,8 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
-  const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const narrowWorkspace = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const shouldUseRightPanelSheet = pane.column || narrowWorkspace;
   const isMobileViewport = useMediaQuery("max-sm");
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
@@ -9276,15 +9293,7 @@ export default function ChatView(props: ChatViewProps) {
     if (failure === null) await saveChildThreadPlacement(nextThreadId);
 
     if (failure === null) {
-      const navigateResult = await settlePromise(() =>
-        navigate({
-          to: "/$environmentId/$threadId",
-          params: {
-            environmentId: activeThread.environmentId,
-            threadId: nextThreadId,
-          },
-        }),
-      );
+      const navigateResult = await settlePromise(() => openCreatedThread(nextThreadId));
       failure = navigateResult._tag === "Failure" ? navigateResult : null;
     }
 
@@ -9332,6 +9341,7 @@ export default function ChatView(props: ChatViewProps) {
     resetLocalDispatch,
     defaultRuntimeMode,
     startThreadTurn,
+    openCreatedThread,
     saveChildThreadPlacement,
     environmentId,
     composerRef,
@@ -9375,15 +9385,7 @@ export default function ChatView(props: ChatViewProps) {
       if (failure === null) await saveChildThreadPlacement(nextThreadId);
 
       if (failure === null) {
-        const navigateResult = await settlePromise(() =>
-          navigate({
-            to: "/$environmentId/$threadId",
-            params: {
-              environmentId: activeThread.environmentId,
-              threadId: nextThreadId,
-            },
-          }),
-        );
+        const navigateResult = await settlePromise(() => openCreatedThread(nextThreadId));
         failure = navigateResult._tag === "Failure" ? navigateResult : null;
       }
 
@@ -9423,6 +9425,7 @@ export default function ChatView(props: ChatViewProps) {
       deleteThread,
       environmentId,
       forkThread,
+      openCreatedThread,
       isServerThread,
       navigate,
       routingProfile,
@@ -9974,7 +9977,10 @@ export default function ChatView(props: ChatViewProps) {
           workspaceViews={reserveTitleBarControlInset}
           electron={isElectron}
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
-          className="relative bg-background"
+          className={cn(
+            "relative bg-background",
+            pane.column && "border-b border-border/50 px-2 sm:px-2",
+          )}
         >
           {isElectron && reserveTitleBarControlInset && rightPanelControlsAtRoot ? (
             <span
@@ -9983,7 +9989,7 @@ export default function ChatView(props: ChatViewProps) {
             />
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
-          {reserveTitleBarControlInset && (
+          {
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -10049,8 +10055,12 @@ export default function ChatView(props: ChatViewProps) {
               </TooltipTrigger>
               <TooltipPopup>Create task from this chat</TooltipPopup>
             </Tooltip>
-          )}
+          }
+          {serverThread && !reserveTitleBarControlInset ? (
+            <DashboardReviewBar thread={serverThread} compact />
+          ) : null}
           <ChatHeader
+            compact={!reserveTitleBarControlInset}
             {...(!supportsPullRequests || activeProjectRepository === null
               ? {}
               : { onOpenPullRequest: openProjectPullRequest })}
@@ -10615,7 +10625,7 @@ export default function ChatView(props: ChatViewProps) {
       {rightPanelPresent && shouldUseRightPanelSheet && activeThreadRef ? (
         <RightPanelSheet
           animationDurationMs={panelAnimationsActive ? panelAnimationDurationMs : 0}
-          open={rightPanelOpen}
+          open={rightPanelOpen && pane.active}
           underFloatingPreview={previewMiniPlayerVisible}
           onClose={closePreviewPanel}
         >

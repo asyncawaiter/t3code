@@ -77,3 +77,25 @@ it("opens a dashboard chat without replacing, reordering or duplicating existing
   expect(board.order).toEqual(["poly:one", "godel:two"]);
   expect(board.hidden).toEqual(["godel:two"]);
 });
+
+it("keeps a moved draft in its original column position and carries its width to the new device", () => {
+  const board = {
+    ...DEFAULT_CHAT_BOARD,
+    order: ["poly:one", "godel:draft", "godel:two"],
+    widths: { "godel:draft": 550 },
+    hidden: ["godel:draft"],
+    labels: { "godel:draft": { title: "Draft", context: "Old folder" } },
+  };
+  const moved = boardWithOpenedChat(board, {
+    previousKey: "godel:draft",
+    key: "poly:draft",
+    title: "New chat",
+    context: "New folder",
+    reference: false,
+  });
+  expect(moved.order).toEqual(["poly:one", "poly:draft", "godel:two"]);
+  expect(moved.widths).toEqual({ "poly:draft": 550 });
+  expect(moved.hidden).toEqual([]);
+  expect(moved.labels).toEqual({ "poly:draft": { title: "New chat", context: "New folder" } });
+  expect(board.order[1]).toBe("godel:draft");
+});

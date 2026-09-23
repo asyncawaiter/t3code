@@ -1,3 +1,9 @@
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { releaseComposerDraftUploads } from "../../lib/composerDraftUploads";
+import { readLocalApi } from "../../localApi";
+import { useSaveProfiles } from "../../hooks/useProfileSync";
+import { moveThreadsToSpace } from "@t3tools/contracts";
+import { toastManager } from "../ui/toast";
 import { useAtomValue } from "@effect/atom-react";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import {
@@ -58,7 +64,6 @@ import {
   MenuSeparator,
 } from "../ui/menu";
 import { Checkbox } from "../ui/checkbox";
-import { openWorkItem } from "../../workItems";
 
 type ColumnChat = Pick<
   EnvironmentThreadShell,
@@ -271,6 +276,7 @@ function BoardColumns({
       },
     });
   };
+  const saveProfiles = useSaveProfiles();
   const [boardName, setBoardName] = useState("");
   const [naming, setNaming] = useState<"rename" | "new" | "duplicate" | null>(null);
   const [profileFilter, setProfileFilter] = useState("all");
@@ -870,19 +876,69 @@ function BoardColumns({
                   <MoreHorizontalIcon />
                 </MenuTrigger>
                 <MenuPopup align="end">
-                  <MenuItem
-                    onClick={() =>
-                      openWorkItem({
-                        environmentId: chat.environmentId,
-                        projectId: chat.projectId,
-                        source: { environmentId: chat.environmentId, threadId: chat.id },
-                      })
-                    }
-                  >
-                    <PlusIcon />
-                    Create task from this chat
-                  </MenuItem>
-                  <MenuSeparator />
+                  {chat.draftId && (
+                    <>
+                      <MenuItem
+                        onClick={() => {
+                          if (!chat.draftId) return;
+                          openChatCreation({
+                            draftId: chat.draftId,
+                            projectRef: scopeProjectRef(chat.environmentId, chat.projectId),
+                          });
+                        }}
+                      >
+                        Move draft
+                      </MenuItem>
+                      <MenuItem
+                        variant="destructive"
+                        onClick={async () => {
+                          if (!chat.draftId) return;
+                          const api = readLocalApi();
+                          if (
+                            !api ||
+                            !(await api.dialogs.confirm(
+                              "Discard this unsent draft and its attachments?",
+                            ))
+                          )
+                            return;
+                          try {
+                            if (
+                              !(await state.update({
+                                ...layout,
+                                hidden: [...new Set([...layout.hidden, key])],
+                              }))
+                            )
+                              return;
+                            await saveProfiles((profiles) =>
+                              profiles.map((profile) =>
+                                moveThreadsToSpace(
+                                  profile,
+                                  [
+                                    {
+                                      threadKey: key,
+                                      projectKey: `${chat.environmentId}:${chat.projectId}`,
+                                    },
+                                  ],
+                                  null,
+                                ),
+                              ),
+                            );
+                            releaseComposerDraftUploads(chat.draftId);
+                            useComposerDraftStore.getState().clearDraftThread(chat.draftId);
+                          } catch (error) {
+                            toastManager.add({
+                              type: "error",
+                              title: "Draft not discarded",
+                              description: error instanceof Error ? error.message : "Try again.",
+                            });
+                          }
+                        }}
+                      >
+                        Discard draft
+                      </MenuItem>
+                      <MenuSeparator />
+                    </>
+                  )}
                   <MenuItem
                     disabled={[...selectedKeys][0] === key}
                     onClick={() => reorder(key, -1)}
@@ -1093,9 +1149,7 @@ function Column({
         />
       )}
       <ChatPaneContext value={{ active: active && !hidden, column: !expanded }}>
-        <div
-          className={`flex min-h-0 flex-1 flex-col ${expanded ? "" : "[&_[data-chat-header]]:hidden"}`}
-        >
+        <div className="flex min-h-0 flex-1 flex-col">
           {!connected ? (
             <p className="p-4 text-sm text-muted-foreground">
               Reconnect {device} to load this conversation.

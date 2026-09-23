@@ -121,6 +121,7 @@ export function SpaceToolbar({
   selectedSpaceId,
   onFilterChange,
   onOverview,
+  showAllChats = true,
 }: {
   profile: Profile;
   onChange: (profile: Profile) => void | Promise<void>;
@@ -129,6 +130,7 @@ export function SpaceToolbar({
   selectedSpaceId: string | null;
   onFilterChange: (id: string | null) => void;
   onOverview: () => void;
+  showAllChats?: boolean;
 }) {
   const [creating, setCreating] = useState(false);
   const location = useLocation();
@@ -170,21 +172,23 @@ export function SpaceToolbar({
       <div className="flex h-7 items-center justify-between px-1.5">
         <span className="min-w-0 flex-1 text-[11px] text-sidebar-muted-foreground">Spaces</span>
 
-        <Button
-          size="xs"
-          variant="ghost"
-          aria-pressed={selectedSpaceId === null}
-          onClick={() => onFilterChange(null)}
-          className={cn(
-            "h-6 gap-1 rounded-md px-2 text-[10px] ring-1 ring-inset",
-            selectedSpaceId === null
-              ? "bg-[color-mix(in_srgb,var(--sidebar-row-active)_85%,transparent)] text-sidebar-foreground ring-sidebar-border hover:bg-sidebar-row-active"
-              : "text-sidebar-muted-foreground ring-transparent",
-          )}
-        >
-          {selectedSpaceId === null && <CheckIcon aria-hidden className="size-3" />}
-          All chats
-        </Button>
+        {showAllChats && (
+          <Button
+            size="xs"
+            variant="ghost"
+            aria-pressed={selectedSpaceId === null}
+            onClick={() => onFilterChange(null)}
+            className={cn(
+              "h-6 gap-1 rounded-md px-2 text-[10px] ring-1 ring-inset",
+              selectedSpaceId === null
+                ? "bg-[color-mix(in_srgb,var(--sidebar-row-active)_85%,transparent)] text-sidebar-foreground ring-sidebar-border hover:bg-sidebar-row-active"
+                : "text-sidebar-muted-foreground ring-transparent",
+            )}
+          >
+            {selectedSpaceId === null && <CheckIcon aria-hidden className="size-3" />}
+            All chats
+          </Button>
+        )}
         {profile.id !== ALL_PROFILE_ID ? (
           <Tooltip>
             <TooltipTrigger

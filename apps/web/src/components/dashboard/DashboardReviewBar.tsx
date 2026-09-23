@@ -6,10 +6,14 @@ import { useWorkflowState } from "../../workflowState";
 import { useThreadShells } from "../../state/entities";
 import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
 import { Button } from "../ui/button";
+import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
+import { CheckCheckIcon } from "lucide-react";
 
 export function DashboardReviewBar({
   thread,
+  compact = false,
 }: {
+  compact?: boolean;
   thread: Pick<EnvironmentThreadShell, "id" | "environmentId" | "latestTurn">;
 }) {
   const workflow = useWorkflowState();
@@ -32,7 +36,7 @@ export function DashboardReviewBar({
       : null;
   if (!inQueue && !completion) return null;
   const actionable = new Set(
-    flattenBoardEntries(buildReviewDashboard(threads, new Date().toISOString(), workflow.kept))
+    flattenBoardEntries(buildReviewDashboard(threads, new Date().toISOString(), workflow.reviewed))
       .filter(
         (entry) =>
           entry.lane === "needs-you" ||
@@ -48,6 +52,42 @@ export function DashboardReviewBar({
   );
   const index = workflow.triageQueue.indexOf(key);
   const next = remaining.find((item) => workflow.triageQueue.indexOf(item) > index) ?? remaining[0];
+  if (compact)
+    return (
+      <Menu>
+        <MenuTrigger render={<Button size="icon-xs" variant="ghost" aria-label="Review chat" />}>
+          <CheckCheckIcon />
+        </MenuTrigger>
+        <MenuPopup align="start">
+          {completion && (
+            <>
+              <MenuItem
+                disabled={workflow.kept[key] === completion}
+                onClick={() => workflow.review(key, completion, true)}
+              >
+                {workflow.kept[key] === completion ? "Kept for review" : "Keep for review"}
+              </MenuItem>
+              <MenuItem
+                disabled={workflow.reviewed[key] === completion}
+                onClick={() => workflow.review(key, completion, false)}
+              >
+                {workflow.reviewed[key] === completion ? "Reviewed" : "Mark reviewed"}
+              </MenuItem>
+            </>
+          )}
+          {inQueue && (
+            <MenuItem
+              disabled={!next}
+              onClick={() => {
+                if (next) openThread(next);
+              }}
+            >
+              Next item{remaining.length ? ` (${remaining.length})` : ""}
+            </MenuItem>
+          )}
+        </MenuPopup>
+      </Menu>
+    );
   return (
     <div
       className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/50 px-4 py-1.5 text-xs text-muted-foreground"

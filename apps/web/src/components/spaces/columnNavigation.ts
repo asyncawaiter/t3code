@@ -65,8 +65,29 @@ export function boardWithOpenedChat(
     title: string;
     context: string;
     reference: boolean;
+    previousKey?: string;
   },
 ): ChatBoard {
+  if (chat.previousKey && chat.previousKey !== chat.key && board.order.includes(chat.previousKey)) {
+    const previous = chat.previousKey;
+    const replace = (keys: readonly string[]) => [
+      ...new Set(keys.map((key) => (key === previous ? chat.key : key))),
+    ];
+    const widths = { ...board.widths };
+    if (widths[previous] !== undefined && widths[chat.key] === undefined)
+      widths[chat.key] = widths[previous];
+    delete widths[previous];
+    const labels = { ...board.labels, [chat.key]: { title: chat.title, context: chat.context } };
+    delete labels[previous];
+    board = {
+      ...board,
+      order: replace(board.order),
+      hidden: replace(board.hidden),
+      kept: replace(board.kept),
+      widths,
+      labels,
+    };
+  }
   if (
     board.order.includes(chat.key) &&
     !board.hidden.includes(chat.key) &&

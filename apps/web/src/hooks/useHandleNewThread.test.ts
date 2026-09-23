@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { RuntimeMode } from "@t3tools/contracts";
 
+const columnState = vi.hoisted(() => ({ mode: "chat", open: vi.fn(async () => false) }));
+vi.mock("./useOpenChatInColumns", () => ({ useOpenChatInColumns: () => columnState.open }));
+vi.mock("../components/spaces/columnNavigation", () => ({ useChatMode: () => [columnState.mode] }));
+
 const testState = vi.hoisted(() => {
   let completeProjectFileRead: (value: null) => void = () => undefined;
   let projectFileRead = Promise.resolve<null>(null);
@@ -53,6 +57,8 @@ const testState = vi.hoisted(() => {
         startFromOrigin: false,
       },
     ) {
+      columnState.mode = "chat";
+      columnState.open.mockClear();
       storedDraft = nextStoredDraft;
       targetSettings = {
         defaultThreadEnvMode: workspaceDefaults.envMode,
@@ -233,6 +239,24 @@ describe.each([
     expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalled();
     expect(testState.router.navigate).not.toHaveBeenCalled();
     expect(revealChatLocation).not.toHaveBeenCalled();
+  });
+
+  it("opens space and project drafts on the board when Columns is selected", async () => {
+    testState.reset(draft);
+    columnState.mode = "columns";
+    const pendingOpen = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    const opened = await pendingOpen;
+    expect(opened?.draftId).toBeTruthy();
+    expect(testState.router.navigate).not.toHaveBeenCalled();
+    expect(columnState.open).toHaveBeenCalledWith({
+      environmentId: "environment-ssh",
+      id: opened!.threadId,
+      title: "New chat",
+    });
   });
 
   it("abandons a delayed draft open when the user navigates elsewhere", async () => {

@@ -1,3 +1,9 @@
+import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
+import { openCommandPalette } from "../../commandPaletteBus";
+import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
+import { useEnvironments } from "../../state/environments";
+import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
+import { ProfileSpaceNavigator } from "./ProfileSpaceNavigator";
 import { useAtomValue } from "@effect/atom-react";
 import {
   PROFILE_JUMP_KEYBINDING_COMMANDS,
@@ -14,6 +20,8 @@ import { isTerminalFocused } from "../../lib/terminalFocus";
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import {
+  SearchIcon,
+  LocateFixedIcon,
   LayoutDashboardIcon,
   LayersIcon,
   SettingsIcon,
@@ -33,12 +41,20 @@ import { SidebarAccountControls } from "../sidebar/SidebarChrome";
 /** Columns owns chat navigation. This rail only visits other parts of the app. */
 export function ColumnsRail() {
   const navigate = useNavigate();
+  const openThread = useWorkflowNavigation();
+  const bookmark = useUiStateStore((state) => state.bookmarkedThreadKey);
+  const { environments } = useEnvironments();
+  const pullRequestsSupported = environments.some(
+    (env) => env.serverConfig?.environment.capabilities.pullRequests === true,
+  );
   const location = useLocation();
   const profiles = usePrimarySettings((settings) => settings.profiles);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const [browsing, setBrowsing] = useState(false);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
+        browsing ||
         event.defaultPrevented ||
         event.repeat ||
         isCommandPaletteOpen() ||
@@ -77,8 +93,7 @@ export function ColumnsRail() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [profiles, keybindings, navigate]);
-  const [browsing, setBrowsing] = useState(false);
+  }, [profiles, keybindings, navigate, browsing]);
   return (
     <aside
       aria-label="Columns navigation"
@@ -103,6 +118,40 @@ export function ColumnsRail() {
         </TooltipTrigger>
         <TooltipPopup side="right">Global dashboard</TooltipPopup>
       </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Search chats and commands"
+              onClick={() => openCommandPalette({ query: "" })}
+            />
+          }
+        >
+          <SearchIcon className="size-4" />
+        </TooltipTrigger>
+        <TooltipPopup side="right">Search chats and commands</TooltipPopup>
+      </Tooltip>
+      {bookmark && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label="Focus saved chat"
+                onClick={() => {
+                  openThread(bookmark);
+                }}
+              />
+            }
+          >
+            <LocateFixedIcon className="size-4" />
+          </TooltipTrigger>
+          <TooltipPopup side="right">Focus saved chat</TooltipPopup>
+        </Tooltip>
+      )}
       <Popover open={browsing} onOpenChange={setBrowsing}>
         <PopoverTrigger
           render={
@@ -116,51 +165,39 @@ export function ColumnsRail() {
         >
           <LayersIcon className="size-4" />
         </PopoverTrigger>
-        <PopoverPopup side="right" align="start" className="w-72" viewportClassName="p-3">
-          <PopoverTitle className="mb-3 text-sm">Profiles and spaces</PopoverTitle>
-          <div className="flex max-h-[65dvh] flex-col gap-3 overflow-y-auto">
-            {profiles.map((profile) => (
-              <div key={profile.id} className="space-y-0.5">
-                <Button
-                  className="w-full justify-start font-semibold"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setBrowsing(false);
-                    void navigate(
-                      scopedOverviewNavigation({ profileId: profile.id, unsorted: false }),
-                    );
-                  }}
-                >
-                  {profile.name}
-                </Button>
-                {[{ id: "", name: "Unsorted" }, ...(profile.spaces ?? [])].map((space) => (
-                  <Button
-                    key={space.id}
-                    className="w-full justify-start pl-6 text-muted-foreground"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => {
-                      setBrowsing(false);
-                      void navigate(
-                        scopedOverviewNavigation({
-                          profileId: profile.id,
-                          spaceId: space.id || undefined,
-                          unsorted: !space.id,
-                        }),
-                      );
-                    }}
-                  >
-                    {space.name}
-                  </Button>
-                ))}
-              </div>
-            ))}
-            {!profiles.length && <p className="text-xs text-muted-foreground">No profiles yet.</p>}
-          </div>
+        <PopoverPopup
+          side="right"
+          align="start"
+          className="w-[360px] max-w-[calc(100vw-5rem)] bg-sidebar text-sidebar-foreground"
+          viewportClassName="p-2"
+        >
+          <PopoverTitle className="sr-only">Profiles and spaces</PopoverTitle>
+          <ProfileSpaceNavigator onNavigate={() => setBrowsing(false)} />
         </PopoverPopup>
       </Popover>
       <div className="mt-auto flex flex-col items-center gap-2">
+        {pullRequestsSupported && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Pull requests"
+                  onClick={() =>
+                    void navigate({
+                      to: "/pull-requests",
+                      search: readPullRequestListPreferences(),
+                    })
+                  }
+                />
+              }
+            >
+              <PullRequestGlyph.pullRequest className="size-4" />
+            </TooltipTrigger>
+            <TooltipPopup side="right">Pull requests</TooltipPopup>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger
             render={

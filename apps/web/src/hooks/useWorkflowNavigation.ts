@@ -1,3 +1,5 @@
+import { useOpenChatInColumns } from "./useOpenChatInColumns";
+import { toastManager } from "../components/ui/toast";
 import { OUTSIDE_SPACES } from "../components/sidebar/Spaces.logic";
 import { useCallback } from "react";
 import { useNavigate, useLocation } from "@tanstack/react-router";
@@ -11,6 +13,7 @@ import { useWorkflowState } from "../workflowState";
 /** Opens a known chat and reveals its organization, including across profiles/devices. */
 export function useWorkflowNavigation() {
   const navigate = useNavigate();
+  const openInColumns = useOpenChatInColumns();
   const dashboardReturn = useLocation({ select: (location) => location.state.dashboardReturn });
   const threads = useThreadShells();
   const profiles = usePrimarySettings((s) => s.profiles);
@@ -32,13 +35,25 @@ export function useWorkflowNavigation() {
           profile ? (spaceForThread(profile, key, projectKey)?.id ?? OUTSIDE_SPACES) : null,
         ),
       );
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: { environmentId: thread.environmentId, threadId: thread.id },
-        state: { dashboardReturn },
-      });
+      void openInColumns(thread)
+        .then((opened) =>
+          opened
+            ? undefined
+            : navigate({
+                to: "/$environmentId/$threadId",
+                params: { environmentId: thread.environmentId, threadId: thread.id },
+                state: { dashboardReturn },
+              }),
+        )
+        .catch((error: unknown) =>
+          toastManager.add({
+            type: "error",
+            title: "Could not open chat",
+            description: error instanceof Error ? error.message : "Try again.",
+          }),
+        );
       return true;
     },
-    [threads, profiles, navigate, dashboardReturn],
+    [threads, profiles, navigate, dashboardReturn, openInColumns],
   );
 }

@@ -1,3 +1,5 @@
+import { useOpenChatInColumns } from "./useOpenChatInColumns";
+import { useChatMode } from "../components/spaces/columnNavigation";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useSaveProfiles } from "./useChatCreation";
 import { draftMatchesChatLocation } from "../lib/chatCreation";
@@ -473,6 +475,8 @@ function useCreateDraft() {
 }
 
 export function useNewThreadHandler() {
+  const [mode] = useChatMode();
+  const openInColumns = useOpenChatInColumns();
   const createDraft = useCreateDraft();
   const saveProfiles = useSaveProfiles();
   return useCallback(
@@ -492,7 +496,11 @@ export function useNewThreadHandler() {
       const previousDrafts = Object.entries(
         useComposerDraftStore.getState().draftThreadsByThreadKey,
       );
-      const opened = await createDraft(projectRef, { ...options, spaceId });
+      const opened = await createDraft(projectRef, {
+        ...options,
+        spaceId,
+        ...(mode === "columns" ? { navigate: false } : {}),
+      });
       if (!opened) return null;
       if (spaceId || options?.spaceId !== undefined) {
         useComposerDraftStore.getState().setDraftThreadContext(opened.draftId, {
@@ -544,10 +552,17 @@ export function useNewThreadHandler() {
         ui.activeProfileId === ALL_PROFILE_ID || ui.activeProfileId === null
           ? ALL_PROFILE_ID
           : (profile?.id ?? ALL_PROFILE_ID);
-      if (options?.navigate !== false) revealChatLocation(visibleProfileId, spaceId);
+      if (options?.navigate !== false) {
+        revealChatLocation(visibleProfileId, spaceId);
+        await openInColumns({
+          environmentId: projectRef.environmentId,
+          id: opened.threadId,
+          title: "New chat",
+        });
+      }
       return opened;
     },
-    [createDraft, saveProfiles],
+    [createDraft, saveProfiles, mode, openInColumns],
   );
 }
 
