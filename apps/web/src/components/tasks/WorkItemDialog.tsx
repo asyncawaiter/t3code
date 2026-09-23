@@ -27,7 +27,14 @@ import {
 import * as Schema from "effect/Schema";
 import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
+import {
+  Dialog,
+  DialogPopup,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogPanel,
+} from "../ui/dialog";
 import { Button } from "../ui/button";
 import { shouldHandleComposerAttachmentPaste } from "../chat/composerAttachmentFiles";
 import { ExpandedImageDialog } from "../chat/ExpandedImageDialog";
@@ -101,7 +108,7 @@ export function WorkItemDialog() {
               <DialogHeader>
                 <DialogTitle>New task</DialogTitle>
               </DialogHeader>
-              <div className="px-5 pb-5">
+              <DialogPanel>
                 {ready ? (
                   <QuickTaskCapture
                     closeRef={closeCapture}
@@ -111,7 +118,7 @@ export function WorkItemDialog() {
                 ) : (
                   "Opening local drafts..."
                 )}
-              </div>
+              </DialogPanel>
             </DialogPopup>
           </Dialog>
         ))}

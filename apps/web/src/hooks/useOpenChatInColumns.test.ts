@@ -3,12 +3,23 @@ import { DEFAULT_CHAT_BOARD, EnvironmentId, ThreadId } from "@t3tools/contracts"
 
 const state = vi.hoisted(() => ({
   mode: "columns",
-  router: { state: { location: { href: "/dashboard" } } },
+  router: { state: { location: { href: "/spaces/all?view=columns&workspace=board" } } },
   board: {},
-  shell: { title: "Reference", settledOverride: "settled", archivedAt: null },
+  shell: { projectId: "project", title: "Reference", settledOverride: "settled", archivedAt: null },
   update: vi.fn(async () => true),
   navigate: vi.fn(async () => undefined),
   dashboardReturn: { href: "/dashboard", label: "Global dashboard", threadKey: "device:reference" },
+}));
+vi.mock("./useSettings", () => ({
+  usePrimarySettings: () => [
+    {
+      id: "work",
+      projectKeys: ["device:project"],
+      spaces: [
+        { id: "pod", threads: [{ threadKey: "device:reference", projectKey: "device:project" }] },
+      ],
+    },
+  ],
 }));
 vi.mock("./useChatBoards", () => ({
   useChatBoards: () => ({ board: state.board, update: state.update }),
@@ -31,7 +42,7 @@ import { useOpenChatInColumns } from "./useOpenChatInColumns";
 const chat = { environmentId: EnvironmentId.make("device"), id: ThreadId.make("reference") };
 beforeEach(() => {
   state.mode = "columns";
-  state.router.state.location.href = "/dashboard";
+  state.router.state.location.href = "/spaces/all?view=columns&workspace=board";
   state.board = { ...DEFAULT_CHAT_BOARD, order: ["other:chat"], widths: { "other:chat": 570 } };
   state.update.mockReset().mockResolvedValue(true);
   state.navigate.mockClear();
@@ -82,4 +93,33 @@ it("does not pull the user back after they leave while the board saves", async (
   });
   expect(await useOpenChatInColumns()(chat)).toBe(true);
   expect(state.navigate).not.toHaveBeenCalled();
+});
+
+it("opens a scoped dashboard conversation without changing any saved board", async () => {
+  state.router.state.location.href = "/spaces/work?space=pod&unsorted=false";
+  expect(await useOpenChatInColumns()(chat)).toBe(true);
+  expect(state.update).not.toHaveBeenCalled();
+  expect(state.navigate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      params: { profileId: "work" },
+      search: {
+        view: "columns",
+        workspace: "space",
+        space: "pod",
+        unsorted: false,
+        focus: "device:reference",
+      },
+    }),
+  );
+});
+it("opens global dashboard conversations in the live all-chats workspace", async () => {
+  state.router.state.location.href = "/dashboard";
+  expect(await useOpenChatInColumns()(chat)).toBe(true);
+  expect(state.update).not.toHaveBeenCalled();
+  expect(state.navigate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      params: { profileId: "all" },
+      search: expect.objectContaining({ workspace: "space" }),
+    }),
+  );
 });

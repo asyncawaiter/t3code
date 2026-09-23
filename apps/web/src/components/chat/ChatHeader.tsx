@@ -1,3 +1,6 @@
+import { ChatPaneContext } from "./ChatPaneContext";
+import type { ThreadActionMenuId } from "../threadActionMenu.logic";
+import { TaskReviewActions } from "../tasks/TaskReviewActions";
 import { useUiStateStore } from "../../uiStateStore";
 import {
   moveThreadsToSpace,
@@ -6,6 +9,8 @@ import {
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
+  type MessageId,
+  type ContextMenuItem,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -13,10 +18,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { BookmarkIcon, ChevronDownIcon, EllipsisIcon } from "lucide-react";
+import { BookmarkIcon, ChevronDownIcon, EllipsisIcon, FolderOpenIcon } from "lucide-react";
 import {
+  Fragment,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -53,13 +60,60 @@ import {
 import { cn } from "~/lib/utils";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+  MenuSub,
+  MenuSubTrigger,
+  MenuSubPopup,
+  MenuGroupLabel,
+} from "../ui/menu";
 
+import { shellEnvironment } from "../../state/shell";
+import { editorLabelForPlatform } from "../../editorLabels";
 import { ThreadSpaceDialog } from "../sidebar/ThreadSpaceDialog";
 import { useSaveProfiles } from "../../hooks/useProfileSync";
 
+function ThreadMenuItems({
+  items,
+  onSelect,
+}: {
+  items: readonly ContextMenuItem<ThreadActionMenuId>[];
+  onSelect: (id: ThreadActionMenuId) => Promise<void>;
+}) {
+  return items.map((item) => (
+    <Fragment key={item.id}>
+      {item.separatorBefore && <MenuSeparator />}
+      {item.header ? (
+        <MenuGroupLabel>{item.label}</MenuGroupLabel>
+      ) : item.children ? (
+        <MenuSub>
+          <MenuSubTrigger disabled={item.disabled}>{item.label}</MenuSubTrigger>
+          <MenuSubPopup>
+            <ThreadMenuItems items={item.children} onSelect={onSelect} />
+          </MenuSubPopup>
+        </MenuSub>
+      ) : (
+        <MenuItem
+          disabled={item.disabled}
+          variant={item.destructive ? "destructive" : "default"}
+          onClick={() => {
+            void onSelect(item.id);
+          }}
+        >
+          {item.label}
+        </MenuItem>
+      )}
+    </Fragment>
+  ));
+}
+
 interface ChatHeaderProps {
   compact?: boolean;
+  resultMessageId?: MessageId | null | undefined;
   activeThreadEnvironmentId: EnvironmentId;
   activeThreadId: ThreadId;
   draftId?: DraftId;
@@ -131,6 +185,7 @@ export function shouldShowOpenInPicker(input: {
 
 export const ChatHeader = memo(function ChatHeader({
   compact = false,
+  resultMessageId,
   activeThreadEnvironmentId,
   activeThreadId,
   draftId,
@@ -154,6 +209,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
+  const { columnActions } = useContext(ChatPaneContext);
   const headerActionsRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const actions = headerActionsRef.current;
@@ -210,6 +266,8 @@ export const ChatHeader = memo(function ChatHeader({
     activeThreadEnvironmentId,
     activeProjectScripts ? activeProjectCwd : null,
   );
+  const revealFolder = useAtomCommand(shellEnvironment.openInEditor, "open folder");
+  const fileManagerLabel = editorLabelForPlatform("file-manager", navigator.platform);
   const remoteOpenState = useRemoteOpenState(activeThreadEnvironmentId);
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
@@ -266,12 +324,15 @@ export const ChatHeader = memo(function ChatHeader({
     },
     [activeThreadEnvironmentId, activeThreadId, activeThreadTitle, updateThreadMetadata],
   );
-  const { openMenu, closeMenu } = useThreadActionMenu({
+  const { openMenu, closeMenu, getMenu } = useThreadActionMenu({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
     onStartRename: startRename,
+    inApp: compact,
   });
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const selectedActionRef = useRef<ThreadActionMenuId | null>(null);
+  const [threadMenu, setThreadMenu] = useState<ReturnType<typeof getMenu>>();
   const titleMenuTimerRef = useRef<number | null>(null);
   const cancelPendingTitleMenu = useCallback(() => {
     if (titleMenuTimerRef.current === null) return;
@@ -300,7 +361,7 @@ export const ChatHeader = memo(function ChatHeader({
       // the first half of a double-click, so they open without waiting.
       const clickedChevron =
         (event.target as HTMLElement).closest("[data-thread-title-chevron]") !== null;
-      if (event.detail === 0 || clickedChevron || window.desktopBridge === undefined) {
+      if (compact || event.detail === 0 || clickedChevron || window.desktopBridge === undefined) {
         openTitleMenuNow();
         return;
       }
@@ -312,7 +373,7 @@ export const ChatHeader = memo(function ChatHeader({
         openTitleMenuNow();
       }, TITLE_MENU_OPEN_DELAY_MS);
     },
-    [cancelPendingTitleMenu, openTitleMenuNow],
+    [cancelPendingTitleMenu, openTitleMenuNow, compact],
   );
   const handleTitleDoubleClick = useCallback(
     (event: ReactMouseEvent) => {
@@ -364,36 +425,8 @@ export const ChatHeader = memo(function ChatHeader({
     },
     [commitRename],
   );
-  const headerActions = (
+  const workspaceActions = (
     <>
-      {compact && isServerThread && (
-        <MenuItem
-          onClick={() => toggleChatBookmark(`${activeThreadEnvironmentId}:${activeThreadId}`)}
-        >
-          <BookmarkIcon className={isBookmarked ? "fill-current text-amber-600" : undefined} />
-          {bookmarkLabel}
-        </MenuItem>
-      )}
-      {compact && activeProject && (
-        <MenuItem
-          onClick={() => {
-            setActionsOpen(false);
-            onNewThreadInProject();
-          }}
-        >
-          New chat in this folder
-        </MenuItem>
-      )}
-      {isServerThread && actionsCollapsed && (
-        <MenuItem
-          onClick={() => {
-            setActionsOpen(false);
-            setAssigningSpace(true);
-          }}
-        >
-          Move to space
-        </MenuItem>
-      )}
       {activeProjectScripts && (
         <>
           <ProjectScriptsControl
@@ -433,6 +466,46 @@ export const ChatHeader = memo(function ChatHeader({
             {...(draftId ? { draftId } : {})}
           />
         </>
+      )}
+    </>
+  );
+  const headerActions = (
+    <>
+      {compact && isServerThread && (
+        <TaskReviewActions
+          environmentId={activeThreadEnvironmentId}
+          threadId={activeThreadId}
+          resultMessageId={resultMessageId}
+          menu
+        />
+      )}
+      {compact && activeProject && (
+        <MenuItem
+          onClick={() => {
+            setActionsOpen(false);
+            onNewThreadInProject();
+          }}
+        >
+          New chat in this folder
+        </MenuItem>
+      )}
+      {isServerThread && actionsCollapsed && (
+        <MenuItem
+          onClick={() => {
+            setActionsOpen(false);
+            setAssigningSpace(true);
+          }}
+        >
+          Move to space
+        </MenuItem>
+      )}
+      {compact ? (
+        <MenuSub>
+          <MenuSubTrigger>Workspace</MenuSubTrigger>
+          <MenuSubPopup>{workspaceActions}</MenuSubPopup>
+        </MenuSub>
+      ) : (
+        workspaceActions
       )}
     </>
   );
@@ -524,6 +597,60 @@ export const ChatHeader = memo(function ChatHeader({
               onFocus={(event) => event.currentTarget.select()}
               onKeyDown={handleRenameKeyDown}
             />
+          ) : compact ? (
+            <Menu
+              open={actionsOpen}
+              onOpenChange={(open) => {
+                if (open) {
+                  selectedActionRef.current = null;
+                  setThreadMenu(getMenu());
+                }
+                setActionsOpen(open);
+              }}
+            >
+              <MenuTrigger
+                render={
+                  <Button
+                    ref={titleButtonRef}
+                    size="xs"
+                    variant="outline"
+                    aria-label={`Actions for ${activeThreadTitle}`}
+                  />
+                }
+              >
+                Actions <ChevronDownIcon className="size-3.5" />
+              </MenuTrigger>
+              <MenuPopup
+                finalFocus={() =>
+                  selectedActionRef.current === "rename" ? false : titleButtonRef.current
+                }
+                aria-label="Chat and workspace actions"
+                align="start"
+                className="min-w-56 max-w-[calc(100vw-2rem)]"
+              >
+                {headerActions}
+                {columnActions && (
+                  <MenuSub>
+                    <MenuSubTrigger>Column arrangement</MenuSubTrigger>
+                    <MenuSubPopup>{columnActions}</MenuSubPopup>
+                  </MenuSub>
+                )}
+                {threadMenu && (
+                  <>
+                    <MenuSeparator />
+                    <ThreadMenuItems
+                      items={threadMenu.items.map((item) =>
+                        item.id === "pin" ? { ...item, label: "Pin in Chat sidebar" } : item,
+                      )}
+                      onSelect={(id) => {
+                        selectedActionRef.current = id;
+                        return threadMenu.onSelect(id);
+                      }}
+                    />
+                  </>
+                )}
+              </MenuPopup>
+            </Menu>
           ) : isServerThread ? (
             <Tooltip>
               <TooltipTrigger
@@ -534,15 +661,17 @@ export const ChatHeader = memo(function ChatHeader({
                     aria-label={`Thread actions for ${activeThreadTitle}`}
                     aria-haspopup="menu"
                     onClick={openMenuFromTitle}
-                    onDoubleClick={handleTitleDoubleClick}
+                    onDoubleClick={compact ? undefined : handleTitleDoubleClick}
                     onBlur={cancelPendingTitleMenu}
-                    className="group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className={cn(
+                      "group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-md text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+                    )}
                   />
                 }
               >
                 <h2 className="min-w-0">
                   {compact ? (
-                    <span className="text-xs font-medium">Chat</span>
+                    <span className="text-xs font-medium">Actions</span>
                   ) : (
                     <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
                   )}
@@ -564,7 +693,9 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipTrigger
                 render={<h2 aria-label={activeThreadTitle} className="min-w-0 flex-1" />}
               >
-                <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
+                <WorkspaceBreadcrumbText>
+                  {compact ? "Draft" : activeThreadTitle}
+                </WorkspaceBreadcrumbText>
               </TooltipTrigger>
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
@@ -601,59 +732,118 @@ export const ChatHeader = memo(function ChatHeader({
           </TooltipPopup>
         </Tooltip>
       ) : null}
-      <div
-        ref={headerActionsRef}
-        data-chat-header-actions
-        className={cn(
-          "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
-          // Reserve two panel toggles plus their 4px gaps and 1px edge inset.
-          // The page header adds 8px more right padding at sm.
-          rightPanelOpen ? "pr-0" : "pr-[calc(--spacing(18)+1px)] sm:pr-[calc(--spacing(14)+1px)]",
-          "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:motion-safe:ease-out",
-        )}
-      >
-        <Menu open={actionsCollapsed && actionsOpen} onOpenChange={setActionsOpen}>
-          <MenuTrigger
-            className={
-              actionsCollapsed &&
-              (isServerThread ||
-                activeProjectScripts ||
-                showOpenInPicker ||
-                (activeProjectName && gitCwd))
-                ? undefined
-                : "hidden"
-            }
-            render={
-              <Button
-                size={compact ? "xs" : "icon-sm"}
-                variant="ghost"
-                aria-label={compact ? "Chat tools" : "More header actions"}
-              />
-            }
-          >
-            {compact ? (
-              <>
-                Tools
-                <ChevronDownIcon className="size-3" />
-              </>
-            ) : (
-              <EllipsisIcon className="size-4" />
-            )}
-          </MenuTrigger>
-          <div ref={mountInlineActions} className="contents" />
-          <MenuPopup
-            data-chat-header-actions
-            keepMounted
-            aria-label="Header actions"
-            align="end"
-            className="min-w-56 max-w-[calc(100vw-2rem)]"
-            finalFocus={actionsCollapsed ? undefined : false}
-          >
-            <div ref={mountMenuActions} className="contents" />
-            {createPortal(headerActions, actionsContainer)}
-          </MenuPopup>
-        </Menu>
-      </div>
+      {compact && (
+        <div className={cn("ml-auto flex shrink-0 items-center gap-1", !rightPanelOpen && "pr-20")}>
+          {isServerThread && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={bookmarkLabel}
+                    aria-pressed={isBookmarked}
+                    onClick={() =>
+                      toggleChatBookmark(`${activeThreadEnvironmentId}:${activeThreadId}`)
+                    }
+                  />
+                }
+              >
+                <BookmarkIcon
+                  className={cn(
+                    "size-4",
+                    isBookmarked && "fill-current text-amber-600 dark:text-amber-400",
+                  )}
+                />
+              </TooltipTrigger>
+              <TooltipPopup>{bookmarkLabel}</TooltipPopup>
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={`Open folder in ${fileManagerLabel}`}
+                  disabled={
+                    !openInCwd ||
+                    remoteOpenState.mode !== "local-exec" ||
+                    !availableEditors.includes("file-manager")
+                  }
+                  onClick={() => {
+                    if (openInCwd)
+                      void revealFolder({
+                        environmentId: activeThreadEnvironmentId,
+                        input: { cwd: openInCwd, editor: "file-manager" },
+                      });
+                  }}
+                />
+              }
+            >
+              <FolderOpenIcon className="size-4" />
+            </TooltipTrigger>
+            <TooltipPopup>
+              {remoteOpenState.mode !== "local-exec"
+                ? "Folder belongs to a remote device"
+                : `Open folder in ${fileManagerLabel}`}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
+      )}
+      {!compact && (
+        <div
+          ref={headerActionsRef}
+          data-chat-header-actions
+          className={cn(
+            "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
+            // Reserve two panel toggles plus their 4px gaps and 1px edge inset.
+            // The page header adds 8px more right padding at sm.
+            rightPanelOpen
+              ? "pr-0"
+              : "pr-[calc(--spacing(18)+1px)] sm:pr-[calc(--spacing(14)+1px)]",
+            "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:motion-safe:ease-out",
+          )}
+        >
+          <Menu open={actionsCollapsed && actionsOpen} onOpenChange={setActionsOpen}>
+            <Tooltip>
+              <MenuTrigger
+                className={
+                  actionsCollapsed &&
+                  (isServerThread ||
+                    activeProjectScripts ||
+                    showOpenInPicker ||
+                    (activeProjectName && gitCwd))
+                    ? undefined
+                    : "hidden"
+                }
+                render={
+                  <TooltipTrigger
+                    render={
+                      <Button size="icon-sm" variant="ghost" aria-label="More header actions" />
+                    }
+                  />
+                }
+              >
+                <EllipsisIcon className="size-4" />
+              </MenuTrigger>
+              <TooltipPopup>Workspace tools</TooltipPopup>
+            </Tooltip>
+            <div ref={mountInlineActions} className="contents" />
+            <MenuPopup
+              data-chat-header-actions
+              keepMounted
+              aria-label="Header actions"
+              align="end"
+              className="min-w-56 max-w-[calc(100vw-2rem)]"
+              finalFocus={actionsCollapsed ? undefined : false}
+            >
+              <div ref={mountMenuActions} className="contents" />
+              {createPortal(headerActions, actionsContainer)}
+            </MenuPopup>
+          </Menu>
+        </div>
+      )}
     </div>
   );
 });

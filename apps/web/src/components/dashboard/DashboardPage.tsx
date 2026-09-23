@@ -8,8 +8,7 @@ import {
 } from "lucide-react";
 import { Sheet, SheetPopup, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet";
 import { filterTaskShelfItems } from "../tasks/TaskShelf.logic";
-import { useChatBoards } from "../../hooks/useChatBoards";
-import { useChatMode, boardWithOpenedChat } from "../spaces/columnNavigation";
+import { useChatMode, spaceColumnsNavigation } from "../spaces/columnNavigation";
 import { workItemChats } from "@t3tools/contracts";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { dashboardStorageScope } from "../../lib/globalDashboardNavigation";
@@ -142,7 +141,6 @@ export function DashboardPage({
   const navigate = useNavigate();
   const location = useLocation();
   const [chatMode] = useChatMode();
-  const chatBoards = useChatBoards();
   const [openingChat, setOpeningChat] = useState<string | null>(null);
   const opening = useRef(false);
   const mounted = useRef(true);
@@ -244,6 +242,12 @@ export function DashboardPage({
   const resolvedProfiles = useMemo(() => resolveProfiles(rawProfiles), [rawProfiles]);
   const activeProfileId = scope?.profileId ?? globalProfileId;
   function setScope(profileId: string | null, spaceKey: string) {
+    if (
+      scope &&
+      chatMode === "columns" &&
+      (scope.spaceId || scope.unsorted || (profileId ?? ALL_PROFILE_ID) !== scope.profileId)
+    )
+      return;
     const owner = rawProfiles.find((profile) =>
       profile.spaces?.some((space) => `${profile.id}:${space.id}` === spaceKey),
     );
@@ -740,27 +744,6 @@ export function DashboardPage({
         : "Global dashboard",
     };
     try {
-      if (chatMode === "columns") {
-        const board = boardWithOpenedChat(chatBoards.board, {
-          key,
-          title: shell.title,
-          context: [
-            shellSpace(shell)?.name ?? "Unsorted",
-            environmentByKind.get(shell.environmentId)?.label ?? "Offline device",
-          ].join(" / "),
-          reference: shell.settledOverride === "settled" || shell.archivedAt !== null,
-        });
-        if (board !== chatBoards.board && !(await chatBoards.update(board))) {
-          toastManager.add({
-            type: "error",
-            title: "Could not add this chat to Columns",
-            description:
-              chatBoards.unavailable ??
-              "The board changed or could not be saved. Your existing columns are intact. Try again.",
-          });
-          return;
-        }
-      }
       if (!mounted.current) return;
       useWorkflowState.setState({
         triageProfileId: activeProfile.id,
@@ -773,9 +756,7 @@ export function DashboardPage({
       });
       if (chatMode === "columns") {
         await navigate({
-          to: "/spaces/$profileId",
-          params: { profileId: "all" },
-          search: { view: "columns", unsorted: false, space: undefined, focus: key },
+          ...spaceColumnsNavigation(scope ?? { profileId: "all", unsorted: false }, key),
           state: { dashboardReturn },
         });
       } else {
@@ -904,25 +885,40 @@ export function DashboardPage({
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="@container/dashboard flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background [&_[data-filter-active=true]]:border-primary/45 [&_[data-filter-active=true]]:bg-primary/10 [&_[data-filter-active=true]]:ring-1 [&_[data-filter-active=true]]:ring-primary/15">
         <WorkspacePageHeader
-          chatModes
           electron={isElectron}
-          className="h-auto min-h-12 flex-wrap py-2 pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]"
+          className="h-auto min-h-[var(--workspace-topbar-height)] flex-wrap py-2"
         >
-          <WorkspaceBreadcrumb ariaLabel="Dashboard">
-            <WorkspaceBreadcrumbItem current>
-              {scope && (selectedSpace || scope.unsorted) && (
-                <span className="mr-2 max-w-48 truncate text-sm font-normal text-muted-foreground">
-                  {selectedSpaceOwner?.name ?? activeProfile.name} /
-                </span>
-              )}
-              <h1 className="truncate text-base font-semibold">
-                {scope
-                  ? (spaceOptions.find((space) => space.key === effectiveSpaceFilter)?.name ??
-                    (scope.unsorted ? "Unsorted" : activeProfile.name))
-                  : "Dashboard"}
-              </h1>
-            </WorkspaceBreadcrumbItem>
-          </WorkspaceBreadcrumb>
+          <div className="flex min-w-0 items-center gap-4">
+            {chatMode === "columns" && scope ? (
+              <WorkspaceViews embedded scope={scope} />
+            ) : (
+              <WorkspaceBreadcrumb ariaLabel="Dashboard">
+                <WorkspaceBreadcrumbItem current>
+                  {scope && (selectedSpace || scope.unsorted) && (
+                    <span className="mr-2 max-w-48 truncate text-sm font-normal text-muted-foreground">
+                      {selectedSpaceOwner?.name ?? activeProfile.name} /
+                    </span>
+                  )}
+                  <h1 className="truncate text-base font-semibold">
+                    {scope
+                      ? (spaceOptions.find((space) => space.key === effectiveSpaceFilter)?.name ??
+                        (scope.unsorted ? "Unsorted" : activeProfile.name))
+                      : "Dashboard"}
+                  </h1>
+                </WorkspaceBreadcrumbItem>
+              </WorkspaceBreadcrumb>
+            )}
+            {!(chatMode === "columns" && scope) && (
+              <WorkspaceViews
+                navigationOnly
+                scope={{
+                  profileId: selectedSpaceOwner?.id ?? activeProfile.id,
+                  spaceId: selectedSpace?.id,
+                  unsorted: effectiveSpaceFilter === "root",
+                }}
+              />
+            )}
+          </div>
           <div className="no-drag flex min-w-48 flex-1 justify-center px-2">
             <div className="relative w-full max-w-md">
               <SearchIcon
@@ -942,16 +938,6 @@ export function DashboardPage({
             </div>
           </div>
           <div className="no-drag flex flex-wrap items-center gap-1">
-            <div className="w-fit">
-              <WorkspaceViews
-                navigationOnly
-                scope={{
-                  profileId: selectedSpaceOwner?.id ?? activeProfile.id,
-                  spaceId: selectedSpace?.id,
-                  unsorted: effectiveSpaceFilter === "root",
-                }}
-              />
-            </div>
             <Button
               size="xs"
               variant="ghost"
@@ -1015,6 +1001,7 @@ export function DashboardPage({
                     <SelectTrigger
                       size="xs"
                       className="h-8 min-w-0 w-full sm:h-8 rounded-md border-border/70 bg-background shadow-none"
+                      disabled={chatMode === "columns" && !!scope}
                       aria-label="Filter dashboard by profile"
                       data-filter-active={activeProfile.id !== ALL_PROFILE_ID}
                     >
@@ -1059,6 +1046,9 @@ export function DashboardPage({
                         "h-8 w-full min-w-0 sm:h-8 rounded-md border-border/70 bg-background shadow-none",
                         effectiveSpaceFilter !== "all" && "border-primary/35",
                       )}
+                      disabled={
+                        chatMode === "columns" && !!scope && (!!scope.spaceId || scope.unsorted)
+                      }
                       aria-label="Filter dashboard by space"
                       data-filter-active={effectiveSpaceFilter !== "all"}
                     >

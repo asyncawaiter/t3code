@@ -9814,7 +9814,7 @@ export default function ChatView(props: ChatViewProps) {
         "pointer-events-none z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]",
         reserveTitleBarControlInset
           ? "fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)]"
-          : "absolute top-0 right-3",
+          : "absolute top-0 right-2 h-10",
       )}
       data-workspace-titlebar-controls
     >
@@ -10049,7 +10049,8 @@ export default function ChatView(props: ChatViewProps) {
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
           className={cn(
             "relative bg-background",
-            pane.column && "border-b border-border/50 px-2 sm:px-2",
+            !reserveTitleBarControlInset &&
+              "h-10 min-h-10 gap-1 border-b border-border/60 bg-muted/15 px-2 sm:px-2",
           )}
         >
           {isElectron && reserveTitleBarControlInset && rightPanelControlsAtRoot ? (
@@ -10063,10 +10064,12 @@ export default function ChatView(props: ChatViewProps) {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <button
+                  <Button
                     type="button"
+                    size="xs"
+                    variant={reserveTitleBarControlInset ? "ghost" : "outline"}
                     aria-label="Create task from this chat"
-                    className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                    className="shrink-0"
                     onClick={async () => {
                       try {
                         const selected = window.getSelection()?.toString();
@@ -10129,6 +10132,7 @@ export default function ChatView(props: ChatViewProps) {
           }
           <ChatHeader
             compact={!reserveTitleBarControlInset}
+            resultMessageId={activeThread.latestTurn?.assistantMessageId}
             {...(!supportsPullRequests || activeProjectRepository === null
               ? {}
               : { onOpenPullRequest: openProjectPullRequest })}
@@ -10696,6 +10700,12 @@ export default function ChatView(props: ChatViewProps) {
           underFloatingPreview={previewMiniPlayerVisible}
           onClose={closePreviewPanel}
         >
+          {!reserveTitleBarControlInset && (
+            <div className="shrink-0 border-b border-border/60 px-4 py-2 text-xs">
+              <span className="block truncate font-medium">{activeThread.title}</span>
+              <span className="block truncate text-muted-foreground">{activeProject?.title}</span>
+            </div>
+          )}
           <RightPanelTabs
             mode="sheet"
             // Same effective inset as the closed-state titlebar controls

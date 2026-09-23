@@ -32,10 +32,15 @@ export const Route = createFileRoute("/_chat/spaces/$profileId")({
     view?: "branches" | "columns" | "folders" | undefined;
     folder?: string | undefined;
     focus?: string | undefined;
+    workspace?: "space" | "board" | undefined;
+    board?: string | undefined;
   } => ({
     space: typeof search.space === "string" ? search.space : undefined,
     unsorted: search.unsorted === true,
     view: workspaceView(search.view),
+    workspace:
+      search.workspace === "space" || search.workspace === "board" ? search.workspace : undefined,
+    board: typeof search.board === "string" ? search.board : undefined,
     focus: typeof search.focus === "string" ? search.focus : undefined,
     folder: typeof search.folder === "string" ? search.folder : undefined,
   }),
@@ -45,7 +50,15 @@ export const Route = createFileRoute("/_chat/spaces/$profileId")({
 function SpaceOverview() {
   const { profileId } = Route.useParams();
   const activation = useLocation({ select: (location) => location.state.overviewActivation });
-  const { space: spaceId, unsorted, view, folder: folderKey, focus } = Route.useSearch();
+  const {
+    space: spaceId,
+    unsorted,
+    view,
+    folder: folderKey,
+    focus,
+    workspace,
+    board,
+  } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { environments } = useEnvironments();
   const profiles = usePrimarySettings((settings) => settings.profiles);
@@ -56,12 +69,14 @@ function SpaceOverview() {
   const threads = useThreadShells();
   const projects = useProjects();
   useEffect(() => {
-    if (view === "columns") return;
+    if (view === "columns" && workspace !== "space" && profileId === "all") return;
     useUiStateStore.getState().setActiveProfileId(profileId === ALL_PROFILE_ID ? null : profileId);
     useUiStateStore.setState((state) => selectSidebarSpace(state, profileId, filter));
-  }, [profileId, filter, view]);
+  }, [profileId, filter, view, workspace]);
 
-  const missing = view !== "columns" && (!profile || (!!spaceId && !space));
+  const spaceColumns =
+    view === "columns" && (workspace === "space" || (workspace !== "board" && profileId !== "all"));
+  const missing = (view !== "columns" || spaceColumns) && (!profile || (!!spaceId && !space));
   const chats =
     profileId === ALL_PROFILE_ID
       ? threads.filter(
@@ -117,11 +132,7 @@ function SpaceOverview() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background">
-      <WorkspacePageHeader
-        electron={isElectron}
-        chatModes
-        className={`border-b border-border/60 ${isElectron && view === "columns" ? "pl-16 sm:pl-16" : ""}`}
-      >
+      <WorkspacePageHeader electron={isElectron} className="border-b border-border/60">
         <WorkspaceViews embedded />
       </WorkspacePageHeader>
       <main
@@ -193,7 +204,12 @@ function SpaceOverview() {
           )}
           {!missing && view === "columns" ? (
             <Suspense fallback={<p>Loading chats...</p>}>
-              <ChatColumns allChats={threads} focus={focus} />
+              <ChatColumns
+                allChats={threads}
+                focus={focus}
+                boardId={board}
+                scope={spaceColumns ? { profileId, spaceId, unsorted } : undefined}
+              />
             </Suspense>
           ) : !missing && view === "branches" && selectedFolder ? (
             <Suspense

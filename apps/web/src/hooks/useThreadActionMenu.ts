@@ -1,3 +1,4 @@
+import { showContextMenuFallback, dismissContextMenu } from "../contextMenuFallback";
 import { useThreadPinMenu } from "./useThreadPinMenu";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -64,11 +65,12 @@ function failureToast(title: string, error: unknown) {
  */
 export function useThreadActionMenu(input: {
   readonly threadRef: ScopedThreadRef | null;
+  readonly inApp?: boolean;
   /** Fallback for "Copy path" when the thread has no worktree. */
   readonly projectCwd: string | null;
   readonly onStartRename: () => void;
 }) {
-  const { threadRef, projectCwd, onStartRename } = input;
+  const { threadRef, projectCwd, onStartRename, inApp = false } = input;
   const { getPinMenu, handlePinScope } = useThreadPinMenu();
   const router = useRouter();
   const projects = useProjects();
@@ -121,44 +123,42 @@ export function useThreadActionMenu(input: {
     onError: (error) => failureToast("Failed to copy thread ID", error),
   });
 
-  const openMenu = useCallback(
-    (position: { x: number; y: number }) => {
-      if (threadRef === null) return;
-      void (async () => {
-        const api = readLocalApi();
-        if (!api) return;
-        // Snapshot at open time — the menu is modal, so state read now is
-        // what the user is looking at.
-        const thread = readThreadShell(threadRef);
-        if (!thread) return;
-        const now = new Date();
-        const supports = {
-          settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
-          snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
-          pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
-          titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
-        };
-        const isRegeneratingTitle = thread.titleRegeneration != null;
-        const snoozePresets = resolveSnoozePresets(now, timestampFormat);
-        const items = buildThreadActionMenuItems({
-          pinMenu: getPinMenu(threadRef),
-          branch: thread.branch ?? null,
-          // The chat header has no project-scoped thread list behind the
-          // menu, so the "Filter by project" affordance is sidebar-only.
-          projectFilter: null,
-          isPinned: thread.pinnedAt != null,
-          isSettled: supports.settlement && thread.settledOverride === "settled",
-          isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
-          canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
-          isRegeneratingTitle,
-          isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
-          supports,
-          snoozePresets,
-        });
-        const clicked = await settlePromise(() => api.contextMenu.show(items, position));
-        if (clicked._tag === "Failure" || clicked.value === null) return;
-        if (await handlePinScope(threadRef, clicked.value)) return;
-        const action: ThreadActionMenuId = clicked.value;
+  const getMenu = useCallback(() => {
+    if (threadRef === null) return;
+    const api = readLocalApi();
+    if (!api) return;
+    // Snapshot at open time — the menu is modal, so state read now is
+    // what the user is looking at.
+    const thread = readThreadShell(threadRef);
+    if (!thread) return;
+    const now = new Date();
+    const supports = {
+      settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
+      snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
+      pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
+      titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
+    };
+    const isRegeneratingTitle = thread.titleRegeneration != null;
+    const snoozePresets = resolveSnoozePresets(now, timestampFormat);
+    const items = buildThreadActionMenuItems({
+      pinMenu: getPinMenu(threadRef),
+      branch: thread.branch ?? null,
+      // The chat header has no project-scoped thread list behind the
+      // menu, so the "Filter by project" affordance is sidebar-only.
+      projectFilter: null,
+      isPinned: thread.pinnedAt != null,
+      isSettled: supports.settlement && thread.settledOverride === "settled",
+      isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
+      canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
+      isRegeneratingTitle,
+      isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
+      supports,
+      snoozePresets,
+    });
+    return {
+      items,
+      onSelect: async (action: ThreadActionMenuId) => {
+        if (await handlePinScope(threadRef, action)) return;
         if (action.startsWith("snooze:")) {
           const preset =
             action === "snooze:custom"
@@ -337,41 +337,58 @@ export function useThreadActionMenu(input: {
           default:
             return;
         }
-      })();
+      },
+    };
+  }, [
+    getPinMenu,
+    handlePinScope,
+    archiveThread,
+    confirmThreadArchive,
+    confirmThreadDelete,
+    confirmAndUnpinThread,
+    copyBranchToClipboard,
+    copyPathToClipboard,
+    copyThreadIdToClipboard,
+    deleteThread,
+    handleNewThread,
+    logicalProjectKeyByPhysicalKey,
+    markThreadUnread,
+    onStartRename,
+    pinThread,
+    projectCwd,
+    projectGroupingSettings,
+    projects,
+    router,
+    settleThread,
+    snoozeThread,
+    threadRef,
+    timestampFormat,
+    unsettleThread,
+    unsnoozeThread,
+    updateThreadMetadata,
+  ]);
+
+  const openMenu = useCallback(
+    (position: { x: number; y: number }) => {
+      const menu = getMenu();
+      const api = readLocalApi();
+      if (!menu || !api) return;
+      void settlePromise(() =>
+        inApp
+          ? showContextMenuFallback(menu.items, position)
+          : api.contextMenu.show(menu.items, position),
+      ).then((clicked) => {
+        if (clicked._tag === "Success" && clicked.value !== null)
+          return menu.onSelect(clicked.value);
+      });
     },
-    [
-      getPinMenu,
-      handlePinScope,
-      archiveThread,
-      confirmThreadArchive,
-      confirmThreadDelete,
-      confirmAndUnpinThread,
-      copyBranchToClipboard,
-      copyPathToClipboard,
-      copyThreadIdToClipboard,
-      deleteThread,
-      handleNewThread,
-      logicalProjectKeyByPhysicalKey,
-      markThreadUnread,
-      onStartRename,
-      pinThread,
-      projectCwd,
-      projectGroupingSettings,
-      projects,
-      router,
-      settleThread,
-      snoozeThread,
-      threadRef,
-      timestampFormat,
-      unsettleThread,
-      unsnoozeThread,
-      updateThreadMetadata,
-    ],
+    [getMenu, inApp],
   );
 
   const closeMenu = useCallback(() => {
-    void readLocalApi()?.contextMenu.close();
-  }, []);
+    if (inApp) dismissContextMenu();
+    else void readLocalApi()?.contextMenu.close();
+  }, [inApp]);
 
-  return { openMenu, closeMenu };
+  return { openMenu, closeMenu, getMenu };
 }

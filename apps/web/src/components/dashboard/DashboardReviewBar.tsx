@@ -7,8 +7,8 @@ import { useWorkflowState } from "../../workflowState";
 import { useThreadShells } from "../../state/entities";
 import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
 import { Button } from "../ui/button";
-import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
-import { ChevronDownIcon } from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { CheckIcon } from "lucide-react";
 
 export function DashboardReviewBar({
   thread,
@@ -40,41 +40,27 @@ export function DashboardReviewBar({
     if (!completion) return null;
     const reviewed = workflow.reviewed[key] === completion;
     return (
-      <div className="flex shrink-0 items-center rounded-md border border-border/60 bg-background">
-        <Button
-          size="micro"
-          variant="ghost"
-          aria-pressed={reviewed}
-          title={
-            reviewed
-              ? "Return this result to Ready to review"
-              : "Mark this result reviewed. The chat stays open."
-          }
-          onClick={() => workflow.review(key, completion, reviewed)}
-        >
-          {reviewed ? "Reviewed" : "Mark reviewed"}
-        </Button>
-        <Menu>
-          <MenuTrigger
-            render={<Button size="icon-xs" variant="ghost" aria-label="Review actions" />}
+      <div className="flex shrink-0 items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="xs"
+                variant={reviewed ? "secondary" : "outline"}
+                aria-pressed={reviewed}
+                onClick={() => workflow.review(key, completion, reviewed)}
+              />
+            }
           >
-            <ChevronDownIcon className="size-3" />
-          </MenuTrigger>
-          <MenuPopup align="end">
-            <MenuItem
-              disabled={workflow.kept[key] === completion}
-              onClick={() => workflow.review(key, completion, true)}
-            >
-              {workflow.kept[key] === completion ? "Kept for review" : "Keep for review"}
-            </MenuItem>
-            <TaskReviewActions
-              environmentId={thread.environmentId}
-              threadId={thread.id}
-              resultMessageId={thread.latestTurn?.assistantMessageId}
-              menu
-            />
-          </MenuPopup>
-        </Menu>
+            {reviewed && <CheckIcon className="size-3" />}
+            {reviewed ? "Undo review" : "Mark reviewed"}
+          </TooltipTrigger>
+          <TooltipPopup>
+            {reviewed
+              ? "Return this result to Ready to review"
+              : "Mark this result reviewed. The chat stays open."}
+          </TooltipPopup>
+        </Tooltip>
       </div>
     );
   }

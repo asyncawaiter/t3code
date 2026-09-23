@@ -76,12 +76,15 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
     ? scopedProjectKey(scopeProjectRef(initialProject.environmentId, initialProject.id))
     : null;
   const initialProfileId =
+    request.scope?.profileId ??
     (session
       ? profiles.find((profile) => initialKey && profile.projectKeys.includes(initialKey))?.id
-      : ui.activeProfileId) ?? ALL_PROFILE_ID;
+      : ui.activeProfileId) ??
+    ALL_PROFILE_ID;
   const initialProfile = profiles.find((profile) => profile.id === initialProfileId);
-  const initialSpace =
-    session && initialKey && initialProfile
+  const initialSpace = request.scope
+    ? request.scope.spaceId
+    : session && initialKey && initialProfile
       ? spaceForThread(
           initialProfile,
           scopedThreadKey(scopeThreadRef(session.environmentId, session.threadId)),
@@ -329,6 +332,7 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                 <span>Profile</span>
                 <Select
                   value={profileId}
+                  disabled={!!request.scope}
                   onValueChange={(id) => {
                     if (id) {
                       changeScope(id, null);
@@ -352,7 +356,7 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
                 <span>Space</span>
                 <Select
                   value={spaceId ?? "outside"}
-                  disabled={!profile}
+                  disabled={!profile || !!request.scope?.spaceId || !!request.scope?.unsorted}
                   onValueChange={(id) => {
                     if (id) changeScope(profileId, id === "outside" ? null : id);
                   }}

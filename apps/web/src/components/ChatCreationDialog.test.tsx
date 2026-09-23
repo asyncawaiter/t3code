@@ -49,6 +49,8 @@ vi.mock("react/compiler-runtime", async () => {
   const { reactHookHarness } = await import("../test/reactHookHarness");
   return { c: reactHookHarness.useMemoCache };
 });
+vi.mock("./spaces/columnNavigation", () => ({ useChatMode: () => ["chat"] }));
+vi.mock("../hooks/useOpenChatInColumns", () => ({ useOpenChatInColumns: () => vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("../state/entities", () => ({
   useProjects: () => state.projects,

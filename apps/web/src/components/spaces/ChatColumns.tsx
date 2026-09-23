@@ -1,10 +1,38 @@
+import { DndContext, PointerSensor, useSensor, useSensors, closestCenter } from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
+import { CSS as DndCSS } from "@dnd-kit/utilities";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { useWorkflowState } from "../../workflowState";
+import { resolveRenameCommit } from "../chat/ChatHeader";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import {
+  Dialog,
+  DialogTrigger,
+  DialogPopup,
+  DialogHeader,
+  DialogTitle,
+  DialogPanel,
+  DialogFooter,
+  DialogDescription,
+} from "../ui/dialog";
 import { isRecoveredChatBoard } from "./chatBoardMigration";
 import { DashboardReviewBar } from "../dashboard/DashboardReviewBar";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { releaseComposerDraftUploads } from "../../lib/composerDraftUploads";
 import { readLocalApi } from "../../localApi";
 import { useSaveProfiles } from "../../hooks/useProfileSync";
-import { moveThreadsToSpace } from "@t3tools/contracts";
+import { moveThreadsToSpace, type ChatBoard } from "@t3tools/contracts";
 import { toastManager } from "../ui/toast";
 import { useAtomValue } from "@effect/atom-react";
 import { primaryServerKeybindingsAtom } from "../../state/server";
@@ -24,8 +52,13 @@ import {
   finalizePromotedDraftThreadByRef,
 } from "../../composerDraftStore";
 import { threadShellHasStarted } from "../ChatView.logic";
-import { useColumnNavigation } from "./columnNavigation";
-import { Sheet, SheetPopup, SheetTitle } from "../ui/sheet";
+import { useColumnNavigation, spaceColumnsNavigation } from "./columnNavigation";
+import type { OverviewScope } from "../../lib/globalDashboardNavigation";
+import { profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
+import { OUTSIDE_SPACES } from "../sidebar/Spaces.logic";
+import { useThreadActions } from "../../hooks/useThreadActions";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { ChatBoard as ChatBoardSchema } from "@t3tools/contracts";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { useChatBoards } from "../../hooks/useChatBoards";
 import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
@@ -33,17 +66,16 @@ import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../
 import { useEffect, useMemo, useLayoutEffect, useRef, useState, lazy, Suspense } from "react";
 import * as Schema from "effect/Schema";
 import {
+  GripVerticalIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
   Maximize2Icon,
   Minimize2Icon,
-  MoreHorizontalIcon,
   PlusIcon,
   XIcon,
   SearchIcon,
-  LayersIcon,
-  FolderIcon,
-  LaptopIcon,
+  GitBranchIcon,
+  MessageSquarePlusIcon,
   Columns3Icon,
   ChevronDownIcon,
 } from "lucide-react";
@@ -79,9 +111,15 @@ type ColumnChat = Pick<
   | "settledOverride"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
+  | "hasActionableProposedPlan"
   | "session"
   | "latestTurn"
-> & { draftId?: DraftId };
+> &
+  Partial<
+    Pick<EnvironmentThreadShell, "branch" | "worktreePath" | "updatedAt" | "snoozedUntil">
+  > & {
+    draftId?: DraftId;
+  };
 const ChatView = lazy(() => import("../ChatView"));
 const OptionalChatKey = Schema.NullOr(Schema.String);
 const Layout = Schema.Struct({
@@ -130,11 +168,19 @@ export function boardColumnKeys(
 export default function ChatColumns({
   allChats: liveChats,
   focus,
+  scope,
+  boardId,
 }: {
+  scope?: OverviewScope | undefined;
+  boardId?: string | undefined;
   allChats: readonly EnvironmentThreadShell[];
   focus?: string | undefined;
 }) {
-  const state = useChatBoards();
+  const state = useChatBoards(boardId);
+  const setSelected = state.setSelected;
+  useEffect(() => {
+    if (boardId) setSelected(boardId);
+  }, [boardId, setSelected]);
   const { environments } = useEnvironments();
   const archiveDevices = useMemo(
     () =>
@@ -142,14 +188,14 @@ export default function ChatColumns({
         .filter(
           (environment) =>
             environment.connection.phase === "connected" &&
-            state.board.order.some(
+            (scope ? (focus ? [focus] : []) : state.board.order).some(
               (key) =>
                 key.startsWith(`${environment.environmentId}:`) &&
                 !liveChats.some((chat) => keyOf(chat) === key),
             ),
         )
         .map((environment) => environment.environmentId),
-    [environments, state.board.order, liveChats],
+    [environments, state.board.order, liveChats, scope, focus],
   );
   const archive = useArchivedThreadSnapshots(archiveDevices);
   const allChats = useMemo(
@@ -160,18 +206,18 @@ export default function ChatColumns({
           .map((shell) => ({ ...shell, environmentId }))
           .filter(
             (shell) =>
-              state.board.order.includes(keyOf(shell)) &&
+              (scope ? keyOf(shell) === focus : state.board.order.includes(keyOf(shell))) &&
               !liveChats.some((chat) => keyOf(chat) === keyOf(shell)),
           ),
       ),
     ],
-    [liveChats, archive.snapshots, state.board.order],
+    [liveChats, archive.snapshots, state.board.order, scope, focus],
   );
   const drafts = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   useEffect(() => {
     for (const draft of Object.values(drafts)) {
       const key = `${draft.environmentId}:${draft.threadId}`;
-      if (!state.board.order.includes(key)) continue;
+      if (!scope && !state.board.order.includes(key)) continue;
       const shell = allChats.find((chat) => keyOf(chat) === key);
       if (threadShellHasStarted(shell))
         finalizePromotedDraftThreadByRef({
@@ -179,7 +225,7 @@ export default function ChatColumns({
           threadId: draft.threadId,
         });
     }
-  }, [allChats, drafts, state.board.order]);
+  }, [allChats, drafts, state.board.order, scope]);
   const chats: readonly ColumnChat[] = useMemo(
     () => [
       ...allChats,
@@ -201,6 +247,7 @@ export default function ChatColumns({
           settledOverride: null,
           hasPendingApprovals: false,
           hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
           session: null,
           latestTurn: null,
           draftId: DraftId.make(draftId),
@@ -208,20 +255,193 @@ export default function ChatColumns({
     ],
     [allChats, drafts],
   );
-  return <BoardColumns key={state.board.id} state={state} allChats={chats} focus={focus} />;
+  return scope ? (
+    <SpaceColumns
+      key={JSON.stringify(scope)}
+      scope={scope}
+      boards={state}
+      allChats={chats}
+      focus={focus}
+    />
+  ) : (
+    <BoardColumns key={state.board.id} state={state} allChats={chats} focus={focus} />
+  );
+}
+
+export function activeSpaceChats<
+  T extends Pick<ColumnChat, "archivedAt" | "settledOverride" | "snoozedUntil">,
+>(chats: readonly T[], now: number) {
+  return chats.filter(
+    (chat) =>
+      !chat.archivedAt &&
+      chat.settledOverride !== "settled" &&
+      !(chat.snoozedUntil && Date.parse(chat.snoozedUntil) > now),
+  );
+}
+
+function SpaceColumns({
+  scope,
+  boards,
+  allChats,
+  focus,
+}: {
+  scope: OverviewScope;
+  boards: ReturnType<typeof useChatBoards>;
+  allChats: readonly ColumnChat[];
+  focus?: string | undefined;
+}) {
+  const profiles = usePrimarySettings((settings) => settings.profiles);
+  const matches = profileThreadFilter(
+    profiles,
+    scope.profileId,
+    scope.unsorted ? OUTSIDE_SPACES : (scope.spaceId ?? null),
+  );
+  const scoped = allChats.filter((chat) => matches({ ...chat, pinnedAt: null }));
+  const id = `space:${scope.profileId}:${scope.spaceId ?? (scope.unsorted ? "unsorted" : "all")}`;
+  const initial = useMemo(() => ({ ...DEFAULT_CHAT_BOARD, id }), [id]);
+  const [arrangement, setArrangement] = useLocalStorage(
+    `t3.space-columns.${id}`,
+    initial,
+    ChatBoardSchema,
+  );
+  const [references, setReferences] = useState<string[]>([]);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const next = Math.min(
+      ...scoped.flatMap((chat) =>
+        chat.snoozedUntil && Date.parse(chat.snoozedUntil) > now
+          ? [Date.parse(chat.snoozedUntil)]
+          : [],
+      ),
+    );
+    if (!Number.isFinite(next)) return;
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      Math.min(2147483647, Math.max(0, next - Date.now())),
+    );
+    return () => clearTimeout(timer);
+  }, [scoped, now]);
+  const active = activeSpaceChats(scoped, now);
+  const activeKeys = new Set(active.map(keyOf));
+  const resumedReferences = references.filter((key) => activeKeys.has(key));
+  useEffect(() => {
+    if (resumedReferences.length)
+      setReferences((current) => current.filter((key) => !resumedReferences.includes(key)));
+  }, [resumedReferences]);
+  const eligible = scoped.filter(
+    (chat) => activeKeys.has(keyOf(chat)) || references.includes(keyOf(chat)),
+  );
+  const eligibleKeys = new Set(eligible.map(keyOf));
+  const order = [
+    ...new Set([
+      ...arrangement.order.filter((key) => eligibleKeys.has(key)),
+      ...eligible.map(keyOf),
+    ]),
+  ];
+  const appliedSpaceFocus = useRef<string | undefined>(undefined);
+  const focusAvailable = scoped.some((chat) => keyOf(chat) === focus);
+  const focusActive = active.some((chat) => keyOf(chat) === focus);
+  useEffect(() => {
+    if (!focus || !focusAvailable || appliedSpaceFocus.current === focus) return;
+    appliedSpaceFocus.current = focus;
+    setArrangement((current) => ({
+      ...current,
+      hidden: current.hidden.filter((key) => key !== focus),
+    }));
+    if (!focusActive)
+      setReferences((current) => (current.includes(focus) ? current : [...current, focus]));
+  }, [focus, focusAvailable, focusActive, setArrangement]);
+  const board = { ...arrangement, id, order, kept: references };
+  return (
+    <BoardColumns
+      scope={scope}
+      now={now}
+      state={{
+        ...boards,
+        board,
+        pending: false,
+        unavailable: null,
+        error: null,
+        update: async (next) => {
+          setReferences([...next.kept]);
+          setArrangement({ ...next, kept: [] });
+          return true;
+        },
+      }}
+      allChats={scoped}
+      focus={focus}
+    />
+  );
+}
+
+export function addChatsToBoard(
+  board: ChatBoard,
+  additions: readonly { key: string; title: string; context: string; settled: boolean }[],
+): ChatBoard {
+  if (!additions.length) return board;
+  const keys = new Set(additions.map((chat) => chat.key));
+  return {
+    ...board,
+    order: [...board.order.filter((key) => !keys.has(key)), ...keys],
+    hidden: board.hidden.filter((key) => !keys.has(key)),
+    kept: [
+      ...new Set([
+        ...board.kept,
+        ...additions.filter((chat) => chat.settled).map((chat) => chat.key),
+      ]),
+    ],
+    labels: {
+      ...board.labels,
+      ...Object.fromEntries(
+        additions.map((chat) => [
+          chat.key,
+          { title: chat.title.slice(0, 500), context: chat.context.slice(0, 1500) },
+        ]),
+      ),
+    },
+  };
 }
 
 function BoardColumns({
   state,
   allChats,
   focus,
+  scope,
+  now = 0,
 }: {
+  now?: number;
+  scope?: OverviewScope | undefined;
   state: ReturnType<typeof useChatBoards>;
   allChats: readonly ColumnChat[];
   focus?: string | undefined;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { unsettleThread, unsnoozeThread } = useThreadActions();
+  const [spacePicker, setSpacePicker] = useState<"settled" | "hidden" | "snoozed" | null>(null);
+  const [spaceSearch, setSpaceSearch] = useState("");
+  const [resuming, setResuming] = useState<string | null>(null);
+  const openFocus = (key: string) => {
+    const target = scope
+      ? spaceColumnsNavigation(scope, key)
+      : {
+          to: "/spaces/$profileId" as const,
+          params: { profileId: "all" },
+          search: {
+            view: "columns" as const,
+            workspace: "board" as const,
+            board: state.board.id,
+            space: undefined,
+            unsorted: false,
+            focus: key,
+          },
+        };
+    void navigate({
+      ...target,
+      state: { dashboardReturn: location.state.dashboardReturn },
+      replace: true,
+    });
+  };
   const { environments } = useEnvironments();
   const [focused, setFocused] = useLocalStorage(
     `t3.columns-focus.${state.board.id}`,
@@ -253,6 +473,7 @@ function BoardColumns({
   const createChat = () => {
     useColumnNavigation.setState({ choosing: false });
     openChatCreation({
+      ...(scope ? { scope } : {}),
       onCreated: async ({ threadId, projectRef }) => {
         const key = `${projectRef.environmentId}:${threadId}`;
         const saved = await state.update({
@@ -269,15 +490,10 @@ function BoardColumns({
         });
         if (!saved)
           throw new Error(
-            "The chat draft is saved, but could not be added to this board. Close this dialog and retry from Choose chats.",
+            "The chat draft is saved, but could not be added to this board. Close this dialog and retry from Add existing chat.",
           );
         setFocused(key);
-        await navigate({
-          to: "/spaces/$profileId",
-          params: { profileId: "all" },
-          search: { view: "columns", space: undefined, unsorted: false, focus: key },
-          state: { dashboardReturn: location.state.dashboardReturn },
-        });
+        openFocus(key);
       },
     });
   };
@@ -290,6 +506,9 @@ function BoardColumns({
   const [deviceFilter, setDeviceFilter] = useState("all");
   const [folderFilter, setFolderFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [pendingChats, setPendingChats] = useState<string[]>([]);
+  const pickerSearchRef = useRef<HTMLInputElement>(null);
+  const reviewedResults = useWorkflowState((state) => state.reviewed);
   const [includeSettled, setIncludeSettled] = useState(false);
   const projects = useProjects();
   const profiles = usePrimarySettings((settings) => settings.profiles);
@@ -311,23 +530,13 @@ function BoardColumns({
       profile: owner?.name ?? "Unassigned",
       space: placement?.space.name ?? "Unsorted",
       folder: folder?.title,
-      path: folder?.workspaceRoot,
+      path: chat.worktreePath ?? folder?.workspaceRoot,
       device:
         environments.find((env) => env.environmentId === chat.environmentId)?.label ??
         "Offline device",
     };
   };
-  const contextFor = (chat: ColumnChat) => {
-    const detail = detailsFor(chat);
-    return [
-      detail.profile,
-      detail.space,
-      detail.folder !== detail.space ? detail.folder : null,
-      detail.device,
-    ]
-      .filter(Boolean)
-      .join(" / ");
-  };
+
   const [expanded, setExpanded] = useState<string | null>(null);
   const active = columns.some((chat) => keyOf(chat) === focused)
     ? focused
@@ -400,32 +609,74 @@ function BoardColumns({
     }
   }, [focus, columns, setFocused]);
   useEffect(() => () => setSavedScroll(scroll.current), [setSavedScroll]);
+  const [draggingColumn, setDraggingColumn] = useState(false);
+  const dragSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
   function reorder(key: string, delta: number) {
     const visible = boardColumnKeys(allChats, layout);
     const index = visible.indexOf(key),
       target = index + delta;
     if (index < 0 || target < 0 || target >= visible.length) return;
-    const order = [...layout.order];
-    const from = order.indexOf(key),
-      to = order.indexOf(visible[target]!);
-    [order[from], order[to]] = [order[to]!, order[from]!];
-    setLayout({ ...layout, order });
+    setLayout({ ...layout, order: moveColumn(layout.order, key, visible[target]!) });
   }
   function selectBoard(id: string) {
     state.setSelected(id);
     void navigate({
       to: "/spaces/$profileId",
       params: { profileId: "all" },
-      search: { view: "columns", unsorted: false, space: undefined },
+      search: { view: "columns", workspace: "board", board: id, unsorted: false, space: undefined },
       state: { dashboardReturn: location.state.dashboardReturn },
       replace: true,
     });
   }
   const selectedKeys = new Set(boardColumnKeys(allChats, layout));
+  const resetPickerFilters = () => {
+    setProfileFilter("all");
+    setSpaceFilter("all");
+    setDeviceFilter("all");
+    setFolderFilter("all");
+    setIncludeSettled(false);
+  };
+  const filtersChanged =
+    profileFilter !== "all" ||
+    spaceFilter !== "all" ||
+    deviceFilter !== "all" ||
+    folderFilter !== "all" ||
+    includeSettled;
+  const pendingAdditions = pendingChats.flatMap((key) => {
+    const chat = allChats.find(
+      (item) => keyOf(item) === key && !item.archivedAt && !selectedKeys.has(key),
+    );
+    if (!chat) return [];
+    const detail = detailsFor(chat);
+    return [
+      {
+        key,
+        title: chat.title,
+        context: [detail.profile, detail.space, detail.folder, detail.device]
+          .filter(Boolean)
+          .join(" / "),
+        settled: chat.settledOverride === "settled",
+      },
+    ];
+  });
+  const addSelectedChats = async () => {
+    if (disabled || !pendingAdditions.length) return;
+    if (!(await state.update(addChatsToBoard(layout, pendingAdditions)))) return;
+    const first = pendingAdditions[0]!.key;
+    setPendingChats([]);
+    setExpanded(null);
+    appliedFocus.current = undefined;
+    setFocused(first);
+    useColumnNavigation.setState({ choosing: false });
+    openFocus(first);
+  };
   const choices = allChats
     .filter(
       (chat) =>
         !chat.archivedAt &&
+        (search.trim() !== "" || !selectedKeys.has(keyOf(chat))) &&
         (includeSettled || chat.settledOverride !== "settled" || selectedKeys.has(keyOf(chat))),
     )
     .map((chat) => ({ chat, detail: detailsFor(chat) }))
@@ -441,203 +692,309 @@ function BoardColumns({
     )
     .toSorted(
       ({ chat: a }, { chat: b }) =>
-        Number(a.settledOverride === "settled") - Number(b.settledOverride === "settled") ||
-        b.createdAt.localeCompare(a.createdAt),
+        Number(selectedKeys.has(keyOf(a))) - Number(selectedKeys.has(keyOf(b))) ||
+        (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
     );
+  const spaceChoices = allChats.filter(
+    (chat) =>
+      !chat.archivedAt &&
+      chat.title.toLowerCase().includes(spaceSearch.toLowerCase()) &&
+      (spacePicker === "hidden"
+        ? layout.hidden.includes(keyOf(chat))
+        : spacePicker === "settled"
+          ? chat.settledOverride === "settled"
+          : !!chat.snoozedUntil && Date.parse(chat.snoozedUntil) > now),
+  );
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/25 p-1.5 text-xs text-muted-foreground">
-        {state.boards.length > 1 ? (
-          <Popover open={boardPickerOpen} onOpenChange={setBoardPickerOpen}>
-            <PopoverTrigger
-              render={
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  aria-label="Choose a saved board"
-                  className="max-w-64"
-                />
-              }
-            >
-              <Columns3Icon className="size-3.5 shrink-0" />
-              <span className="truncate">{state.board.name}</span>
-              <ChevronDownIcon className="size-3 shrink-0" />
-            </PopoverTrigger>
-            <PopoverPopup align="start" className="w-72 max-h-96 overflow-y-auto p-2">
-              <div className="flex flex-col gap-1" aria-label="Saved boards">
-                {state.boards
-                  .filter((board) => !isRecoveredChatBoard(board))
-                  .map((board) => (
+        {!scope && (
+          <>
+            {state.boards.filter((board) => !isRecoveredChatBoard(board)).length > 1 ||
+            isRecoveredChatBoard(state.board) ? (
+              <Popover open={boardPickerOpen} onOpenChange={setBoardPickerOpen}>
+                <PopoverTrigger
+                  render={
                     <Button
-                      key={board.id}
                       size="xs"
-                      variant={state.board.id === board.id ? "secondary" : "ghost"}
-                      className="justify-between"
-                      aria-pressed={state.board.id === board.id}
-                      onClick={() => {
-                        selectBoard(board.id);
-                        setBoardPickerOpen(false);
-                      }}
-                    >
-                      <span className="truncate">{board.name}</span>
-                      <span className="text-muted-foreground">
-                        {board.order.filter((key) => !board.hidden.includes(key)).length} chats
-                      </span>
-                    </Button>
-                  ))}
-              </div>
-              {state.boards.some((board) => isRecoveredChatBoard(board)) && (
-                <details className="mt-2 border-t border-border/60 pt-2">
-                  <summary className="cursor-pointer px-2 py-1 text-xs text-muted-foreground">
-                    Previous layouts
-                  </summary>
-                  <div className="mt-1 flex flex-col gap-1">
+                      variant="ghost"
+                      aria-label="Choose a saved board"
+                      className="max-w-64"
+                    />
+                  }
+                >
+                  <Columns3Icon className="size-3.5 shrink-0" />
+                  <span className="truncate">
+                    {state.board.name.replace(/^Imported /, "Recovered: ")}
+                  </span>
+                  <ChevronDownIcon className="size-3 shrink-0" />
+                </PopoverTrigger>
+                <PopoverPopup align="start" className="w-64 max-h-80 overflow-y-auto p-1">
+                  <div className="flex flex-col gap-1" aria-label="Saved boards">
                     {state.boards
-                      .filter((board) => isRecoveredChatBoard(board))
+                      .filter(
+                        (board) => !isRecoveredChatBoard(board) || board.id === state.board.id,
+                      )
                       .map((board) => (
                         <Button
                           key={board.id}
                           size="xs"
                           variant={state.board.id === board.id ? "secondary" : "ghost"}
-                          className="justify-between"
+                          className="h-8 justify-between rounded-sm px-2 text-xs"
                           aria-pressed={state.board.id === board.id}
                           onClick={() => {
                             selectBoard(board.id);
                             setBoardPickerOpen(false);
                           }}
                         >
-                          <span className="truncate">{board.name.replace(/^Imported /, "")}</span>
+                          <span className="truncate">
+                            {board.name.replace(/^Imported /, "Recovered: ")}
+                          </span>
                           <span className="text-muted-foreground">
-                            {board.order.filter((key) => !board.hidden.includes(key)).length} chats
+                            {board.order.filter((key) => !board.hidden.includes(key)).length}{" "}
+                            {board.order.filter((key) => !board.hidden.includes(key)).length === 1
+                              ? "chat"
+                              : "chats"}
                           </span>
                         </Button>
                       ))}
                   </div>
-                </details>
-              )}
-            </PopoverPopup>
-          </Popover>
-        ) : (
-          <span className="flex items-center gap-1.5 px-2 font-medium text-foreground">
-            <Columns3Icon className="size-3.5" />
-            {state.board.name}
-          </span>
-        )}
-        <span className="shrink-0 tabular-nums">{selectedKeys.size} chats</span>
-        <Popover
-          open={naming !== null}
-          onOpenChange={(open) => {
-            if (!open) setNaming(null);
-          }}
-        >
-          <PopoverTrigger
-            render={
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Manage boards"
-                disabled={disabled}
-              />
-            }
-            onClick={() => {
-              setBoardName(state.board.name);
-              setNaming("rename");
-            }}
-          >
-            <MoreHorizontalIcon />
-          </PopoverTrigger>
-          <PopoverPopup className="w-72">
-            <div className="flex gap-1 mb-3">
-              {(["rename", "new", "duplicate"] as const).map((mode) => (
-                <Button
-                  key={mode}
-                  size="xs"
-                  variant={naming === mode ? "secondary" : "ghost"}
-                  onClick={() => {
-                    setNaming(mode);
-                    setBoardName(
-                      mode === "new"
-                        ? ""
-                        : mode === "duplicate"
-                          ? `${state.board.name} copy`
-                          : state.board.name,
-                    );
-                  }}
-                >
-                  {mode === "rename" ? "Rename" : mode === "new" ? "New board" : "Duplicate"}
-                </Button>
-              ))}
-            </div>
-            <form
-              onSubmit={async (event) => {
-                event.preventDefault();
-                if (!boardName.trim() || disabled) return;
-                const next = {
-                  ...(naming === "new" ? DEFAULT_CHAT_BOARD : layout),
-                  id: naming === "rename" ? layout.id : crypto.randomUUID(),
-                  name: boardName.trim(),
-                };
-                const saved =
-                  naming === "rename" ? await state.update(next) : await state.save([next], []);
-                if (saved) {
-                  selectBoard(next.id);
-                  setNaming(null);
-                }
+                </PopoverPopup>
+              </Popover>
+            ) : (
+              <span className="flex items-center gap-1.5 px-2 font-medium text-foreground">
+                <Columns3Icon className="size-3.5" />
+                {state.board.name.replace(/^Imported /, "Recovered: ")}
+              </span>
+            )}
+            <span className="shrink-0 tabular-nums">{selectedKeys.size} chats</span>
+            <Dialog
+              open={naming !== null}
+              onOpenChange={(open) => {
+                if (!open) setNaming(null);
               }}
             >
-              <Input
-                aria-label="Board name"
-                maxLength={100}
-                value={boardName}
-                onChange={(event) => setBoardName(event.target.value)}
-                autoFocus
-              />
-              <div className="mt-3 flex justify-between gap-2">
+              <DialogTrigger
+                render={
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    aria-label="Manage boards"
+                    disabled={disabled}
+                  />
+                }
+                onClick={() => {
+                  setBoardName(state.board.name);
+                  setNaming("rename");
+                }}
+              >
+                Manage
+              </DialogTrigger>
+              <DialogPopup className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Manage boards</DialogTitle>
+                </DialogHeader>
+                <DialogPanel>
+                  <div className="flex gap-1 mb-3">
+                    {(["rename", "new", "duplicate"] as const).map((mode) => (
+                      <Button
+                        key={mode}
+                        size="xs"
+                        variant={naming === mode ? "secondary" : "ghost"}
+                        onClick={() => {
+                          setNaming(mode);
+                          setBoardName(
+                            mode === "new"
+                              ? ""
+                              : mode === "duplicate"
+                                ? `${state.board.name} copy`
+                                : state.board.name,
+                          );
+                        }}
+                      >
+                        {mode === "rename" ? "Rename" : mode === "new" ? "New board" : "Duplicate"}
+                      </Button>
+                    ))}
+                  </div>
+                  <form
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      if (!boardName.trim() || disabled) return;
+                      const next = {
+                        ...(naming === "new" ? DEFAULT_CHAT_BOARD : layout),
+                        id: naming === "rename" ? layout.id : crypto.randomUUID(),
+                        name: boardName.trim(),
+                      };
+                      const saved =
+                        naming === "rename"
+                          ? await state.update(next)
+                          : await state.save([next], []);
+                      if (saved) {
+                        selectBoard(next.id);
+                        setNaming(null);
+                      }
+                    }}
+                  >
+                    <Input
+                      aria-label="Board name"
+                      maxLength={100}
+                      value={boardName}
+                      onChange={(event) => setBoardName(event.target.value)}
+                      autoFocus
+                    />
+                    <div className="mt-3 flex justify-between gap-2">
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        disabled={disabled || layout.id === "default"}
+                        onClick={async () => {
+                          if (await state.remove(layout)) {
+                            selectBoard("default");
+                            setNaming(null);
+                          }
+                        }}
+                      >
+                        Delete board
+                      </Button>
+                      <Button size="xs" type="submit" disabled={disabled || !boardName.trim()}>
+                        Save
+                      </Button>
+                    </div>
+                  </form>
+                  {state.boards.some((board) => isRecoveredChatBoard(board)) && (
+                    <details className="mt-3 border-t border-border/60 pt-3">
+                      <summary className="cursor-pointer px-2 py-1 text-xs text-muted-foreground">
+                        Recover an old layout
+                      </summary>
+                      <p className="px-2 py-2 text-xs text-muted-foreground">
+                        Saved from the old space-based columns. Open one to inspect or rename it.
+                        Your current board is kept.
+                      </p>
+                      <div className="mt-1 max-h-48 overflow-y-auto flex flex-col gap-1">
+                        {state.boards
+                          .filter((board) => isRecoveredChatBoard(board))
+                          .map((board) => (
+                            <Button
+                              key={board.id}
+                              size="xs"
+                              variant={state.board.id === board.id ? "secondary" : "ghost"}
+                              className="h-8 justify-between rounded-sm px-2 text-xs"
+                              aria-pressed={state.board.id === board.id}
+                              onClick={() => {
+                                selectBoard(board.id);
+                                setBoardPickerOpen(false);
+                              }}
+                            >
+                              <span className="truncate">
+                                {board.name.replace(/^Imported /, "")}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {board.order.filter((key) => !board.hidden.includes(key)).length}{" "}
+                                {board.order.filter((key) => !board.hidden.includes(key)).length ===
+                                1
+                                  ? "chat"
+                                  : "chats"}
+                              </span>
+                            </Button>
+                          ))}
+                      </div>
+                    </details>
+                  )}
+                </DialogPanel>
+              </DialogPopup>
+            </Dialog>
+          </>
+        )}
+        {scope && (
+          <span className="px-2 font-medium text-foreground">
+            {
+              columns.filter(
+                (chat) =>
+                  chat.settledOverride !== "settled" &&
+                  !(chat.snoozedUntil && Date.parse(chat.snoozedUntil) > now),
+              ).length
+            }{" "}
+            active
+            {columns.some((chat) => layout.kept.includes(keyOf(chat)))
+              ? ` · ${columns.filter((chat) => layout.kept.includes(keyOf(chat))).length} reference${columns.filter((chat) => layout.kept.includes(keyOf(chat))).length === 1 ? "" : "s"}`
+              : ""}
+          </span>
+        )}
+        <Button size="xs" variant="ghost" disabled={disabled} onClick={() => setWidths({})}>
+          Reset widths
+        </Button>
+        <div className="ml-auto flex items-center gap-1.5">
+          {scope &&
+            (["hidden", "snoozed", "settled"] as const).map((kind) => {
+              const count = allChats.filter((chat) =>
+                kind === "hidden"
+                  ? layout.hidden.includes(keyOf(chat))
+                  : kind === "settled"
+                    ? chat.settledOverride === "settled"
+                    : !!chat.snoozedUntil && Date.parse(chat.snoozedUntil) > now,
+              ).length;
+              return (
                 <Button
-                  type="button"
+                  key={kind}
                   size="xs"
                   variant="ghost"
-                  disabled={disabled || layout.id === "default"}
-                  onClick={async () => {
-                    if (await state.remove(layout)) {
-                      selectBoard("default");
-                      setNaming(null);
-                    }
+                  onClick={() => {
+                    setSpacePicker(kind);
+                    setSpaceSearch("");
                   }}
                 >
-                  Delete board
+                  {kind === "hidden" ? "Hidden" : kind === "settled" ? "Settled" : "Snoozed"}{" "}
+                  {count}
                 </Button>
-                <Button size="xs" type="submit" disabled={disabled || !boardName.trim()}>
-                  Save
-                </Button>
-              </div>
-            </form>
-          </PopoverPopup>
-        </Popover>
-        <div className="ml-auto flex items-center gap-2">
+              );
+            })}
+          {!scope && (
+            <>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={disabled}
+                aria-haspopup="dialog"
+                aria-expanded={choosing}
+                onClick={() => {
+                  setPendingChats([]);
+                  setSearch("");
+                  resetPickerFilters();
+                  useColumnNavigation.setState({ choosing: true });
+                }}
+              >
+                <PlusIcon className="size-3.5" />
+                Add existing chat
+              </Button>
+            </>
+          )}
           <Button size="xs" variant="outline" disabled={disabled} onClick={createChat}>
-            <PlusIcon className="size-3.5" />
+            <MessageSquarePlusIcon className="size-3.5" />
             New chat
           </Button>
-          <Button size="xs" variant="ghost" disabled={disabled} onClick={() => setWidths({})}>
-            Equal widths
-          </Button>
-          <Sheet
+          <Dialog
             open={choosing}
-            onOpenChange={(open) => useColumnNavigation.setState({ choosing: open })}
+            onOpenChange={(open) => {
+              if (state.pending) return;
+              if (!open) setPendingChats([]);
+              useColumnNavigation.setState({ choosing: open });
+            }}
           >
-            <SheetPopup
-              side="left"
-              showCloseButton={false}
-              className="w-[min(26rem,calc(100vw-1rem))] max-w-none"
-              backdropClassName="bg-black/10 backdrop-blur-none"
+            <DialogPopup
+              initialFocus={pickerSearchRef}
+              bottomStickOnMobile={false}
+              className="flex h-[min(42rem,85dvh)] w-[min(50rem,calc(100vw-2rem))] max-w-none flex-col overflow-hidden p-0"
+              backdropClassName="bg-black/15 backdrop-blur-none"
             >
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="shrink-0 space-y-3 border-b border-border/60 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <SheetTitle className="text-sm font-semibold">Choose chats</SheetTitle>
+                  <div className="flex items-center justify-between gap-3 pr-8">
+                    <DialogTitle className="text-base font-semibold">
+                      Add existing chats
+                    </DialogTitle>
                     <span aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
-                      {columns.length} on this board
+                      {selectedKeys.size} on this board
                     </span>
                   </div>
                   <div className="relative">
@@ -646,15 +1003,16 @@ function BoardColumns({
                       className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-3.5 -translate-y-1/2 text-muted-foreground"
                     />
                     <Input
+                      ref={pickerSearchRef}
                       size="compact"
                       className="[&_input]:pl-8"
                       aria-label="Find chats across Spaces"
-                      placeholder="Search chats, spaces or devices..."
+                      placeholder="Search by title, space, project or device..."
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
                     {[
                       {
                         label: "Profile",
@@ -662,13 +1020,17 @@ function BoardColumns({
                         set: (value: string) => {
                           setProfileFilter(value);
                           setSpaceFilter("all");
+                          setFolderFilter("all");
                         },
                         options: [{ id: "unassigned", name: "Unassigned" }, ...profiles],
                       },
                       {
                         label: "Space",
                         value: spaceFilter,
-                        set: setSpaceFilter,
+                        set: (value: string) => {
+                          setSpaceFilter(value);
+                          setFolderFilter("all");
+                        },
                         options: [
                           { id: "unsorted", name: "Unsorted" },
                           ...profiles
@@ -705,7 +1067,15 @@ function BoardColumns({
                         options: projects
                           .filter(
                             (project) =>
-                              deviceFilter === "all" || project.environmentId === deviceFilter,
+                              (deviceFilter === "all" || project.environmentId === deviceFilter) &&
+                              allChats.some((chat) => {
+                                const detail = detailsFor(chat);
+                                return (
+                                  detail.folderId === `${project.environmentId}:${project.id}` &&
+                                  (profileFilter === "all" || detail.profileId === profileFilter) &&
+                                  (spaceFilter === "all" || detail.spaceId === spaceFilter)
+                                );
+                              }),
                           )
                           .map((project) => ({
                             id: `${project.environmentId}:${project.id}`,
@@ -713,115 +1083,124 @@ function BoardColumns({
                           })),
                       },
                     ].map((filter) => (
-                      <Select
+                      <div
                         key={filter.label}
-                        value={filter.value}
-                        onValueChange={(value) => filter.set(value ?? "all")}
+                        className={
+                          filter.label === "Device"
+                            ? "sm:border-l sm:border-border/60 sm:pl-3"
+                            : undefined
+                        }
                       >
-                        <SelectTrigger size="xs" aria-label={`Choose chats: ${filter.label}`}>
-                          <SelectValue>
-                            {filter.value === "all"
-                              ? `All ${filter.label.toLowerCase()}s`
-                              : (filter.options.find((option) => option.id === filter.value)
-                                  ?.name ?? filter.label)}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectPopup alignItemWithTrigger={false}>
-                          <SelectItem value="all">All {filter.label.toLowerCase()}s</SelectItem>
-                          {filter.options.map((option) => (
-                            <SelectItem key={option.id} value={option.id}>
-                              {option.name}
-                            </SelectItem>
-                          ))}
-                        </SelectPopup>
-                      </Select>
+                        <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                          {filter.label}
+                        </div>
+                        <Select
+                          value={filter.value}
+                          onValueChange={(value) => filter.set(value ?? "all")}
+                        >
+                          <SelectTrigger
+                            size="xs"
+                            className={
+                              filter.value !== "all"
+                                ? "border-primary/40 bg-primary/8 text-foreground"
+                                : undefined
+                            }
+                            aria-label={`Find chats: ${filter.label}`}
+                          >
+                            <SelectValue>
+                              {filter.value === "all"
+                                ? `All ${filter.label.toLowerCase()}s`
+                                : (filter.options.find((option) => option.id === filter.value)
+                                    ?.name ?? filter.label)}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectPopup alignItemWithTrigger={false}>
+                            <SelectItem value="all">All {filter.label.toLowerCase()}s</SelectItem>
+                            {filter.options.map((option) => (
+                              <SelectItem key={option.id} value={option.id}>
+                                {option.name}
+                              </SelectItem>
+                            ))}
+                          </SelectPopup>
+                        </Select>
+                      </div>
                     ))}
                   </div>
-                  <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-                    <Checkbox checked={includeSettled} onCheckedChange={setIncludeSettled} />
-                    Show settled chats
-                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label
+                      className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs ${includeSettled ? "bg-primary/8 text-foreground" : "text-muted-foreground"}`}
+                    >
+                      <Checkbox checked={includeSettled} onCheckedChange={setIncludeSettled} />
+                      Include settled chats
+                    </label>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      disabled={!filtersChanged}
+                      onClick={resetPickerFilters}
+                    >
+                      Reset filters
+                    </Button>
+                  </div>
+                  {includeSettled && (
+                    <p className="text-xs text-muted-foreground">
+                      Settled chats you add will stay on this board as references.
+                    </p>
+                  )}
                 </div>
                 <div
-                  className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-1.5"
+                  className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-2"
                   aria-label="Available chats"
                 >
                   {choices.map(({ chat, detail }) => {
                     const key = keyOf(chat);
-                    const visible = selectedKeys.has(key);
+                    const alreadyAdded = selectedKeys.has(key);
                     return (
                       <label
                         key={key}
-                        className={`flex cursor-pointer items-start gap-2.5 rounded-md px-2.5 py-2.5 hover:bg-accent/50 has-focus-visible:ring-2 has-focus-visible:ring-inset has-focus-visible:ring-ring ${visible ? "bg-primary/8" : ""}`}
+                        className={`flex items-center gap-3 border-b border-border/40 px-3 py-2.5 last:border-0 has-focus-visible:ring-2 has-focus-visible:ring-inset has-focus-visible:ring-ring ${alreadyAdded ? "opacity-60" : "cursor-pointer hover:bg-accent/40"} ${pendingChats.includes(key) ? "bg-primary/8" : ""}`}
                       >
                         <Checkbox
-                          className="mt-0.5"
-                          aria-label={chat.title}
-                          checked={visible}
-                          disabled={disabled}
-                          onCheckedChange={(checked) => {
-                            void state.update({
-                              ...layout,
-                              labels: {
-                                ...layout.labels,
-                                [key]: {
-                                  title: chat.title.slice(0, 500),
-                                  context: contextFor(chat).slice(0, 1500),
-                                },
-                              },
-                              order: checked ? [...new Set([...layout.order, key])] : layout.order,
-                              hidden: checked
-                                ? layout.hidden.filter((id) => id !== key)
-                                : [...new Set([...layout.hidden, key])],
-                              kept:
-                                checked && chat.settledOverride === "settled"
-                                  ? [...new Set([...layout.kept, key])]
-                                  : layout.kept,
-                            });
-                          }}
+                          aria-labelledby={`picker-chat-${key}`}
+                          checked={alreadyAdded || pendingChats.includes(key)}
+                          disabled={alreadyAdded || disabled}
+                          onCheckedChange={(checked) =>
+                            setPendingChats((current) =>
+                              checked
+                                ? [...new Set([...current, key])]
+                                : current.filter((id) => id !== key),
+                            )
+                          }
                         />
-                        <span className="min-w-0 flex-1 space-y-1">
-                          <span className="flex items-start gap-2">
-                            <span className="line-clamp-2 flex-1 text-xs font-medium leading-4 text-foreground">
-                              {chat.title}
-                            </span>
-                            {chat.settledOverride === "settled" && (
-                              <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
-                                Settled
-                              </span>
-                            )}
+                        <span className="min-w-0 flex-1">
+                          <span
+                            id={`picker-chat-${key}`}
+                            className="block truncate text-sm font-medium text-foreground"
+                          >
+                            {chat.title}
                           </span>
                           <Tooltip>
                             <TooltipTrigger
-                              render={<span tabIndex={0} className="block space-y-1" />}
+                              render={
+                                <span className="mt-1 block truncate text-xs text-muted-foreground" />
+                              }
                             >
-                              <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
-                                <LayersIcon aria-hidden className="size-3 shrink-0" />
-                                <span className="truncate">
-                                  {detail.profile} / {detail.space}
-                                </span>
-                              </span>
-                              <span className="flex min-w-0 items-center gap-3 text-[10px] leading-4 text-muted-foreground/80">
-                                {detail.folder && detail.folder !== detail.space && (
-                                  <span className="flex min-w-0 flex-1 items-center gap-1">
-                                    <FolderIcon aria-hidden className="size-3 shrink-0" />
-                                    <span className="truncate">{detail.folder}</span>
-                                  </span>
-                                )}
-                                <span className="flex min-w-0 flex-1 items-center gap-1">
-                                  <LaptopIcon aria-hidden className="size-3 shrink-0" />
-                                  <span className="truncate">{detail.device}</span>
-                                </span>
-                              </span>
+                              {detail.space} · {detail.folder ?? "No project"} · {detail.device}
                             </TooltipTrigger>
-                            <TooltipPopup className="max-w-xs text-xs">
-                              <p>
-                                {detail.profile} / {detail.space}
-                              </p>
-                              <p className="break-all">{detail.path ?? detail.folder}</p>
-                              <p>{detail.device}</p>
+                            <TooltipPopup>
+                              {detail.profile} / {detail.space} / {detail.folder} / {detail.device}
                             </TooltipPopup>
                           </Tooltip>
+                        </span>
+                        <span className="shrink-0 space-y-1 text-right text-[11px] text-muted-foreground">
+                          <span className="block">
+                            {alreadyAdded
+                              ? "Already added"
+                              : columnStatus(chat, reviewedResults[key])}
+                          </span>
+                          <time className="block" dateTime={chat.updatedAt ?? chat.createdAt}>
+                            {formatRelativeTimeLabel(chat.updatedAt ?? chat.createdAt)}
+                          </time>
                         </span>
                       </label>
                     );
@@ -830,25 +1209,60 @@ function BoardColumns({
                     <p className="px-3 py-8 text-center text-xs text-muted-foreground">
                       {search.trim()
                         ? "No matching chats. Try another name or show settled chats."
-                        : "No chats available."}
+                        : "No chats available to add. Try other filters or include settled chats."}
                     </p>
                   )}
                 </div>
-                <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/60 px-3 py-2">
-                  <span className="text-xs text-muted-foreground">
-                    Selections stay when you change filters.
-                  </span>
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    onClick={() => useColumnNavigation.setState({ choosing: false })}
-                  >
-                    Done
-                  </Button>
+                <div className="shrink-0 border-t border-border/60 bg-muted/15 px-4 py-3">
+                  {(state.error || state.unavailable) && (
+                    <p role="alert" className="mb-2 text-xs text-destructive">
+                      {state.error ?? state.unavailable}
+                    </p>
+                  )}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 text-xs text-muted-foreground" aria-live="polite">
+                      <span className="font-medium text-foreground">
+                        {pendingAdditions.length} selected
+                      </span>
+                      {pendingAdditions.length > 0 && (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          disabled={state.pending}
+                          onClick={() => setPendingChats([])}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                      <p className="mt-1">Selections stay when you search or filter.</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={state.pending}
+                        onClick={() => {
+                          setPendingChats([]);
+                          useColumnNavigation.setState({ choosing: false });
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={disabled || !pendingAdditions.length}
+                        onClick={() => void addSelectedChats()}
+                      >
+                        {state.pending
+                          ? "Adding..."
+                          : `Add ${pendingAdditions.length || ""} ${pendingAdditions.length === 1 ? "chat" : "chats"}`}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </SheetPopup>
-          </Sheet>
+            </DialogPopup>
+          </Dialog>
         </div>
       </div>
       {(state.error || state.unavailable) && (
@@ -856,222 +1270,433 @@ function BoardColumns({
           {state.error ?? state.unavailable}
         </p>
       )}
-      <div
-        ref={rail}
-        onScroll={(event) => {
-          if (!expanded) scroll.current = event.currentTarget.scrollLeft;
+      <Dialog
+        open={spacePicker !== null}
+        onOpenChange={(open) => {
+          if (!open && !resuming) setSpacePicker(null);
         }}
-        className="flex min-h-0 flex-1 snap-x snap-proximity gap-3 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:thin]"
       >
-        {[...selectedKeys].map((key) => {
-          const chat = columns.find((chat) => keyOf(chat) === key);
-          if (!chat) {
-            if (allChats.some((chat) => keyOf(chat) === key)) return null;
-            return (
-              <section
-                key={key}
-                style={{ width: columnWidth(widths[key] ?? 420) }}
-                className={`${expanded ? "hidden" : "flex"} shrink-0 flex-col rounded-xl border border-border p-3`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium">
-                    {layout.labels?.[key]?.title ?? "Chat unavailable"}
-                  </span>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Remove unavailable chat"
-                    disabled={disabled}
-                    onClick={() => setLayout({ ...layout, hidden: [...layout.hidden, key] })}
-                  >
-                    <XIcon />
-                  </Button>
-                </div>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  This chat is not available here yet. Connect its device, or send its first message
-                  if it is still a draft.
-                </p>
-                <span className="mt-2 break-all text-[10px] text-muted-foreground">
-                  {layout.labels?.[key]?.context ?? key}
-                </span>
-              </section>
-            );
-          }
-          return (
-            <Column
-              key={key}
-              chat={chat}
-              context={contextFor(chat)}
-              width={columnWidth(widths[key] ?? 420)}
-              onResize={(width) =>
-                disabled
-                  ? Promise.resolve(false)
-                  : state.update({ ...layout, widths: { ...widths, [key]: columnWidth(width) } })
-              }
-              resizeDisabled={disabled}
-              active={active === key}
-              expanded={expanded === key}
-              hidden={expanded !== null && expanded !== key}
-              onFocus={() => setFocused(key)}
-              connected={environments.some(
-                (env) =>
-                  env.environmentId === chat.environmentId && env.connection.phase === "connected",
-              )}
-              device={
-                environments.find((env) => env.environmentId === chat.environmentId)?.label ??
-                "Offline device"
-              }
-            >
-              <Menu>
-                <MenuTrigger
-                  render={
+        <DialogPopup className="max-h-[min(36rem,80dvh)] max-w-xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>
+              {spacePicker === "settled"
+                ? "Settled chats"
+                : spacePicker === "hidden"
+                  ? "Hidden chats"
+                  : "Snoozed chats"}
+            </DialogTitle>
+            <DialogDescription>
+              {spacePicker === "hidden"
+                ? "Chats hidden from this workspace. Show one to restore its column."
+                : spacePicker === "snoozed"
+                  ? "Wake a chat to return it to active work, or open it as a reference."
+                  : "Resume a chat to return it to active work, or open it as a reference."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="shrink-0 px-6 pb-3">
+            <Input
+              size="compact"
+              type="search"
+              aria-label="Search this space"
+              placeholder="Search this space..."
+              value={spaceSearch}
+              onChange={(event) => setSpaceSearch(event.target.value)}
+            />
+          </div>
+          <DialogPanel className="pt-1! pb-4" scrollFade={false}>
+            <div className="divide-y divide-border/60">
+              {spaceChoices.map((chat) => {
+                const key = keyOf(chat);
+                const open = async (resume: boolean) => {
+                  setResuming(key);
+                  try {
+                    if (resume) {
+                      const result =
+                        spacePicker === "snoozed"
+                          ? await unsnoozeThread(scopeThreadRef(chat.environmentId, chat.id))
+                          : await unsettleThread(scopeThreadRef(chat.environmentId, chat.id));
+                      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+                    }
+                    await state.update({
+                      ...layout,
+                      hidden: layout.hidden.filter((item) => item !== key),
+                      kept:
+                        !resume && (chat.settledOverride === "settled" || !!chat.snoozedUntil)
+                          ? [...new Set([...layout.kept, key])]
+                          : layout.kept.filter((item) => item !== key),
+                    });
+                    setExpanded(null);
+                    appliedFocus.current = undefined;
+                    setFocused(key);
+                    openFocus(key);
+                    setSpacePicker(null);
+                  } catch (error) {
+                    toastManager.add({
+                      type: "error",
+                      title: "Could not open chat",
+                      description: error instanceof Error ? error.message : "Try again.",
+                    });
+                  } finally {
+                    setResuming(null);
+                  }
+                };
+                return (
+                  <div key={key} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
+                    <span className="min-w-32 flex-1 break-words text-sm font-medium">
+                      {chat.title}
+                    </span>
                     <Button
                       size="xs"
                       variant="ghost"
-                      aria-label={`Column options for ${chat.title}`}
-                      disabled={disabled}
-                    />
-                  }
-                >
-                  Column
-                  <ChevronDownIcon className="size-3" />
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  {chat.draftId && (
-                    <>
-                      <MenuItem
-                        onClick={() => {
-                          if (!chat.draftId) return;
-                          openChatCreation({
-                            draftId: chat.draftId,
-                            projectRef: scopeProjectRef(chat.environmentId, chat.projectId),
-                          });
-                        }}
+                      disabled={!!resuming}
+                      onClick={() => void open(false)}
+                    >
+                      {spacePicker === "hidden" ? "Show chat" : "Open as reference"}
+                    </Button>
+                    {spacePicker !== "hidden" && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={!!resuming}
+                        onClick={() => void open(true)}
                       >
-                        Move draft
+                        {spacePicker === "snoozed" ? "Wake chat" : "Resume chat"}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {!spaceChoices.length && (
+              <div
+                role="status"
+                className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-4 py-6 text-center"
+              >
+                <p className="text-sm font-medium">
+                  {spaceSearch.trim()
+                    ? "No matching chats"
+                    : spacePicker === "hidden"
+                      ? "No hidden chats"
+                      : spacePicker === "snoozed"
+                        ? "No snoozed chats"
+                        : "No settled chats"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {spaceSearch.trim()
+                    ? "Try a different search."
+                    : "Chats in this state will appear here."}
+                </p>
+              </div>
+            )}
+          </DialogPanel>
+          <DialogFooter className="sm:justify-start">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {spacePicker === "hidden"
+                ? "Showing a chat does not change its status."
+                : "References keep their settled or snoozed status."}{" "}
+              Only chats in this workspace are shown.
+            </p>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+      <DndContext
+        sensors={dragSensors}
+        accessibility={{
+          screenReaderInstructions: {
+            draggable: "Drag to move the column, or press Left or Right to move it one position.",
+          },
+        }}
+        onDragStart={() => setDraggingColumn(true)}
+        onDragCancel={() => setDraggingColumn(false)}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToHorizontalAxis]}
+        onDragEnd={({ active, over }) => {
+          setDraggingColumn(false);
+          if (disabled || expanded || !over || active.id === over.id) return;
+          setLayout((current) => ({
+            ...current,
+            order: moveColumn(current.order, String(active.id), String(over.id)),
+          }));
+        }}
+      >
+        <SortableContext items={[...selectedKeys]} strategy={horizontalListSortingStrategy}>
+          <div
+            ref={rail}
+            onScroll={(event) => {
+              if (!expanded) scroll.current = event.currentTarget.scrollLeft;
+            }}
+            className={`flex min-h-0 flex-1 ${draggingColumn ? "" : "snap-x snap-proximity"} gap-3 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:thin]`}
+          >
+            {[...selectedKeys].map((key) => {
+              const chat = columns.find((chat) => keyOf(chat) === key);
+              if (!chat) {
+                if (allChats.some((chat) => keyOf(chat) === key)) return null;
+                return (
+                  <section
+                    key={key}
+                    style={{ width: columnWidth(widths[key] ?? 420) }}
+                    className={`${expanded ? "hidden" : "flex"} shrink-0 flex-col rounded-xl border border-border p-3`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">
+                        {layout.labels?.[key]?.title ?? "Chat unavailable"}
+                      </span>
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label="Remove unavailable chat from board"
+                        disabled={disabled}
+                        onClick={() => setLayout({ ...layout, hidden: [...layout.hidden, key] })}
+                      >
+                        <XIcon />
+                      </Button>
+                    </div>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      This chat is not available here yet. Connect its device, or send its first
+                      message if it is still a draft.
+                    </p>
+                    <span className="mt-2 break-all text-[10px] text-muted-foreground">
+                      {layout.labels?.[key]?.context ?? key}
+                    </span>
+                  </section>
+                );
+              }
+              return (
+                <Column
+                  key={key}
+                  chat={chat}
+                  context={detailsFor(chat)}
+                  width={columnWidth(widths[key] ?? 420)}
+                  onResize={(width) =>
+                    disabled
+                      ? Promise.resolve(false)
+                      : state.update({
+                          ...layout,
+                          widths: { ...widths, [key]: columnWidth(width) },
+                        })
+                  }
+                  resizeDisabled={disabled}
+                  onMove={(delta) => reorder(key, delta)}
+                  active={active === key}
+                  expanded={expanded === key}
+                  hidden={expanded !== null && expanded !== key}
+                  onFocus={() => setFocused(key)}
+                  connected={environments.some(
+                    (env) =>
+                      env.environmentId === chat.environmentId &&
+                      env.connection.phase === "connected",
+                  )}
+                  columnActions={
+                    <>
+                      {chat.draftId && (
+                        <>
+                          <MenuItem
+                            disabled={disabled}
+                            onClick={() => {
+                              if (!chat.draftId) return;
+                              openChatCreation({
+                                draftId: chat.draftId,
+                                projectRef: scopeProjectRef(chat.environmentId, chat.projectId),
+                              });
+                            }}
+                          >
+                            Move draft
+                          </MenuItem>
+                          <MenuItem
+                            variant="destructive"
+                            disabled={disabled}
+                            onClick={async () => {
+                              if (!chat.draftId) return;
+                              const api = readLocalApi();
+                              if (
+                                !api ||
+                                !(await api.dialogs.confirm(
+                                  "Discard this unsent draft and its attachments?",
+                                ))
+                              )
+                                return;
+                              try {
+                                if (
+                                  !(await state.update({
+                                    ...layout,
+                                    hidden: [...new Set([...layout.hidden, key])],
+                                  }))
+                                )
+                                  return;
+                                await saveProfiles((profiles) =>
+                                  profiles.map((profile) =>
+                                    moveThreadsToSpace(
+                                      profile,
+                                      [
+                                        {
+                                          threadKey: key,
+                                          projectKey: `${chat.environmentId}:${chat.projectId}`,
+                                        },
+                                      ],
+                                      null,
+                                    ),
+                                  ),
+                                );
+                                releaseComposerDraftUploads(chat.draftId);
+                                useComposerDraftStore.getState().clearDraftThread(chat.draftId);
+                              } catch (error) {
+                                toastManager.add({
+                                  type: "error",
+                                  title: "Draft not discarded",
+                                  description:
+                                    error instanceof Error ? error.message : "Try again.",
+                                });
+                              }
+                            }}
+                          >
+                            Discard draft
+                          </MenuItem>
+                          <MenuSeparator />
+                        </>
+                      )}
+                      <MenuItem
+                        disabled={disabled || [...selectedKeys][0] === key}
+                        onClick={() => reorder(key, -1)}
+                      >
+                        <ArrowLeftIcon />
+                        Move left
                       </MenuItem>
                       <MenuItem
-                        variant="destructive"
-                        onClick={async () => {
-                          if (!chat.draftId) return;
-                          const api = readLocalApi();
-                          if (
-                            !api ||
-                            !(await api.dialogs.confirm(
-                              "Discard this unsent draft and its attachments?",
-                            ))
-                          )
-                            return;
-                          try {
-                            if (
-                              !(await state.update({
-                                ...layout,
-                                hidden: [...new Set([...layout.hidden, key])],
-                              }))
-                            )
-                              return;
-                            await saveProfiles((profiles) =>
-                              profiles.map((profile) =>
-                                moveThreadsToSpace(
-                                  profile,
-                                  [
-                                    {
-                                      threadKey: key,
-                                      projectKey: `${chat.environmentId}:${chat.projectId}`,
-                                    },
-                                  ],
-                                  null,
-                                ),
-                              ),
-                            );
-                            releaseComposerDraftUploads(chat.draftId);
-                            useComposerDraftStore.getState().clearDraftThread(chat.draftId);
-                          } catch (error) {
-                            toastManager.add({
-                              type: "error",
-                              title: "Draft not discarded",
-                              description: error instanceof Error ? error.message : "Try again.",
-                            });
-                          }
-                        }}
+                        disabled={disabled || [...selectedKeys].at(-1) === key}
+                        onClick={() => reorder(key, 1)}
                       >
-                        Discard draft
+                        <ArrowRightIcon />
+                        Move right
                       </MenuItem>
                       <MenuSeparator />
+                      {!scope && (
+                        <MenuCheckboxItem
+                          disabled={disabled}
+                          checked={layout.kept.includes(key)}
+                          onCheckedChange={(checked) =>
+                            setLayout((current) => ({
+                              ...current,
+                              kept: checked
+                                ? [...new Set([...current.kept, key])]
+                                : current.kept.filter((id) => id !== key),
+                            }))
+                          }
+                        >
+                          Keep on board when settled
+                        </MenuCheckboxItem>
+                      )}
                     </>
-                  )}
-                  <MenuItem
-                    disabled={[...selectedKeys][0] === key}
-                    onClick={() => reorder(key, -1)}
+                  }
+                  device={
+                    environments.find((env) => env.environmentId === chat.environmentId)?.label ??
+                    "Offline device"
+                  }
+                >
+                  <Button
+                    size={expanded === key ? "xs" : "icon-xs"}
+                    variant="ghost"
+                    aria-label={expanded === key ? "Back to columns" : `Expand ${chat.title}`}
+                    onClick={() => {
+                      setFocused(key);
+                      setExpanded(expanded === key ? null : key);
+                    }}
                   >
-                    <ArrowLeftIcon />
-                    Move left
-                  </MenuItem>
-                  <MenuItem
-                    disabled={[...selectedKeys].at(-1) === key}
-                    onClick={() => reorder(key, 1)}
-                  >
-                    <ArrowRightIcon />
-                    Move right
-                  </MenuItem>
-                  <MenuSeparator />
-                  <MenuCheckboxItem
-                    checked={layout.kept.includes(key)}
-                    onCheckedChange={(checked) =>
-                      setLayout((current) => ({
-                        ...current,
-                        kept: checked
-                          ? [...new Set([...current.kept, key])]
-                          : current.kept.filter((id) => id !== key),
-                      }))
-                    }
-                  >
-                    Keep on board when settled
-                  </MenuCheckboxItem>
-                </MenuPopup>
-              </Menu>
-              <Button
-                size={expanded === key ? "xs" : "icon-xs"}
-                variant="ghost"
-                aria-label={expanded === key ? "Back to columns" : `Expand ${chat.title}`}
-                onClick={() => {
-                  setFocused(key);
-                  setExpanded(expanded === key ? null : key);
-                }}
-              >
-                {expanded === key ? (
-                  <>
-                    <Minimize2Icon />
-                    <span>Back to columns</span>
-                  </>
-                ) : (
-                  <Maximize2Icon />
-                )}
-              </Button>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label={`Hide ${chat.title} from columns`}
-                disabled={disabled}
-                onClick={() => {
-                  setExpanded(null);
-                  setLayout({ ...layout, hidden: [...layout.hidden, key] });
-                }}
-              >
-                <XIcon />
-              </Button>
-            </Column>
-          );
-        })}
-        {!selectedKeys.size && (
-          <p className="m-auto max-w-sm text-center text-sm text-muted-foreground">
-            Choose chats from any profile, space, or device. Enable Show settled chats to bring back
-            a reference conversation.
-          </p>
-        )}
-      </div>
+                    {expanded === key ? (
+                      <>
+                        <Minimize2Icon />
+                        <span>Back to columns</span>
+                      </>
+                    ) : (
+                      <Maximize2Icon />
+                    )}
+                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label={
+                            scope
+                              ? `${layout.kept.includes(key) ? "Close reference" : "Hide"} ${chat.title}`
+                              : `Remove ${chat.title} from board`
+                          }
+                          disabled={disabled}
+                          onClick={() => {
+                            setExpanded(null);
+                            setLayout({
+                              ...layout,
+                              hidden:
+                                scope && layout.kept.includes(key)
+                                  ? layout.hidden.filter((item) => item !== key)
+                                  : [...layout.hidden, key],
+                              ...(scope
+                                ? { kept: layout.kept.filter((item) => item !== key) }
+                                : {}),
+                            });
+                            if (scope && focus === key)
+                              void navigate({ ...spaceColumnsNavigation(scope), replace: true });
+                          }}
+                        />
+                      }
+                    >
+                      <XIcon />
+                    </TooltipTrigger>
+                    <TooltipPopup>
+                      {scope
+                        ? layout.kept.includes(key)
+                          ? "Close this reference. Its status stays unchanged."
+                          : "Hide from this view. Restore it from Hidden."
+                        : "Remove from this board. The chat stays saved."}
+                    </TooltipPopup>
+                  </Tooltip>
+                </Column>
+              );
+            })}
+            {!selectedKeys.size && (
+              <p className="m-auto max-w-sm text-center text-sm text-muted-foreground">
+                {scope
+                  ? "No active chats here. Start a new chat, restore a hidden chat, or open a settled reference."
+                  : "Add existing chats from any profile, space, or device. Enable Include settled chats to bring back a reference conversation."}
+              </p>
+            )}
+          </div>
+        </SortableContext>
+      </DndContext>
     </div>
   );
+}
+
+export function moveColumn(order: readonly string[], from: string, to: string) {
+  const source = order.indexOf(from);
+  const target = order.indexOf(to);
+  return source < 0 || target < 0 || source === target
+    ? order
+    : arrayMove([...order], source, target);
+}
+
+export function columnStatus(
+  chat: Pick<
+    ColumnChat,
+    | "hasPendingApprovals"
+    | "hasPendingUserInput"
+    | "hasActionableProposedPlan"
+    | "session"
+    | "archivedAt"
+    | "settledOverride"
+    | "latestTurn"
+  >,
+  reviewedAt?: string,
+) {
+  if (chat.hasPendingApprovals || chat.hasPendingUserInput || chat.hasActionableProposedPlan)
+    return "Needs input";
+  if (chat.session?.status === "running") return "Running";
+  if (chat.archivedAt) return "Archived";
+  if (chat.settledOverride === "settled") return "Settled";
+  if (chat.latestTurn?.state === "completed" && chat.latestTurn.completedAt) {
+    return reviewedAt === chat.latestTurn.completedAt ? "Reviewed" : "Ready to review";
+  }
+  return "Idle";
 }
 
 function Column({
@@ -1087,11 +1712,20 @@ function Column({
   onResize,
   resizeDisabled,
   context,
+  columnActions,
+  onMove,
 }: {
   width: number;
+  onMove: (delta: number) => void;
   resizeDisabled: boolean;
   onResize: (width: number) => Promise<boolean>;
-  context: string;
+  context: {
+    profile: string;
+    space: string;
+    folder: string | undefined;
+    path: string | undefined;
+    device: string;
+  };
   chat: ColumnChat;
   active: boolean;
   expanded: boolean;
@@ -1100,7 +1734,48 @@ function Column({
   device: string;
   connected: boolean;
   children: React.ReactNode;
+  columnActions: React.ReactNode;
 }) {
+  const reviewedAt = useWorkflowState((state) => state.reviewed[keyOf(chat)]);
+  const statusLabel = columnStatus(chat, reviewedAt);
+  const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
+  const titleCommitted = useRef(false);
+  const commitTitle = (value: string) => {
+    if (titleCommitted.current) return;
+    titleCommitted.current = true;
+    const resolution = resolveRenameCommit({ title: value, originalTitle: chat.title });
+    setEditingTitle(null);
+    if (resolution.action === "reject-empty") {
+      toastManager.add({ type: "warning", title: "Chat title cannot be empty" });
+      return;
+    }
+    if (resolution.action === "noop") return;
+    void updateMetadata({
+      environmentId: chat.environmentId,
+      input: { threadId: chat.id, title: resolution.title },
+    }).then((result) => {
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        toastManager.add({
+          type: "error",
+          title: "Could not rename chat",
+          description: String(squashAtomCommandFailure(result)),
+        });
+      }
+    });
+  };
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: keyOf(chat),
+    disabled: resizeDisabled || expanded || hidden,
+  });
   const element = useRef<HTMLElement>(null);
   const resize = useRef<{ x: number; width: number } | null>(null);
   const [visible, setVisible] = useState(false);
@@ -1117,57 +1792,175 @@ function Column({
   return (
     <section
       data-column-key={keyOf(chat)}
-      ref={element}
+      ref={(node) => {
+        element.current = node;
+        setNodeRef(node);
+      }}
       aria-label={`Chat column: ${chat.title}`}
       onPointerDownCapture={onFocus}
       onFocusCapture={onFocus}
       hidden={hidden}
-      style={{ width: expanded ? "100%" : width }}
+      style={{
+        width: expanded ? "100%" : width,
+        transform: DndCSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 10 : undefined,
+        opacity: isDragging ? 0.85 : undefined,
+      }}
       className={`${hidden ? "hidden" : "flex"} relative min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl border ${active ? "border-primary/60 ring-1 ring-primary/20" : "border-border"}`}
     >
-      <header className="flex flex-col gap-1 border-b border-border/60 bg-muted/20 px-3 py-2">
+      <header className="flex flex-col gap-2.5 border-b border-border/60 bg-muted/15 px-3 pt-3 pb-2.5">
         <div className="flex items-center gap-2">
-          <button
-            onClick={onFocus}
-            className="min-w-0 flex-1 truncate text-left text-sm font-semibold"
-          >
-            {chat.title}
-          </button>
-          <div className="flex shrink-0 items-center gap-1">
-            <DashboardReviewBar thread={chat} compact />
-            {(!connected ||
-              chat.hasPendingApprovals ||
-              chat.hasPendingUserInput ||
-              chat.session?.status === "running" ||
-              chat.archivedAt ||
-              chat.settledOverride === "settled" ||
-              chat.latestTurn?.state !== "completed") && (
-              <span className="text-[10px] text-muted-foreground">
-                {!connected
-                  ? "Offline"
-                  : chat.hasPendingApprovals
-                    ? "Approval needed"
-                    : chat.hasPendingUserInput
-                      ? "Answer needed"
-                      : chat.session?.status === "running"
-                        ? "Running"
-                        : chat.archivedAt
-                          ? "Archived"
-                          : chat.settledOverride === "settled"
-                            ? "Settled"
-                            : "Idle"}
-              </span>
+          {!expanded && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    ref={setActivatorNodeRef}
+                    {...attributes}
+                    {...listeners}
+                    onKeyDown={(event) => {
+                      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onMove(event.key === "ArrowLeft" ? -1 : 1);
+                    }}
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={`Move column: ${chat.title}`}
+                    disabled={resizeDisabled}
+                    className="touch-none cursor-grab text-muted-foreground active:cursor-grabbing"
+                  />
+                }
+              >
+                <GripVerticalIcon className="size-4" />
+              </TooltipTrigger>
+              <TooltipPopup>Drag to reorder, or use Left and Right arrow keys.</TooltipPopup>
+            </Tooltip>
+          )}
+          {editingTitle !== null ? (
+            <Input
+              autoFocus
+              aria-label="Chat title"
+              defaultValue={editingTitle}
+              className="h-7 min-w-0 flex-1 text-sm font-semibold"
+              onFocus={(event) => event.currentTarget.select()}
+              onBlur={(event) => commitTitle(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitTitle(event.currentTarget.value);
+                }
+                if (event.key === "Escape") {
+                  titleCommitted.current = true;
+                  setEditingTitle(null);
+                }
+              }}
+            />
+          ) : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    onClick={() => {
+                      onFocus();
+                      if (!chat.draftId) {
+                        titleCommitted.current = false;
+                        setEditingTitle(chat.title);
+                      }
+                    }}
+                    aria-label={`Rename ${chat.title}`}
+                    className="min-w-0 flex-1 truncate rounded px-1 -ml-1 text-left text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                }
+              >
+                {chat.title}
+              </TooltipTrigger>
+              <TooltipPopup>{chat.draftId ? chat.title : "Click to rename chat"}</TooltipPopup>
+            </Tooltip>
+          )}
+          <div className="flex shrink-0 items-center gap-1">{children}</div>
+        </div>
+        <div
+          className="flex min-h-7 max-w-2xl items-center justify-between gap-2"
+          aria-label="Chat status and review"
+        >
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium ${statusLabel === "Needs input" ? "border-warning/25 bg-warning/10 text-foreground" : statusLabel === "Running" || statusLabel === "Ready to review" ? "border-primary/20 bg-primary/8 text-foreground" : "border-border/70 bg-muted/50 text-muted-foreground"}`}
+            >
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current opacity-60" />
+              {statusLabel}
+            </span>
+            {!connected && <span className="text-[10px] text-muted-foreground">Offline</span>}
+          </div>
+          <DashboardReviewBar thread={chat} compact />
+        </div>
+        <div
+          aria-label="Chat context"
+          className="min-w-0 max-w-2xl overflow-hidden rounded-lg border border-border/50 bg-muted/30 text-xs"
+        >
+          <div className="grid grid-cols-2 divide-x divide-border/50">
+            <Tooltip>
+              <TooltipTrigger render={<div className="min-w-0 px-2.5 py-1.5" />}>
+                <div className="mb-0.5 text-[10px] font-medium text-muted-foreground">Space</div>
+                <div className="truncate font-medium">{context.space}</div>
+              </TooltipTrigger>
+              <TooltipPopup>
+                {context.profile} / {context.space}
+              </TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger render={<div className="min-w-0 px-2.5 py-1.5" />}>
+                <div className="mb-0.5 text-[10px] font-medium text-muted-foreground">Project</div>
+                <div className="truncate font-medium">{context.folder ?? "Unassigned"}</div>
+              </TooltipTrigger>
+              <TooltipPopup>Project: {context.folder ?? "Unassigned"}</TooltipPopup>
+            </Tooltip>
+          </div>
+          <div className="space-y-1 border-t border-border/50 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2">
+              <Tooltip>
+                <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
+                  {context.profile}{" "}
+                  <span aria-hidden className="mx-1 opacity-50">
+                    /
+                  </span>{" "}
+                  {context.device}
+                </TooltipTrigger>
+                <TooltipPopup>
+                  Profile: {context.profile}. Device: {context.device}
+                </TooltipPopup>
+              </Tooltip>
+              {chat.branch && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="inline-flex min-w-0 max-w-[40%] items-center gap-1" />}
+                  >
+                    <GitBranchIcon className="size-3 shrink-0" />
+                    <span className="truncate">{chat.branch}</span>
+                  </TooltipTrigger>
+                  <TooltipPopup>Branch: {chat.branch}</TooltipPopup>
+                </Tooltip>
+              )}
+            </div>
+            {context.path && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      aria-label={`Path: ${context.path}`}
+                      className="block truncate font-mono text-[10px]"
+                    />
+                  }
+                >
+                  {context.path}
+                </TooltipTrigger>
+                <TooltipPopup>{context.path}</TooltipPopup>
+              </Tooltip>
             )}
           </div>
-        </div>
-        <div className="flex items-center gap-0.5">
-          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">
-            <Tooltip>
-              <TooltipTrigger render={<span />}>{context}</TooltipTrigger>
-              <TooltipPopup>{context}</TooltipPopup>
-            </Tooltip>
-          </span>
-          {children}
         </div>
       </header>
       {!expanded && !resizeDisabled && (
@@ -1220,12 +2013,20 @@ function Column({
           }}
         />
       )}
-      <ChatPaneContext value={{ active: active && !hidden, column: !expanded }}>
+      <ChatPaneContext value={{ active: active && !hidden, column: !expanded, columnActions }}>
         <div className="flex min-h-0 flex-1 flex-col">
           {!connected ? (
-            <p className="p-4 text-sm text-muted-foreground">
-              Reconnect {device} to load this conversation.
-            </p>
+            <div className="p-3">
+              <Menu>
+                <MenuTrigger render={<Button size="xs" variant="outline" />}>
+                  Actions <ChevronDownIcon />
+                </MenuTrigger>
+                <MenuPopup>{columnActions}</MenuPopup>
+              </Menu>
+              <p className="mt-3 text-sm text-muted-foreground">
+                Reconnect {device} to load this conversation.
+              </p>
+            </div>
           ) : visible && !hidden ? (
             <Suspense
               fallback={<p className="p-3 text-xs text-muted-foreground">Loading chat...</p>}

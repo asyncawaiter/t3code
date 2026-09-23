@@ -109,3 +109,37 @@ declare module "@tanstack/react-router" {
     dashboardFocusKey?: string | undefined;
   }
 }
+
+/** Space membership is automatic; board membership is explicitly saved. */
+export function spaceColumnsNavigation(
+  scope: { profileId: string; spaceId?: string | undefined; unsorted: boolean },
+  focus?: string,
+) {
+  return {
+    to: "/spaces/$profileId" as const,
+    params: { profileId: scope.profileId },
+    search: {
+      view: "columns" as const,
+      workspace: "space" as const,
+      space: scope.spaceId,
+      unsorted: scope.unsorted,
+      ...(focus ? { focus } : {}),
+    },
+  };
+}
+
+export function columnSpaceScope(pathname: string, search: string) {
+  if (!pathname.startsWith("/spaces/")) return undefined;
+  const params = new URLSearchParams(search);
+  const profileId = decodeURIComponent(pathname.split("/")[2] ?? "all");
+  if (
+    params.get("workspace") === "board" ||
+    (params.get("view") === "columns" && profileId === "all" && params.get("workspace") !== "space")
+  )
+    return undefined;
+  return {
+    profileId,
+    spaceId: params.get("space") ?? undefined,
+    unsorted: params.get("unsorted") === "true",
+  };
+}

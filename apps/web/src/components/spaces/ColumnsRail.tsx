@@ -3,6 +3,12 @@ import { openCommandPalette } from "../../commandPaletteBus";
 import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
 import { useEnvironments } from "../../state/environments";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
+import { useChatBoards } from "../../hooks/useChatBoards";
+import { isRecoveredChatBoard } from "./chatBoardMigration";
+import { spaceColumnsNavigation } from "./columnNavigation";
+import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
+import { Input } from "../ui/input";
+import { ChatModeSwitch } from "./ChatModeSwitch";
 import { ProfileSpaceNavigator } from "./ProfileSpaceNavigator";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -24,15 +30,14 @@ import {
   LocateFixedIcon,
   LayoutDashboardIcon,
   LayersIcon,
+  Columns3Icon,
+  PlusIcon,
   SettingsIcon,
   UserRoundIcon,
   ChartNoAxesColumnIcon,
 } from "lucide-react";
 import { usePrimarySettings } from "../../hooks/useSettings";
-import {
-  globalDashboardNavigation,
-  scopedOverviewNavigation,
-} from "../../lib/globalDashboardNavigation";
+import { globalDashboardNavigation } from "../../lib/globalDashboardNavigation";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
@@ -51,10 +56,24 @@ export function ColumnsRail() {
   const profiles = usePrimarySettings((settings) => settings.profiles);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const [browsing, setBrowsing] = useState(false);
+  const [boardsOpen, setBoardsOpen] = useState(false);
+  const [newBoard, setNewBoard] = useState(false);
+  const [name, setName] = useState("");
+  const boards = useChatBoards();
+  const visitBoard = (id: string) => {
+    boards.setSelected(id);
+    setBoardsOpen(false);
+    void navigate({
+      to: "/spaces/$profileId",
+      params: { profileId: "all" },
+      search: { view: "columns", workspace: "board", board: id, space: undefined, unsorted: false },
+    });
+  };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         browsing ||
+        boardsOpen ||
         event.defaultPrevented ||
         event.repeat ||
         isCommandPaletteOpen() ||
@@ -77,13 +96,13 @@ export function ColumnsRail() {
           : nextProfileId(resolved, activeId, direction);
       if (profileId) {
         event.preventDefault();
-        void navigate(scopedOverviewNavigation({ profileId, unsorted: false }));
+        void navigate(spaceColumnsNavigation({ profileId, unsorted: false }));
       } else if (spaceIndex >= 0 && activeId !== "all") {
         const space = profiles.find((profile) => profile.id === activeId)?.spaces?.[spaceIndex - 1];
         if (spaceIndex > 0 && !space) return;
         event.preventDefault();
         void navigate(
-          scopedOverviewNavigation({
+          spaceColumnsNavigation({
             profileId: activeId,
             spaceId: space?.id,
             unsorted: spaceIndex === 0,
@@ -93,11 +112,11 @@ export function ColumnsRail() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [profiles, keybindings, navigate, browsing]);
+  }, [profiles, keybindings, navigate, browsing, boardsOpen]);
   return (
     <aside
       aria-label="Columns navigation"
-      className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-sidebar-border bg-sidebar px-1.5 pb-3 pt-[var(--workspace-topbar-height)]"
+      className="flex w-18 shrink-0 flex-col items-center gap-2 border-r border-sidebar-border bg-sidebar px-1.5 pb-3 pt-[var(--workspace-topbar-height)]"
     >
       <Tooltip>
         <TooltipTrigger
@@ -107,14 +126,12 @@ export function ColumnsRail() {
               variant="ghost"
               aria-label="Global dashboard"
               aria-current={location.pathname === "/dashboard" ? "page" : undefined}
-              className={
-                location.pathname === "/dashboard" ? "bg-primary/10 text-primary" : undefined
-              }
+              className={`size-14 sm:size-14 ${location.pathname === "/dashboard" ? "bg-primary/10 text-primary" : ""}`}
               onClick={() => void navigate(globalDashboardNavigation())}
             />
           }
         >
-          <LayoutDashboardIcon className="size-4" />
+          <LayoutDashboardIcon className="size-6" />
         </TooltipTrigger>
         <TooltipPopup side="right">Global dashboard</TooltipPopup>
       </Tooltip>
@@ -125,11 +142,12 @@ export function ColumnsRail() {
               size="icon"
               variant="ghost"
               aria-label="Search chats and commands"
+              className="size-14 sm:size-14"
               onClick={() => openCommandPalette({ query: "" })}
             />
           }
         >
-          <SearchIcon className="size-4" />
+          <SearchIcon className="size-6" />
         </TooltipTrigger>
         <TooltipPopup side="right">Search chats and commands</TooltipPopup>
       </Tooltip>
@@ -152,18 +170,32 @@ export function ColumnsRail() {
           <TooltipPopup side="right">Focus saved chat</TooltipPopup>
         </Tooltip>
       )}
-      <Popover open={browsing} onOpenChange={setBrowsing}>
+      <Popover
+        open={browsing}
+        onOpenChange={(open) => {
+          setBrowsing(open);
+          if (open) setBoardsOpen(false);
+        }}
+      >
         <PopoverTrigger
+          openOnHover
+          delay={150}
+          closeDelay={250}
           render={
             <Button
               size="icon"
               variant="ghost"
               aria-label="Profiles and spaces"
-              title="Profiles and spaces"
+              className={`size-14 sm:size-14 ${
+                location.pathname.startsWith("/spaces/") &&
+                new URLSearchParams(location.searchStr).get("workspace") === "space"
+                  ? "bg-primary/10 text-primary"
+                  : ""
+              }`}
             />
           }
         >
-          <LayersIcon className="size-4" />
+          <LayersIcon className="size-6" />
         </PopoverTrigger>
         <PopoverPopup
           side="right"
@@ -175,7 +207,102 @@ export function ColumnsRail() {
           <ProfileSpaceNavigator onNavigate={() => setBrowsing(false)} />
         </PopoverPopup>
       </Popover>
+      <Popover
+        open={boardsOpen}
+        onOpenChange={(open) => {
+          setBoardsOpen(open);
+          if (open) setBrowsing(false);
+        }}
+      >
+        <PopoverTrigger
+          openOnHover
+          delay={150}
+          closeDelay={250}
+          render={
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Boards"
+              className={`size-14 sm:size-14 ${
+                location.pathname.startsWith("/spaces/") &&
+                new URLSearchParams(location.searchStr).get("view") === "columns" &&
+                new URLSearchParams(location.searchStr).get("workspace") !== "space"
+                  ? "bg-primary/10 text-primary"
+                  : ""
+              }`}
+            />
+          }
+        >
+          <Columns3Icon className="size-6" />
+        </PopoverTrigger>
+        <PopoverPopup side="right" align="start" className="w-72" viewportClassName="p-2">
+          <div className="flex items-center justify-between px-2 pb-2">
+            <PopoverTitle>Boards</PopoverTitle>
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={boards.pending || !!boards.unavailable}
+              onClick={() => {
+                setNewBoard(!newBoard);
+                setName("");
+              }}
+            >
+              <PlusIcon className="size-3.5" />
+              New board
+            </Button>
+          </div>
+          {newBoard && (
+            <form
+              className="mb-2 flex gap-2"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                if (!name.trim() || boards.pending) return;
+                const board = { ...DEFAULT_CHAT_BOARD, id: crypto.randomUUID(), name: name.trim() };
+                if (await boards.save([board], [])) {
+                  setNewBoard(false);
+                  visitBoard(board.id);
+                }
+              }}
+            >
+              <Input
+                aria-label="New board name"
+                value={name}
+                maxLength={100}
+                onChange={(event) => setName(event.target.value)}
+                autoFocus
+              />
+              <Button size="xs" type="submit" disabled={!name.trim() || boards.pending}>
+                Create
+              </Button>
+            </form>
+          )}
+          <div className="max-h-80 overflow-y-auto">
+            {boards.boards
+              .filter((board) => !isRecoveredChatBoard(board))
+              .map((board) => (
+                <Button
+                  key={board.id}
+                  size="sm"
+                  variant={boards.board.id === board.id ? "secondary" : "ghost"}
+                  className="w-full justify-between"
+                  onClick={() => visitBoard(board.id)}
+                >
+                  <span className="truncate">{board.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {board.order.filter((key) => !board.hidden.includes(key)).length}
+                  </span>
+                </Button>
+              ))}
+          </div>
+          {(boards.error || boards.unavailable) && (
+            <p role="status" className="mt-2 px-2 text-xs text-muted-foreground">
+              {boards.error ?? boards.unavailable}
+            </p>
+          )}
+        </PopoverPopup>
+      </Popover>
       <div className="mt-auto flex flex-col items-center gap-2">
+        <ChatModeSwitch />
         {pullRequestsSupported && (
           <Tooltip>
             <TooltipTrigger

@@ -1,3 +1,4 @@
+import { ChatModeSwitch } from "../spaces/ChatModeSwitch";
 import { globalDashboardNavigation } from "../../lib/globalDashboardNavigation";
 import { ChartNoAxesColumnIcon, LayoutDashboardIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -250,6 +251,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
         <div className="min-w-0 flex-1">
           <SidebarUtilityMenu />
         </div>
+        <ChatModeSwitch />
         {hasCloudPublicConfig() ? (
           <Suspense fallback={null}>
             <T3ConnectSidebarAvatar />

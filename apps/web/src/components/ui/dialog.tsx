@@ -90,6 +90,7 @@ function DialogPopup({
             className,
           )}
           data-slot="dialog-popup"
+          data-has-close={showCloseButton || undefined}
           {...props}
         >
           {children}
@@ -112,7 +113,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-panel])]:pb-3 max-sm:pb-4",
+        "flex shrink-0 flex-col gap-2 p-6 in-[[data-slot=dialog-popup][data-has-close=true]]:pr-12 in-[[data-slot=dialog-popup]:has([data-slot=dialog-panel])]:pb-3 max-sm:pb-4",
         className,
       )}
       data-slot="dialog-header"
@@ -131,7 +132,7 @@ function DialogFooter({
   return (
     <div
       className={cn(
-        "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-2xl)-1px)]",
+        "flex shrink-0 flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-2xl)-1px)]",
         variant === "default" && "border-t bg-muted/72 py-4",
         variant === "bare" && "py-4",
         className,
@@ -145,7 +146,7 @@ function DialogFooter({
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
-      className={cn("font-heading font-semibold text-xl leading-none", className)}
+      className={cn("break-words font-heading font-semibold text-xl leading-snug", className)}
       data-slot="dialog-title"
       {...props}
     />

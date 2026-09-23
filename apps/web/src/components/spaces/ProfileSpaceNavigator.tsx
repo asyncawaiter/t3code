@@ -32,16 +32,14 @@ import {
 } from "../../keybindings";
 import { useUiStateStore } from "../../uiStateStore";
 import { openChatCreation, revealChatLocation } from "../../chatCreationStore";
-import {
-  globalDashboardNavigation,
-  scopedOverviewNavigation,
-} from "../../lib/globalDashboardNavigation";
 import { ProfileStrip } from "../sidebar/ProfileStrip";
 import { SpaceToolbar, SpaceTile, DefaultSpaceTile } from "../sidebar/Spaces";
 import { OUTSIDE_SPACES, spaceProjectKeys, spaceDragId } from "../sidebar/Spaces.logic";
 import { useProfileSwipe } from "../sidebar/useProfileSwipe";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
+import { scopedOverviewNavigation } from "../../lib/globalDashboardNavigation";
+import { spaceColumnsNavigation } from "./columnNavigation";
 import { cn } from "../../lib/utils";
 
 /** Browsing profiles is local to this popup; choosing a destination changes scope. */
@@ -98,13 +96,11 @@ export function ProfileSpaceNavigator({ onNavigate }: { onNavigate: () => void }
   };
   const visit = (spaceId?: string) => {
     void navigate(
-      profile.id === ALL_PROFILE_ID
-        ? globalDashboardNavigation()
-        : scopedOverviewNavigation({
-            profileId: profile.id,
-            spaceId: spaceId === OUTSIDE_SPACES ? undefined : spaceId,
-            unsorted: spaceId === OUTSIDE_SPACES,
-          }),
+      spaceColumnsNavigation({
+        profileId: profile.id,
+        spaceId: spaceId === OUTSIDE_SPACES ? undefined : spaceId,
+        unsorted: spaceId === OUTSIDE_SPACES,
+      }),
     );
     onNavigate();
   };
@@ -168,7 +164,7 @@ export function ProfileSpaceNavigator({ onNavigate }: { onNavigate: () => void }
         <div className="max-h-[60dvh] overflow-y-auto rounded-xl bg-sidebar-foreground/[0.025] p-1.5">
           {profile.id === ALL_PROFILE_ID ? (
             <Button variant="ghost" className="w-full justify-start" onClick={() => visit()}>
-              Global dashboard
+              All chats
             </Button>
           ) : (
             <>
@@ -181,7 +177,12 @@ export function ProfileSpaceNavigator({ onNavigate }: { onNavigate: () => void }
                 onCreated={setCreatedId}
                 selectedSpaceId={selectedSpace}
                 onFilterChange={() => visit()}
-                onOverview={() => visit()}
+                onOverview={() => {
+                  void navigate(
+                    scopedOverviewNavigation({ profileId: profile.id, unsorted: false }),
+                  );
+                  onNavigate();
+                }}
               />
               <SortableContext
                 items={(profile.spaces ?? []).map((item) => spaceDragId(profile.id, item.id))}

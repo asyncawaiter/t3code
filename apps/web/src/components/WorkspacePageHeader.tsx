@@ -1,6 +1,5 @@
 import type { ComponentPropsWithoutRef } from "react";
 
-import { ChatModeSwitch } from "./spaces/ChatModeSwitch";
 import { WorkspaceViews } from "./spaces/WorkspaceViews";
 import { cn } from "../lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../workspaceTitlebar";
@@ -9,7 +8,6 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../workspaceTitlebar";
 export function WorkspacePageHeader({
   electron = false,
   workspaceViews = false,
-  chatModes = workspaceViews,
   children,
   reserveNativeControls = electron,
   className,
@@ -17,7 +15,6 @@ export function WorkspacePageHeader({
 }: ComponentPropsWithoutRef<"header"> & {
   readonly electron?: boolean;
   readonly workspaceViews?: boolean;
-  readonly chatModes?: boolean;
   readonly reserveNativeControls?: boolean;
 }) {
   return (
@@ -28,14 +25,12 @@ export function WorkspacePageHeader({
           electron && "drag-region",
           reserveNativeControls && "wco:pr-[var(--workspace-native-controls-inset)]",
           COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-          chatModes && "[[data-columns-rail=true]_&]:pl-[var(--workspace-rail-inset)]",
-          chatModes && "pr-28 sm:pr-28",
+          "[[data-columns-rail=true]_&]:pl-[var(--workspace-rail-inset)]",
           className,
         )}
         {...props}
       >
         {children}
-        {chatModes && <ChatModeSwitch />}
       </header>
       {workspaceViews && <WorkspaceViews />}
     </>

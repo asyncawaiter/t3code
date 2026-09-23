@@ -6,6 +6,7 @@ import type { ScopedProjectRef, ThreadId } from "@t3tools/contracts";
 import type { DraftId } from "./composerDraftStore";
 
 export interface ChatCreationRequest {
+  scope?: { profileId: string; spaceId?: string | undefined; unsorted: boolean };
   projectRef?: ScopedProjectRef;
   draftId?: DraftId;
   onCreated?: (draft: {

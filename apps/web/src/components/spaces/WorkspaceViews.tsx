@@ -8,6 +8,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { OUTSIDE_SPACES } from "../sidebar/Spaces.logic";
 import { Button } from "../ui/button";
+import { columnSpaceScope, spaceColumnsNavigation, useChatMode } from "./columnNavigation";
 import { workspaceView } from "./workspaceView";
 
 /** View navigation stays available while reading a chat, without changing its assignment. */
@@ -23,6 +24,9 @@ export function WorkspaceViews({
   const location = useLocation();
   const navigate = useNavigate();
   const dashboardReturn = location.state.dashboardReturn;
+  const [mode] = useChatMode();
+  const columnsScope = columnSpaceScope(location.pathname, location.searchStr);
+  const destinationScope = scope ?? columnsScope;
   const onSpace = location.pathname.startsWith("/spaces/");
   const search = new URLSearchParams(location.searchStr);
   const onColumns = onSpace && workspaceView(search.get("view")) === "columns";
@@ -52,6 +56,53 @@ export function WorkspaceViews({
     : location.pathname === "/dashboard"
       ? "overview"
       : null;
+  if (mode === "columns" && destinationScope && (onColumns || view === "overview")) {
+    const owner = profiles.find((item) => item.id === destinationScope.profileId);
+    const selectedSpace = owner?.spaces?.find((item) => item.id === destinationScope.spaceId);
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-4 py-1 no-drag">
+        {!navigationOnly && (
+          <span className="truncate text-sm font-medium">
+            {owner?.name ?? "All"} /{" "}
+            {destinationScope.unsorted ? "Unsorted" : (selectedSpace?.name ?? "All chats")}
+          </span>
+        )}
+        <nav
+          aria-label="Space views"
+          className="flex shrink-0 items-center gap-1 rounded-lg bg-muted/40 p-0.5"
+        >
+          <Button
+            size="xs"
+            variant={onColumns ? "secondary" : "ghost"}
+            className={
+              onColumns ? "bg-background shadow-xs ring-1 ring-border/60" : "text-muted-foreground"
+            }
+            aria-current={onColumns ? "page" : undefined}
+            onClick={() => void navigate(spaceColumnsNavigation(destinationScope))}
+          >
+            Chats
+          </Button>
+          <Button
+            size="xs"
+            variant={!onColumns ? "secondary" : "ghost"}
+            className={
+              !onColumns ? "bg-background shadow-xs ring-1 ring-border/60" : "text-muted-foreground"
+            }
+            aria-current={!onColumns ? "page" : undefined}
+            onClick={() =>
+              void navigate({
+                to: "/spaces/$profileId",
+                params: { profileId: destinationScope.profileId },
+                search: { space: destinationScope.spaceId, unsorted: destinationScope.unsorted },
+              })
+            }
+          >
+            Dashboard
+          </Button>
+        </nav>
+      </div>
+    );
+  }
   return (
     <div
       className={`flex min-h-10 items-center gap-3 bg-background py-1 [-webkit-app-region:no-drag] ${navigationOnly || embedded ? "min-w-0 flex-1" : "shrink-0 border-b border-border/60 px-4"}`}
@@ -75,7 +126,7 @@ export function WorkspaceViews({
               <span className="truncate">{dashboardReturn.label}</span>
             </Button>
           ) : onColumns ? (
-            "Columns"
+            "Boards"
           ) : (
             <>
               {profile?.name ?? "All"}

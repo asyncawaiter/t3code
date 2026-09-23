@@ -1,12 +1,21 @@
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { indexProfileSpaces, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
+import { profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
+import { usePrimarySettings } from "./useSettings";
+import { OUTSIDE_SPACES } from "../components/sidebar/Spaces.logic";
 import { readThreadShell } from "../state/entities";
 import { useChatBoards } from "./useChatBoards";
-import { boardWithOpenedChat, useChatMode } from "../components/spaces/columnNavigation";
+import {
+  boardWithOpenedChat,
+  useChatMode,
+  columnSpaceScope,
+  spaceColumnsNavigation,
+} from "../components/spaces/columnNavigation";
 
-/** Reuse the selected board for every chat entry point without changing its layout. */
+/** Space entry points preserve scope; explicit boards retain their saved membership. */
 export function useOpenChatInColumns() {
   const [mode] = useChatMode();
+  const profiles = usePrimarySettings((settings) => settings.profiles);
   const boards = useChatBoards();
   const navigate = useNavigate();
   const router = useRouter();
@@ -22,7 +31,42 @@ export function useOpenChatInColumns() {
   }) => {
     if (mode !== "columns") return false;
     const origin = router.state.location.href;
+    const current = new URL(origin, "http://local");
     const shell = readThreadShell({ environmentId: chat.environmentId, threadId: chat.id });
+    let spaceScope =
+      columnSpaceScope(current.pathname, current.search) ??
+      (current.pathname === "/dashboard"
+        ? { profileId: "all", spaceId: undefined, unsorted: false }
+        : undefined);
+    if (
+      spaceScope &&
+      shell &&
+      !profileThreadFilter(
+        profiles,
+        spaceScope.profileId,
+        spaceScope.unsorted ? OUTSIDE_SPACES : (spaceScope.spaceId ?? null),
+      )({ ...shell, environmentId: chat.environmentId, id: chat.id, pinnedAt: null })
+    ) {
+      const placement = indexProfileSpaces(profiles).get(`${chat.environmentId}:${chat.id}`);
+      const owner =
+        placement?.profile ??
+        profiles.find((profile) =>
+          profile.projectKeys.includes(`${chat.environmentId}:${shell.projectId}`),
+        );
+      spaceScope = {
+        profileId: owner?.id ?? "all",
+        spaceId: placement?.space.id,
+        unsorted: !placement,
+      };
+    }
+    if (spaceScope) {
+      await navigate({
+        ...spaceColumnsNavigation(spaceScope, `${chat.environmentId}:${chat.id}`),
+        state: { dashboardReturn },
+        ...(chat.hash ? { hash: chat.hash } : {}),
+      });
+      return true;
+    }
     const key = `${chat.environmentId}:${chat.id}`;
     const next = boardWithOpenedChat(boards.board, {
       key,

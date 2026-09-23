@@ -1,6 +1,14 @@
 import { expect, it } from "vite-plus/test";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { columnOrder, columnWidth, boardColumnKeys } from "./ChatColumns";
+import { EnvironmentId, ThreadId, TurnId, DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
+import {
+  moveColumn,
+  columnOrder,
+  columnWidth,
+  boardColumnKeys,
+  columnStatus,
+  addChatsToBoard,
+  activeSpaceChats,
+} from "./ChatColumns";
 it("keeps column order stable, appends new chats, and only retains explicitly chosen settled chats", () => {
   const chat = (id: string) => ({
     id: ThreadId.make(id),
@@ -70,4 +78,82 @@ it("bounds independently saved widths to a usable range", () => {
   expect(columnWidth(100)).toBe(340);
   expect(columnWidth(4000)).toBe(1000);
   expect(columnWidth(NaN)).toBe(420);
+});
+
+it("keeps conversation settlement distinct from result review and prioritizes requests for input", () => {
+  const completedAt = "2026-09-23T12:00:00Z";
+  const chat: Parameters<typeof columnStatus>[0] = {
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+    session: null,
+    archivedAt: null,
+    settledOverride: null,
+    latestTurn: {
+      turnId: TurnId.make("turn"),
+      state: "completed",
+      requestedAt: completedAt,
+      startedAt: completedAt,
+      completedAt,
+      assistantMessageId: null,
+    },
+  };
+  expect(columnStatus(chat)).toBe("Ready to review");
+  expect(columnStatus(chat, completedAt)).toBe("Reviewed");
+  expect(columnStatus(chat, "older-result")).toBe("Ready to review");
+  expect(columnStatus({ ...chat, settledOverride: "settled" }, completedAt)).toBe("Settled");
+  expect(columnStatus({ ...chat, settledOverride: "settled", hasPendingApprovals: true })).toBe(
+    "Needs input",
+  );
+  expect(columnStatus({ ...chat, hasActionableProposedPlan: true })).toBe("Needs input");
+  expect(columnStatus({ ...chat, archivedAt: completedAt })).toBe("Archived");
+  expect(columnStatus({ ...chat, latestTurn: null })).toBe("Idle");
+});
+
+it("appends a batch without disturbing existing columns and retains settled references", () => {
+  const board = {
+    ...DEFAULT_CHAT_BOARD,
+    order: ["a", "hidden", "b"],
+    hidden: ["hidden"],
+    kept: ["a"],
+    widths: { a: 500 },
+  };
+  const updated = addChatsToBoard(board, [
+    { key: "hidden", title: "Returning chat", context: "POD", settled: false },
+    { key: "reference", title: "Reference", context: "Evals", settled: true },
+  ]);
+  expect(updated.order).toEqual(["a", "b", "hidden", "reference"]);
+  expect(updated.hidden).toEqual([]);
+  expect(updated.kept).toEqual(["a", "reference"]);
+  expect(updated.widths).toEqual({ a: 500 });
+  expect(updated.labels?.reference).toEqual({ title: "Reference", context: "Evals" });
+  expect(board.order).toEqual(["a", "hidden", "b"]);
+  expect(board.hidden).toEqual(["hidden"]);
+  expect(addChatsToBoard(board, [])).toEqual(board);
+});
+
+it("space membership includes idle and reviewed chats, excludes parked chats, and wakes expired snoozes", () => {
+  const idle = { id: "idle", archivedAt: null, settledOverride: null };
+  const reviewed = { ...idle, id: "reviewed" };
+  const settled = { ...idle, id: "settled", settledOverride: "settled" as const };
+  const archived = { ...idle, id: "archived", archivedAt: "2026-09-23" };
+  const snoozed = { ...idle, id: "snoozed", snoozedUntil: "2026-09-24T00:00:00Z" };
+  const expired = { ...idle, id: "expired", snoozedUntil: "2026-09-22T00:00:00Z" };
+  expect(
+    activeSpaceChats(
+      [idle, reviewed, settled, archived, snoozed, expired],
+      Date.parse("2026-09-23"),
+    ),
+  ).toEqual([idle, reviewed, expired]);
+  expect(activeSpaceChats([snoozed], Date.parse("2026-09-24"))).toEqual([snoozed]);
+});
+
+it("moves a column across multiple positions without losing other or hidden columns", () => {
+  const order = ["a", "hidden", "b", "c"];
+  expect(moveColumn(order, "a", "c")).toEqual(["hidden", "b", "c", "a"]);
+  expect(moveColumn(order, "c", "a")).toEqual(["c", "a", "hidden", "b"]);
+  expect(moveColumn(order, "missing", "a")).toBe(order);
+  expect(moveColumn(order, "a", "missing")).toBe(order);
+  expect(moveColumn(order, "a", "a")).toBe(order);
+  expect(order).toEqual(["a", "hidden", "b", "c"]);
 });

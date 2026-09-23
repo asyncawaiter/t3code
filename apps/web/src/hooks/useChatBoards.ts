@@ -21,7 +21,7 @@ import {
 } from "../components/spaces/chatBoardMigration";
 
 const EMPTY: readonly ChatBoard[] = [];
-export function useChatBoards() {
+export function useChatBoards(boardId?: string) {
   const source = useAtomValue(profileSourceAtom);
   const { environments } = useEnvironments();
   const [cache, setCache] = useLocalStorage(
@@ -40,9 +40,10 @@ export function useChatBoards() {
       ? persisted
       : [DEFAULT_CHAT_BOARD, ...persisted],
   );
-  const previous = persisted.find((board) => board.id === selected);
+  const activeId = boardId ?? selected;
+  const previous = persisted.find((board) => board.id === activeId);
   const board =
-    boards.find((board) => board.id === selected) ??
+    boards.find((board) => board.id === activeId) ??
     (previous &&
       boards.find((board) => chatBoardArrangement(board) === chatBoardArrangement(previous))) ??
     boards.find((board) => board.id === "default")!;
