@@ -19,7 +19,8 @@ import {
   spaceColumnsNavigation,
 } from "./columnNavigation";
 
-export function ChatModeSwitch() {
+/** `large` matches the columns rail's oversized buttons. */
+export function ChatModeSwitch({ large = false }: { large?: boolean }) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -109,12 +110,13 @@ export function ChatModeSwitch() {
                   size="icon"
                   variant="ghost"
                   aria-label={`Conversation layout: ${selectedColumns ? "Columns" : "Chat"}`}
+                  className={large ? "size-14 sm:size-14" : undefined}
                 />
               }
             />
           }
         >
-          <PanelsTopLeftIcon className="size-4" />
+          <PanelsTopLeftIcon className={large ? "size-6" : "size-4"} />
         </TooltipTrigger>
         <TooltipPopup side="right">
           Conversation layout: {selectedColumns ? "Columns" : "Chat"}

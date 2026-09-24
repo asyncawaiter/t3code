@@ -53,6 +53,7 @@ import {
 } from "../../composerDraftStore";
 import { threadShellHasStarted } from "../ChatView.logic";
 import { useColumnNavigation, spaceColumnsNavigation } from "./columnNavigation";
+import { scoreChatPickerMatch } from "./chatPickerSearch";
 import type { OverviewScope } from "../../lib/globalDashboardNavigation";
 import { profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
 import { OUTSIDE_SPACES } from "../sidebar/Spaces.logic";
@@ -78,7 +79,14 @@ import {
   MessageSquarePlusIcon,
   Columns3Icon,
   ChevronDownIcon,
+  FolderIcon,
+  LayersIcon,
+  MonitorIcon,
+  TerminalSquareIcon,
+  UserRoundIcon,
+  type LucideIcon,
 } from "lucide-react";
+import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useEnvironments } from "../../state/environments";
@@ -723,21 +731,28 @@ function BoardColumns({
         (search.trim() !== "" || !selectedKeys.has(keyOf(chat))) &&
         (includeSettled || chat.settledOverride !== "settled" || selectedKeys.has(keyOf(chat))),
     )
-    .map((chat) => ({ chat, detail: detailsFor(chat) }))
+    .map((chat) => {
+      const detail = detailsFor(chat);
+      const score = scoreChatPickerMatch(
+        chat.title,
+        [detail.profile, detail.space, detail.folder, detail.device],
+        search,
+      );
+      return { chat, detail, score: score ?? 0, matches: !search.trim() || score !== null };
+    })
     .filter(
-      ({ chat, detail }) =>
+      ({ chat, detail, matches }) =>
+        matches &&
         (profileFilter === "all" || detail.profileId === profileFilter) &&
         (spaceFilter === "all" || detail.spaceId === spaceFilter) &&
         (deviceFilter === "all" || chat.environmentId === deviceFilter) &&
-        (folderFilter === "all" || detail.folderId === folderFilter) &&
-        `${chat.title} ${Object.values(detail).join(" ")}`
-          .toLowerCase()
-          .includes(search.trim().toLowerCase()),
+        (folderFilter === "all" || detail.folderId === folderFilter),
     )
     .toSorted(
-      ({ chat: a }, { chat: b }) =>
-        Number(selectedKeys.has(keyOf(a))) - Number(selectedKeys.has(keyOf(b))) ||
-        (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
+      (a, b) =>
+        Number(selectedKeys.has(keyOf(a.chat))) - Number(selectedKeys.has(keyOf(b.chat))) ||
+        a.score - b.score ||
+        (b.chat.updatedAt ?? b.chat.createdAt).localeCompare(a.chat.updatedAt ?? a.chat.createdAt),
     );
   const spaceChoices = allChats.filter(
     (chat) =>
@@ -1900,70 +1915,46 @@ function Column({
           </div>
           <DashboardReviewBar thread={chat} compact />
         </div>
-        <div
-          aria-label="Chat context"
-          className="min-w-0 max-w-2xl overflow-hidden rounded-lg border border-border/50 bg-muted/30 text-xs"
-        >
-          <div className="grid grid-cols-2 divide-x divide-border/50">
-            <Tooltip>
-              <TooltipTrigger render={<div className="min-w-0 px-2.5 py-1.5" />}>
-                <div className="mb-0.5 text-[10px] font-medium text-muted-foreground">Space</div>
-                <div className="truncate font-medium">{context.space}</div>
-              </TooltipTrigger>
-              <TooltipPopup>
-                {context.profile} / {context.space}
-              </TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger render={<div className="min-w-0 px-2.5 py-1.5" />}>
-                <div className="mb-0.5 text-[10px] font-medium text-muted-foreground">Project</div>
-                <div className="truncate font-medium">{context.folder ?? "Unassigned"}</div>
-              </TooltipTrigger>
-              <TooltipPopup>Project: {context.folder ?? "Unassigned"}</TooltipPopup>
-            </Tooltip>
-          </div>
-          <div className="space-y-1 border-t border-border/50 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-            <div className="flex min-w-0 items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
-                  {context.profile}{" "}
-                  <span aria-hidden className="mx-1 opacity-50">
-                    /
-                  </span>{" "}
-                  {context.device}
-                </TooltipTrigger>
-                <TooltipPopup>
-                  Profile: {context.profile}. Device: {context.device}
-                </TooltipPopup>
-              </Tooltip>
-              {chat.branch && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<span className="inline-flex min-w-0 max-w-[40%] items-center gap-1" />}
-                  >
-                    <GitBranchIcon className="size-3 shrink-0" />
-                    <span className="truncate">{chat.branch}</span>
-                  </TooltipTrigger>
-                  <TooltipPopup>Branch: {chat.branch}</TooltipPopup>
-                </Tooltip>
-              )}
-            </div>
-            {context.path && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span
-                      aria-label={`Path: ${context.path}`}
-                      className="block truncate font-mono text-[10px]"
-                    />
-                  }
-                >
-                  {context.path}
-                </TooltipTrigger>
-                <TooltipPopup>{context.path}</TooltipPopup>
-              </Tooltip>
-            )}
-          </div>
+        <div aria-label="Chat context" className="flex min-w-0 max-w-2xl flex-wrap gap-1.5">
+          <ContextLabel
+            icon={UserRoundIcon}
+            caption="Profile"
+            value={context.profile}
+            tone="indigo"
+          />
+          <ContextLabel icon={LayersIcon} caption="Space" value={context.space} tone="violet" />
+          <ContextLabel
+            icon={FolderIcon}
+            caption="Project"
+            value={context.folder ?? "Unassigned"}
+            tone="sky"
+          />
+          {chat.branch && (
+            <ContextLabel
+              icon={GitBranchIcon}
+              caption="Branch"
+              value={chat.branch}
+              tone="emerald"
+            />
+          )}
+          <ContextLabel icon={MonitorIcon} caption="Device" value={context.device} tone="amber" />
+          {context.path && (
+            <ContextLabel
+              icon={TerminalSquareIcon}
+              caption="Path"
+              tone="neutral"
+              value={shortPath(context.path)}
+              tooltip={`${context.path} (click to copy)`}
+              mono
+              onClick={() => {
+                const path = context.path!;
+                void writeTextToClipboard(path).then(
+                  () => toastManager.add({ type: "success", title: "Path copied" }),
+                  () => toastManager.add({ type: "error", title: "Could not copy path" }),
+                );
+              }}
+            />
+          )}
         </div>
       </header>
       {!expanded && !resizeDisabled && (
@@ -2049,5 +2040,58 @@ function Column({
         </div>
       </ChatPaneContext>
     </section>
+  );
+}
+
+const CONTEXT_LABEL_TONES = {
+  indigo: "border-indigo-500/20 bg-indigo-500/8 text-indigo-600 dark:text-indigo-300",
+  violet: "border-violet-500/20 bg-violet-500/8 text-violet-600 dark:text-violet-300",
+  sky: "border-sky-500/20 bg-sky-500/8 text-sky-600 dark:text-sky-300",
+  emerald: "border-emerald-500/20 bg-emerald-500/8 text-emerald-600 dark:text-emerald-300",
+  amber: "border-amber-500/25 bg-amber-500/8 text-amber-600 dark:text-amber-300",
+  neutral: "border-border/70 bg-muted/50 text-muted-foreground",
+} as const;
+
+/** Last two segments of a path, enough to tell worktrees apart without the full string. */
+function shortPath(path: string) {
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  return segments.length > 2 ? `.../${segments.slice(-2).join("/")}` : path;
+}
+
+/** Tinted label for one piece of chat context: icon, small caption, value. */
+function ContextLabel(props: {
+  icon: LucideIcon;
+  caption: string;
+  value: string;
+  tone: keyof typeof CONTEXT_LABEL_TONES;
+  tooltip?: string;
+  mono?: boolean;
+  onClick?: () => void;
+}) {
+  const Icon = props.icon;
+  const className = `inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] ${CONTEXT_LABEL_TONES[props.tone]} ${props.onClick ? "cursor-pointer hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          props.onClick ? (
+            <button type="button" onClick={props.onClick} className={className} />
+          ) : (
+            <span className={className} />
+          )
+        }
+      >
+        <Icon aria-hidden className="size-3 shrink-0" />
+        <span className="shrink-0 text-[9px] font-semibold tracking-wide uppercase opacity-75">
+          {props.caption}
+        </span>
+        <span
+          className={`min-w-0 truncate font-medium text-foreground ${props.mono ? "font-mono text-[10px]" : ""}`}
+        >
+          {props.value}
+        </span>
+      </TooltipTrigger>
+      <TooltipPopup>{props.tooltip ?? `${props.caption}: ${props.value}`}</TooltipPopup>
+    </Tooltip>
   );
 }
