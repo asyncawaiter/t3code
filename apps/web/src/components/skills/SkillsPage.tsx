@@ -5,6 +5,8 @@ import * as Schema from "effect/Schema";
 import { LayoutGridIcon, LibraryBigIcon, SlidersHorizontalIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
+import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { isElectron } from "../../env";
 import { Menu, MenuCheckboxItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -27,7 +29,9 @@ import {
 
 export type SkillsPageView = "library" | "gaps";
 
-const HiddenDriversSchema = Schema.mutable(Schema.Array(Schema.String));
+const DriverListSchema = Schema.mutable(Schema.Array(Schema.String));
+/** Claude and Codex only until the user opts other providers in. */
+const DEFAULT_SHOWN_DRIVERS = ["claudeAgent", "codex"];
 
 const PROVIDER_NAMES: Record<string, string> = {
   claudeAgent: "Claude",
@@ -53,11 +57,10 @@ export function SkillsPage({
   const [live, setLive] = useState<Record<string, SkillEnvironmentLiveState>>({});
   const [filters, setFilters] = useState<SkillFilters>(DEFAULT_SKILL_FILTERS);
   const [dialogRequest, setDialogRequest] = useState<SkillActionRequest | null>(null);
-  // Hidden rather than shown, so a newly added provider appears until the user opts out.
-  const [hiddenDrivers, setHiddenDrivers] = useLocalStorage(
-    "t3code:skills:hidden-drivers",
-    [] as string[],
-    HiddenDriversSchema,
+  const [shownDrivers, setShownDrivers] = useLocalStorage(
+    "t3code:skills:shown-drivers",
+    DEFAULT_SHOWN_DRIVERS,
+    DriverListSchema,
   );
 
   const handleLiveUpdate = useCallback((state: SkillEnvironmentLiveState) => {
@@ -109,10 +112,10 @@ export function SkillsPage({
       ].toSorted(),
     [environments],
   );
-  const hiddenCount = allDrivers.filter((driver) => hiddenDrivers.includes(driver)).length;
+  const hiddenCount = allDrivers.filter((driver) => !shownDrivers.includes(driver)).length;
   const visibleEnvironments = useMemo(
     () =>
-      hiddenDrivers.length === 0
+      hiddenCount === 0
         ? environments
         : environments.map((env) =>
             env.inventory
@@ -120,14 +123,14 @@ export function SkillsPage({
                   ...env,
                   inventory: {
                     ...env.inventory,
-                    providers: env.inventory.providers.filter(
-                      (provider) => !hiddenDrivers.includes(provider.driver),
+                    providers: env.inventory.providers.filter((provider) =>
+                      shownDrivers.includes(provider.driver),
                     ),
                   },
                 }
               : env,
           ),
-    [environments, hiddenDrivers],
+    [environments, shownDrivers, hiddenCount],
   );
   const groups = useMemo(() => buildSkillGroups(visibleEnvironments), [visibleEnvironments]);
   const targets = useMemo(() => buildSkillTargets(visibleEnvironments), [visibleEnvironments]);
@@ -143,7 +146,7 @@ export function SkillsPage({
   };
 
   return (
-    <div className="flex h-full min-w-0 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       {connectedIds.map((environmentId) => (
         <SkillEnvironmentLoader
           key={environmentId}
@@ -151,7 +154,7 @@ export function SkillsPage({
           onUpdate={handleLiveUpdate}
         />
       ))}
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-2">
+      <WorkspacePageHeader electron={isElectron} className="justify-between border-b">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-semibold">Skills</h1>
           <ToggleGroup
@@ -185,12 +188,12 @@ export function SkillsPage({
               {allDrivers.map((driver) => (
                 <MenuCheckboxItem
                   key={driver}
-                  checked={!hiddenDrivers.includes(driver)}
+                  checked={shownDrivers.includes(driver)}
                   onCheckedChange={(checked) =>
-                    setHiddenDrivers((current) =>
+                    setShownDrivers((current) =>
                       checked
-                        ? current.filter((hidden) => hidden !== driver)
-                        : [...new Set([...current, driver])],
+                        ? [...new Set([...current, driver])]
+                        : current.filter((shown) => shown !== driver),
                     )
                   }
                 >
@@ -208,7 +211,7 @@ export function SkillsPage({
             <RefreshIcon refreshing={Object.values(live).some((state) => state.isPending)} />
           </Button>
         </div>
-      </header>
+      </WorkspacePageHeader>
       <div className="flex min-h-0 flex-1">
         {view === "library" ? (
           <>
