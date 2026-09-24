@@ -216,12 +216,17 @@ const discoverSkillsInRoot = Effect.fn("discoverCursorSkillsInRoot")(function* (
   return skills;
 });
 
+/** The home directory Cursor's own `.cursor/skills` discovery resolves against. */
+export function resolveCursorUserHome(environment: NodeJS.ProcessEnv = process.env): string {
+  return environment.HOME?.trim() || environment.USERPROFILE?.trim() || NodeOS.homedir();
+}
+
 const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
   cwd?: string,
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const path = yield* Path.Path;
-  const userHome = environment.HOME?.trim() || environment.USERPROFILE?.trim() || NodeOS.homedir();
+  const userHome = resolveCursorUserHome(environment);
   const rootsBelow = (base: string, scope: "user" | "project") => [
     { directory: path.join(base, ".cursor", "skills"), scope },
     { directory: path.join(base, ".agents", "skills"), scope },

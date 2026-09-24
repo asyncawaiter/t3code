@@ -59,7 +59,11 @@ import {
 } from "../ProviderDriver.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./AntigravitySkills.ts";
+import {
+  antigravityUserSkillDirectories,
+  discoverAntigravitySkills,
+  resolveAntigravityUserHome,
+} from "./AntigravitySkills.ts";
 
 const DRIVER = ProviderDriverKind.make("antigravity");
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
@@ -475,6 +479,11 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         textGeneration,
         auth: authFlow.controller,
         refreshModels,
+        // The real `~/.gemini` skills folder, not the private profile copy
+        // `GEMINI_HOME` points at: that copy is only a symlink back to this
+        // directory (best-effort, may be missing), so writing through it
+        // risks landing on nothing.
+        skillsDirectory: antigravityUserSkillDirectories(path, path.join(userHome, ".gemini"))[0],
       } satisfies ProviderInstance;
     }),
 };

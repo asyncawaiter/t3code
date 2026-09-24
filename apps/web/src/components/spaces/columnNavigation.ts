@@ -53,7 +53,8 @@ export function usesColumnsRail(pathname: string, search: string, mode: "chat" |
       (pathname === "/dashboard" ||
         pathname.startsWith("/spaces/") ||
         pathname === "/usage" ||
-        pathname === "/pull-requests"))
+        pathname === "/pull-requests" ||
+        pathname === "/skills"))
   );
 }
 

@@ -1,6 +1,6 @@
 import { ChatModeSwitch } from "../spaces/ChatModeSwitch";
 import { globalDashboardNavigation } from "../../lib/globalDashboardNavigation";
-import { ChartNoAxesColumnIcon, LayoutDashboardIcon, SettingsIcon } from "lucide-react";
+import { ChartNoAxesColumnIcon, LayoutDashboardIcon, SettingsIcon, SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { lazy, memo, Suspense, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -164,9 +164,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             ? "usage"
             : location.pathname === "/pull-requests"
               ? "pull-requests"
-              : location.pathname === "/dashboard"
-                ? "dashboard"
-                : null,
+              : location.pathname === "/skills"
+                ? "skills"
+                : location.pathname === "/dashboard"
+                  ? "dashboard"
+                  : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -185,6 +187,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       to: "/pull-requests",
       search: readPullRequestListPreferences(),
     });
+  }, [closeMobileSidebar, navigate]);
+  const handleSkillsClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/skills" });
   }, [closeMobileSidebar, navigate]);
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
@@ -225,6 +231,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           onClick={handlePullRequestsClick}
         />
       ) : null}
+      <SidebarUtilityItem
+        icon={<SparklesIcon />}
+        label="Skills"
+        active={currentFooterPage === "skills"}
+        onClick={handleSkillsClick}
+      />
       <SidebarUtilityItem
         icon={<ChartNoAxesColumnIcon />}
         label="Usage"

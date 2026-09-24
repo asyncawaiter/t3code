@@ -12,6 +12,8 @@
  *
  * @module provider/Drivers/OpenCodeDriver
  */
+import * as NodeOS from "node:os";
+
 import { OpenCodeSettings, ProviderDriverKind } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -257,6 +259,13 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         ),
       );
 
+      // OpenCode reads its user-global config (and skills) from
+      // `$XDG_CONFIG_HOME/opencode`, falling back to `~/.config/opencode`.
+      const configHome =
+        processEnv.XDG_CONFIG_HOME?.trim() ||
+        pathService.join(processEnv.HOME || processEnv.USERPROFILE || NodeOS.homedir(), ".config");
+      const skillsDirectory = pathService.join(configHome, "opencode", "skills");
+
       return {
         instanceId,
         driverKind: DRIVER_KIND,
@@ -265,6 +274,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         accentColor,
         enabled,
         snapshot,
+        skillsDirectory,
         snapshotForCwd: (cwd) =>
           !effectiveConfig.enabled
             ? snapshot.getSnapshot

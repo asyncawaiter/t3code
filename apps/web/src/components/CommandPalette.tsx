@@ -76,6 +76,7 @@ import {
   MoonIcon,
   PaletteIcon,
   SettingsIcon,
+  SparklesIcon,
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
@@ -2042,6 +2043,17 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:skills",
+    searchTerms: ["skills", "agent skills", "claude skills"],
+    title: "Open skills",
+    icon: <SparklesIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/skills" });
+    },
+  });
 
   actionItems.push({
     kind: "action",

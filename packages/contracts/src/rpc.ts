@@ -3,6 +3,18 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { WorkItems } from "./workItem.ts";
+import {
+  SkillBundle,
+  SkillInventory,
+  SkillLibraryError,
+  SkillListInput,
+  SkillReadInput,
+  SkillRemoveInput,
+  SkillRemoveResult,
+  SkillRestoreInput,
+  SkillWriteInput,
+  SkillWriteResult,
+} from "./skills.ts";
 import { Profile } from "./profile.ts";
 import { EnvironmentId, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
@@ -321,6 +333,13 @@ export const WS_METHODS = {
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
 
+  // Skill library methods
+  skillsList: "skills.list",
+  skillsRead: "skills.read",
+  skillsWrite: "skills.write",
+  skillsRemove: "skills.remove",
+  skillsRestore: "skills.restore",
+
   // VCS methods
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
@@ -569,6 +588,38 @@ const WsProviderInstallRemoveRpc = Rpc.make(WS_METHODS.providerInstallRemove, {
   payload: ProviderSetupInput,
   success: ProviderInstallState,
   error: ProviderSetupRpcError,
+});
+
+const SkillRpcError = Schema.Union([SkillLibraryError, EnvironmentAuthorizationError]);
+
+const WsSkillsListRpc = Rpc.make(WS_METHODS.skillsList, {
+  payload: SkillListInput,
+  success: SkillInventory,
+  error: SkillRpcError,
+});
+
+const WsSkillsReadRpc = Rpc.make(WS_METHODS.skillsRead, {
+  payload: SkillReadInput,
+  success: SkillBundle,
+  error: SkillRpcError,
+});
+
+const WsSkillsWriteRpc = Rpc.make(WS_METHODS.skillsWrite, {
+  payload: SkillWriteInput,
+  success: SkillWriteResult,
+  error: SkillRpcError,
+});
+
+const WsSkillsRemoveRpc = Rpc.make(WS_METHODS.skillsRemove, {
+  payload: SkillRemoveInput,
+  success: SkillRemoveResult,
+  error: SkillRpcError,
+});
+
+const WsSkillsRestoreRpc = Rpc.make(WS_METHODS.skillsRestore, {
+  payload: SkillRestoreInput,
+  success: SkillWriteResult,
+  error: SkillRpcError,
 });
 
 const WsServerUpdateServerRpc = Rpc.make(WS_METHODS.serverUpdateServer, {
@@ -1454,6 +1505,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderInstallCancelRpc,
   WsProviderInstallSubscribeRpc,
   WsProviderInstallRemoveRpc,
+  WsSkillsListRpc,
+  WsSkillsReadRpc,
+  WsSkillsWriteRpc,
+  WsSkillsRemoveRpc,
+  WsSkillsRestoreRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
   WsServerCommitDesktopUpdateRpc,

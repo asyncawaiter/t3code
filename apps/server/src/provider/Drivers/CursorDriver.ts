@@ -55,7 +55,11 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
-import { discoverCursorSkills, probeCursorSkills } from "./CursorSkills.ts";
+import {
+  discoverCursorSkills,
+  probeCursorSkills,
+  resolveCursorUserHome,
+} from "./CursorSkills.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
@@ -236,6 +240,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
               ),
         adapter,
         textGeneration,
+        skillsDirectory: path.join(resolveCursorUserHome(processEnv), ".cursor", "skills"),
       } satisfies ProviderInstance;
     }),
 };

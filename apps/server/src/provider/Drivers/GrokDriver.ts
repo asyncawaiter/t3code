@@ -19,7 +19,7 @@ import {
   enrichGrokSnapshot,
 } from "../Layers/GrokProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
-import { readGrokUsageLimits } from "../Layers/grokUsageLimits.ts";
+import { readGrokUsageLimits, resolveGrokHome } from "../Layers/grokUsageLimits.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -166,6 +166,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         snapshotForCwd,
         adapter,
         textGeneration,
+        skillsDirectory: path.join(resolveGrokHome(path, processEnv), "skills"),
       } satisfies ProviderInstance;
     }),
 };

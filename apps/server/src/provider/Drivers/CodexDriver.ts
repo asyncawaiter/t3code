@@ -343,6 +343,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         consumeResetCredit,
         adapter,
         textGeneration,
+        skillsDirectory: pathService.join(homeLayout.sharedHomePath, "skills"),
       } satisfies ProviderInstance;
     }),
 };

@@ -86,6 +86,13 @@ export interface ProviderInstance {
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
   readonly auth?: ProviderAuthController;
+  /**
+   * The user-level folder this provider scans for skills and that T3
+   * installs personal skills into. Absolute, resolved against this
+   * instance's own config/environment (custom home dirs included).
+   * Undefined when the driver can't take file-based skills.
+   */
+  readonly skillsDirectory?: string;
 }
 
 export interface ProviderContinuationIdentity {

@@ -32,6 +32,7 @@ import {
   Columns3Icon,
   PlusIcon,
   SettingsIcon,
+  SparklesIcon,
   UserRoundIcon,
   ChartNoAxesColumnIcon,
 } from "lucide-react";
@@ -115,7 +116,7 @@ export function ColumnsRail() {
   return (
     <aside
       aria-label="Columns navigation"
-      className="relative flex w-18 shrink-0 flex-col items-center gap-2 bg-sidebar px-1.5 pb-3 pt-[var(--workspace-topbar-height)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-[var(--workspace-topbar-height)] before:bg-background after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:top-[var(--workspace-topbar-height)] after:w-px after:bg-sidebar-border"
+      className="relative flex min-h-0 w-18 shrink-0 flex-col items-center gap-2 overflow-y-auto [scrollbar-width:none] bg-sidebar px-1.5 pb-3 pt-[var(--workspace-topbar-height)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-[var(--workspace-topbar-height)] before:bg-background after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:top-[var(--workspace-topbar-height)] after:w-px after:bg-sidebar-border"
     >
       <Tooltip>
         <TooltipTrigger
@@ -299,8 +300,25 @@ export function ColumnsRail() {
           )}
         </PopoverPopup>
       </Popover>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Skills"
+              aria-current={location.pathname === "/skills" ? "page" : undefined}
+              className={`size-14 sm:size-14 ${location.pathname === "/skills" ? "bg-primary/10 text-primary" : ""}`}
+              onClick={() => void navigate({ to: "/skills" })}
+            />
+          }
+        >
+          <SparklesIcon className="size-6" />
+        </TooltipTrigger>
+        <TooltipPopup side="right">Skills</TooltipPopup>
+      </Tooltip>
       <div className="mt-auto flex flex-col items-center gap-2">
-        <ChatModeSwitch />
+        <ChatModeSwitch large />
         {pullRequestsSupported && (
           <Tooltip>
             <TooltipTrigger
@@ -308,6 +326,7 @@ export function ColumnsRail() {
                 <Button
                   size="icon"
                   variant="ghost"
+                  className="size-14 sm:size-14"
                   aria-label="Pull requests"
                   onClick={() =>
                     void navigate({
@@ -318,7 +337,7 @@ export function ColumnsRail() {
                 />
               }
             >
-              <PullRequestGlyph.pullRequest className="size-4" />
+              <PullRequestGlyph.pullRequest className="size-6" />
             </TooltipTrigger>
             <TooltipPopup side="right">Pull requests</TooltipPopup>
           </Tooltip>
@@ -329,12 +348,13 @@ export function ColumnsRail() {
               <Button
                 size="icon"
                 variant="ghost"
+                className="size-14 sm:size-14"
                 aria-label="Usage"
                 onClick={() => void navigate({ to: "/usage" })}
               />
             }
           >
-            <ChartNoAxesColumnIcon className="size-4" />
+            <ChartNoAxesColumnIcon className="size-6" />
           </TooltipTrigger>
           <TooltipPopup side="right">Usage</TooltipPopup>
         </Tooltip>
@@ -344,12 +364,13 @@ export function ColumnsRail() {
               <Button
                 size="icon"
                 variant="ghost"
+                className="size-14 sm:size-14"
                 aria-label="Account and T3 Connect"
                 title="Account and T3 Connect"
               />
             }
           >
-            <UserRoundIcon className="size-4" />
+            <UserRoundIcon className="size-6" />
           </PopoverTrigger>
           <PopoverPopup side="right" align="end" className="w-64">
             <PopoverTitle className="mb-3 text-sm">Account and T3 Connect</PopoverTitle>
@@ -362,12 +383,13 @@ export function ColumnsRail() {
               <Button
                 size="icon"
                 variant="ghost"
+                className="size-14 sm:size-14"
                 aria-label="Settings"
                 onClick={() => void navigate({ to: "/settings" })}
               />
             }
           >
-            <SettingsIcon className="size-4" />
+            <SettingsIcon className="size-6" />
           </TooltipTrigger>
           <TooltipPopup side="right">Settings</TooltipPopup>
         </Tooltip>

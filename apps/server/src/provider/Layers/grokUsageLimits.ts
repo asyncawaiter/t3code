@@ -57,6 +57,14 @@ export function grokUsageResponseToLimits(
   return makeUsageLimits({ checkedAt, windows: [window] });
 }
 
+/** `GROK_HOME` when set, else `<HOME>/.grok`, matching the CLI's own resolution. */
+export function resolveGrokHome(path: Path.Path, environment: NodeJS.ProcessEnv): string {
+  return (
+    environment.GROK_HOME?.trim() ||
+    path.join(environment.HOME || environment.USERPROFILE || NodeOS.homedir(), ".grok")
+  );
+}
+
 export const readGrokUsageLimits = Effect.fn("readGrokUsageLimits")(function* (
   environment: NodeJS.ProcessEnv = process.env,
 ) {
@@ -87,9 +95,7 @@ export const readGrokUsageLimits = Effect.fn("readGrokUsageLimits")(function* (
     }
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const home =
-      environment.GROK_HOME?.trim() ||
-      path.join(environment.HOME || environment.USERPROFILE || NodeOS.homedir(), ".grok");
+    const home = resolveGrokHome(path, environment);
     for (const configPath of [
       path.join(home, "config.toml"),
       path.join(home, "managed_config.toml"),

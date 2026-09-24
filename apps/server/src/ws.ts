@@ -119,6 +119,7 @@ import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
+import { makeSkillLibrary } from "./skills/SkillLibrary.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -574,6 +575,7 @@ const makeWsRpcLayer = (
       const providerAuth = yield* ProviderAuthService;
       const providerInstances = yield* ProviderInstanceRegistry;
       const providerInstallation = yield* makeProviderInstallation();
+      const skillLibrary = yield* makeSkillLibrary();
       const serverUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
@@ -2538,6 +2540,26 @@ const makeWsRpcLayer = (
         [WS_METHODS.providerInstallRemove]: (input) =>
           observeRpcEffect(WS_METHODS.providerInstallRemove, providerInstallation.remove(input), {
             "rpc.aggregate": "provider",
+          }),
+        [WS_METHODS.skillsList]: (_input) =>
+          observeRpcEffect(WS_METHODS.skillsList, skillLibrary.list(), {
+            "rpc.aggregate": "skills",
+          }),
+        [WS_METHODS.skillsRead]: (input) =>
+          observeRpcEffect(WS_METHODS.skillsRead, skillLibrary.read(input), {
+            "rpc.aggregate": "skills",
+          }),
+        [WS_METHODS.skillsWrite]: (input) =>
+          observeRpcEffect(WS_METHODS.skillsWrite, skillLibrary.write(input), {
+            "rpc.aggregate": "skills",
+          }),
+        [WS_METHODS.skillsRemove]: (input) =>
+          observeRpcEffect(WS_METHODS.skillsRemove, skillLibrary.remove(input), {
+            "rpc.aggregate": "skills",
+          }),
+        [WS_METHODS.skillsRestore]: (input) =>
+          observeRpcEffect(WS_METHODS.skillsRestore, skillLibrary.restore(input), {
+            "rpc.aggregate": "skills",
           }),
         [WS_METHODS.serverUpdateServer]: (input) =>
           observeRpcEffect(WS_METHODS.serverUpdateServer, serverUpdate.update(input), {
