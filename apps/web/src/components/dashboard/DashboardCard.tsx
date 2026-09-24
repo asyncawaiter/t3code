@@ -10,7 +10,26 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import type { EnvironmentMachineKind } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDownIcon, ChevronUpIcon, GitBranchIcon, MonitorIcon } from "lucide-react";
+import {
+  CheckCheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CircleCheckIcon,
+  CircleDotIcon,
+  CircleSlashIcon,
+  CircleXIcon,
+  EyeIcon,
+  GitBranchIcon,
+  ListChecksIcon,
+  MessageCircleIcon,
+  MessageCircleQuestionIcon,
+  MonitorIcon,
+  MoonIcon,
+  PlugIcon,
+  ShieldAlertIcon,
+  WifiOffIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { memo, useCallback, useState } from "react";
 
 import { DASHBOARD_REASON_LABELS, isEscalated } from "@t3tools/client-runtime/state/dashboard";
@@ -26,17 +45,38 @@ import { DashboardApprovalActions } from "./DashboardApprovalActions";
 import type { DashboardBoardEntry } from "./DashboardPage.logic";
 
 const REASON_COLOR_CLASS: Record<DashboardBoardEntry["reason"], string> = {
-  "pending-approval": "text-amber-600 dark:text-amber-300/90 bg-amber-500/10",
-  "awaiting-input": "text-indigo-600 dark:text-indigo-300/90 bg-indigo-500/10",
-  "plan-ready": "text-violet-600 dark:text-violet-300/90 bg-violet-500/10",
-  working: "text-sky-600 dark:text-sky-300/80 bg-sky-500/10",
-  connecting: "text-sky-600 dark:text-sky-300/80 bg-sky-500/10",
-  monitoring: "text-sky-600 dark:text-sky-300/80 bg-sky-500/10",
-  idle: "text-muted-foreground bg-muted-foreground/10",
-  reviewed: "text-muted-foreground bg-muted-foreground/10",
-  completed: "text-emerald-600 dark:text-emerald-300/90 bg-emerald-500/10",
-  failed: "text-destructive bg-destructive/10",
-  interrupted: "text-muted-foreground bg-muted-foreground/10",
+  "pending-approval":
+    "border-amber-600/35 bg-amber-500/12 text-amber-800 dark:border-amber-400/35 dark:text-amber-200",
+  "awaiting-input":
+    "border-indigo-600/30 bg-indigo-500/10 text-indigo-800 dark:border-indigo-400/35 dark:text-indigo-200",
+  "plan-ready":
+    "border-violet-600/30 bg-violet-500/10 text-violet-800 dark:border-violet-400/35 dark:text-violet-200",
+  working: "border-sky-600/30 bg-sky-500/10 text-sky-800 dark:border-sky-400/35 dark:text-sky-200",
+  connecting:
+    "border-sky-600/30 bg-sky-500/10 text-sky-800 dark:border-sky-400/35 dark:text-sky-200",
+  monitoring:
+    "border-sky-600/30 bg-sky-500/10 text-sky-800 dark:border-sky-400/35 dark:text-sky-200",
+  idle: "border-border bg-muted/60 text-foreground/75",
+  reviewed: "border-border bg-muted/60 text-foreground/75",
+  completed:
+    "border-emerald-600/30 bg-emerald-500/10 text-emerald-800 dark:border-emerald-400/35 dark:text-emerald-200",
+  failed: "border-destructive/35 bg-destructive/10 text-destructive-foreground",
+  interrupted: "border-border bg-muted/60 text-foreground/75",
+};
+
+/** Each state also gets a shape, so it never depends on telling colors apart. */
+const REASON_ICON: Record<DashboardBoardEntry["reason"], LucideIcon> = {
+  "pending-approval": ShieldAlertIcon,
+  "awaiting-input": MessageCircleQuestionIcon,
+  "plan-ready": ListChecksIcon,
+  working: CircleDotIcon,
+  connecting: PlugIcon,
+  monitoring: EyeIcon,
+  idle: MoonIcon,
+  reviewed: CheckCheckIcon,
+  completed: CircleCheckIcon,
+  failed: CircleXIcon,
+  interrupted: CircleSlashIcon,
 };
 
 function dashboardTimeLabel(entry: DashboardBoardEntry, nowMs: number): string {
@@ -141,8 +181,16 @@ export const DashboardCard = memo(function DashboardCard({
   } else if (!connected) {
     actions = (
       <Tooltip>
-        <TooltipTrigger render={<span tabIndex={0} className="text-xs text-muted-foreground" />}>
-          Offline
+        <TooltipTrigger
+          render={
+            <span
+              tabIndex={0}
+              aria-label="Offline"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+            />
+          }
+        >
+          <WifiOffIcon className="size-3.5" />
         </TooltipTrigger>
         <TooltipPopup>Offline, showing last known state</TooltipPopup>
       </Tooltip>
@@ -178,6 +226,7 @@ export const DashboardCard = memo(function DashboardCard({
       <Button
         size="micro"
         variant="ghost-muted"
+        className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
         onClick={(event) => {
           event.stopPropagation();
           review(key, entry.since, isReviewed);
@@ -204,7 +253,7 @@ export const DashboardCard = memo(function DashboardCard({
         }
       }}
       className={cn(
-        "group relative flex min-w-0 cursor-pointer flex-col gap-1.5 rounded-lg border border-border/70 bg-card p-2.5 text-xs outline-none hover:border-foreground/25 hover:bg-[color-mix(in_srgb,var(--sidebar-row-active)_18%,var(--card))] focus-visible:ring-2 focus-visible:ring-ring",
+        "surface-raised-sm group relative flex min-w-0 cursor-pointer flex-col gap-2 rounded-xl p-3 text-xs outline-none hover:surface-raised focus-visible:ring-2 focus-visible:ring-ring",
         escalated && "ring-1 ring-amber-500/60 dark:ring-amber-400/50",
       )}
     >
@@ -215,9 +264,16 @@ export const DashboardCard = memo(function DashboardCard({
       )}
       <div className="flex min-w-0 items-start gap-2">
         {unread ? (
-          <span aria-label="Unread" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
+          <Tooltip>
+            <TooltipTrigger
+              render={<span aria-label="Unread" className="mt-0.5 flex shrink-0 items-center" />}
+            >
+              <MessageCircleIcon aria-hidden className="size-3.5 fill-primary text-primary" />
+            </TooltipTrigger>
+            <TooltipPopup>New activity since you last opened this chat</TooltipPopup>
+          </Tooltip>
         ) : null}
-        <div className="line-clamp-2 min-w-0 flex-1 text-[13px] font-medium leading-[18px] text-foreground">
+        <div className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-5 text-foreground">
           {shell.title}
         </div>
         {!detailed && (
@@ -243,17 +299,23 @@ export const DashboardCard = memo(function DashboardCard({
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <span
             className={cn(
-              "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 font-medium",
+              "inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 font-medium",
               REASON_COLOR_CLASS[entry.reason],
             )}
           >
+            {(() => {
+              const ReasonIcon = REASON_ICON[entry.reason];
+              return <ReasonIcon aria-hidden className="size-3 shrink-0" />;
+            })()}
             {entry.reason === "idle"
               ? "Idle"
               : entry.reason === "reviewed"
                 ? "Reviewed"
                 : DASHBOARD_REASON_LABELS[entry.reason]}
           </span>
-          <span className="shrink-0">{dashboardTimeLabel(entry, nowMs)}</span>
+          <span className="shrink-0 text-foreground/70 tabular-nums">
+            {dashboardTimeLabel(entry, nowMs)}
+          </span>
           {entry.lane === "done" &&
           kept[scopedThreadKey(scopeThreadRef(environmentId, threadId))] === entry.since ? (
             <span>Kept for review</span>
@@ -375,7 +437,7 @@ export const DashboardCard = memo(function DashboardCard({
             render={
               <button
                 type="button"
-                className="min-w-0 truncate text-left text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                className="min-w-0 truncate text-left text-xs text-foreground/65 hover:text-foreground hover:underline"
                 onClick={openClick}
               />
             }
@@ -485,8 +547,8 @@ export const DashboardCard = memo(function DashboardCard({
           </div>
         </>
       ) : (
-        <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-          <ProjectFavicon project={project} className="size-3 shrink-0" />
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-foreground/65">
+          <ProjectFavicon project={project} className="size-3.5 shrink-0" />
           <Tooltip>
             <TooltipTrigger render={<span tabIndex={0} className="min-w-0 flex-1 truncate" />}>
               {spaceName ?? "Unsorted"}

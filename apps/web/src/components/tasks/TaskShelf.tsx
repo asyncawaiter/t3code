@@ -17,6 +17,8 @@ import {
   ChevronLeftIcon,
   XIcon,
   ChevronRightIcon,
+  CircleCheckIcon,
+  CircleDotIcon,
   ClipboardListIcon,
   MoreHorizontalIcon,
 } from "lucide-react";
@@ -146,13 +148,21 @@ export function TaskShelf({
   const render = (task: LocatedWorkItem) => (
     <div
       key={`${task.environmentId}:${task.item.id}`}
-      className="flex min-w-0 flex-col gap-1 border-b border-border/50 px-3 py-2 text-left last:border-b-0 hover:bg-accent/30"
+      className={
+        section === "history"
+          ? "surface-raised-sm flex min-w-0 flex-col gap-1.5 rounded-xl px-4 py-3 text-left"
+          : "flex min-w-0 flex-col gap-1 border-b border-border/50 px-3 py-2 text-left last:border-b-0 hover:bg-accent/30"
+      }
     >
       <div className="flex items-start gap-2">
         <button
           type="button"
           onClick={() => showTask(task)}
-          className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-medium leading-[18px] hover:underline"
+          className={
+            section === "history"
+              ? "line-clamp-2 min-w-0 flex-1 text-left text-sm font-medium leading-5 hover:underline"
+              : "line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-medium leading-[18px] hover:underline"
+          }
         >
           {task.item.title}
         </button>
@@ -190,15 +200,22 @@ export function TaskShelf({
           <span className="text-[10px] text-muted-foreground">Chat selected, not sent</span>
         )}
       {section === "history" && (
-        <span className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
-          <span className="">
-            {task.item.status === "working" || task.item.status === "done"
-              ? workItemStage(task.item)
-              : workItemChats(task.item, task.environmentId).length
-                ? "Chat selected, not sent"
-                : ""}
-          </span>
-          <span>
+        <span className="mt-0.5 flex items-center justify-between gap-3 text-xs text-foreground/65">
+          {task.item.status === "working" || task.item.status === "done" ? (
+            <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/60 px-1.5 py-0.5 font-medium text-foreground/80 capitalize">
+              {task.item.status === "done" ? (
+                <CircleCheckIcon aria-hidden className="size-3" />
+              ) : (
+                <CircleDotIcon aria-hidden className="size-3" />
+              )}
+              {workItemStage(task.item)}
+            </span>
+          ) : (
+            <span>
+              {workItemChats(task.item, task.environmentId).length ? "Chat selected, not sent" : ""}
+            </span>
+          )}
+          <span className="truncate">
             {task.item.executionEnvironmentId === null
               ? "Folder later"
               : (environments.find(
@@ -244,20 +261,22 @@ export function TaskShelf({
   if (section === "history")
     return (
       <section aria-label="Task history" className="space-y-3">
-        <div className="divide-y divide-border/60">
+        <div className="space-y-2">
           {history.sort((a, b) => b.item.updatedAt.localeCompare(a.item.updatedAt)).map(render)}
         </div>
         {!history.length && (
           <p className="p-3 text-xs text-muted-foreground">No tasks match this history.</p>
         )}
-        <details className="border-t border-border/60">
-          <summary className="cursor-pointer px-3 py-2 text-xs font-medium">
-            Trash ({trash.length})
+        <details className="group border-t border-border pt-2">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] font-medium text-foreground/80 hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRightIcon className="size-3.5 transition-transform group-open:rotate-90" />
+            Trash
+            <span className="text-muted-foreground tabular-nums">{trash.length}</span>
           </summary>
           {trash.length ? (
-            trash.map(render)
+            <div className="mt-2 space-y-2">{trash.map(render)}</div>
           ) : (
-            <p className="px-3 py-2 text-xs text-muted-foreground">Trash is empty.</p>
+            <p className="px-1 py-2 text-[13px] text-muted-foreground">Trash is empty.</p>
           )}
         </details>
       </section>

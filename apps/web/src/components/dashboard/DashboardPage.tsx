@@ -3,11 +3,17 @@ import { useOpenChatInColumns } from "../../hooks/useOpenChatInColumns";
 import { useChatColumnLocation, type ColumnLocation } from "../../hooks/useChatColumnLocation";
 import {
   CheckCheckIcon,
+  CircleCheckIcon,
+  CircleDotIcon,
   ClockIcon,
   ClipboardListIcon,
+  EyeIcon,
+  HandIcon,
+  MoonIcon,
   PlusIcon,
   SearchIcon,
   XIcon,
+  type LucideIcon,
 } from "lucide-react";
 import { Sheet, SheetPopup, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet";
 import { filterTaskShelfItems } from "../tasks/TaskShelf.logic";
@@ -116,6 +122,30 @@ const LANE_TILE_LABELS: Record<DashboardLane, string> = {
   idle: "Idle",
 };
 
+/** Lane identity comes from an icon and its label, never from color. */
+const LANE_STYLE: Record<DashboardLane, { icon: LucideIcon; empty: string }> = {
+  "needs-you": {
+    icon: HandIcon,
+    empty: "Nothing needs you right now",
+  },
+  running: {
+    icon: CircleDotIcon,
+    empty: "Nothing running",
+  },
+  monitoring: {
+    icon: EyeIcon,
+    empty: "Nothing being monitored",
+  },
+  done: {
+    icon: CircleCheckIcon,
+    empty: "Nothing to review",
+  },
+  idle: {
+    icon: MoonIcon,
+    empty: "No idle chats",
+  },
+};
+
 function useNow(): string {
   const [now, setNow] = useState(() => new Date().toISOString());
   useEffect(() => {
@@ -181,6 +211,7 @@ export function DashboardPage({
   const [taskHistoryOpen, setTaskHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const historyRef = useRef<HTMLDivElement>(null);
+  const historySearchRef = useRef<HTMLInputElement>(null);
   const historyOpen = visibility !== "active" || taskHistoryOpen;
   function openHistory(view: "settled" | "snoozed" | "archived" | "tasks") {
     setTaskHistoryOpen(view === "tasks");
@@ -1014,12 +1045,14 @@ export function DashboardPage({
           </div>
         </WorkspacePageHeader>
         <div
-          className="shrink-0 border-b border-border/60 px-4 py-2"
+          className="shrink-0 border-b border-border px-4 py-2.5"
           aria-label="Dashboard controls"
         >
           <div className="grid max-w-[55rem] grid-cols-1 items-end gap-x-5 gap-y-2 @min-[52rem]/dashboard:grid-cols-[20.5rem_minmax(0,1fr)]">
             <fieldset className="min-w-0">
-              <legend className="mb-1 text-[10px] font-medium text-muted-foreground">Scope</legend>
+              <legend className="mb-1 text-[11px] font-semibold tracking-[0.04em] text-foreground/70 uppercase">
+                Scope
+              </legend>
               <div className="grid grid-cols-2 gap-2">
                 <div className="min-w-0">
                   <div className="sr-only">Profile</div>
@@ -1115,7 +1148,7 @@ export function DashboardPage({
               </div>
             </fieldset>
             <fieldset className="min-w-0 @min-[52rem]/dashboard:border-l @min-[52rem]/dashboard:border-border/60 @min-[52rem]/dashboard:pl-4">
-              <legend className="mb-1 text-[10px] font-medium text-muted-foreground">
+              <legend className="mb-1 text-[11px] font-semibold tracking-[0.04em] text-foreground/70 uppercase">
                 Environment
               </legend>
               <div className="grid grid-cols-3 gap-2">
@@ -1282,7 +1315,9 @@ export function DashboardPage({
           </div>
           <div className="mt-2 grid max-w-[55rem] grid-cols-1 items-end gap-x-5 gap-y-2 @min-[52rem]/dashboard:grid-cols-[20.5rem_minmax(0,1fr)]">
             <fieldset className="min-w-0">
-              <legend className="mb-1 text-[10px] font-medium text-muted-foreground">Git</legend>
+              <legend className="mb-1 text-[11px] font-semibold tracking-[0.04em] text-foreground/70 uppercase">
+                Git
+              </legend>
               <div className="grid grid-cols-2 gap-2">
                 <div className="min-w-0">
                   <div className="sr-only">Branch</div>
@@ -1346,7 +1381,7 @@ export function DashboardPage({
               </div>
             </fieldset>
             <fieldset className="min-w-0 @min-[52rem]/dashboard:border-l @min-[52rem]/dashboard:border-border/60 @min-[52rem]/dashboard:pl-4">
-              <legend className="mb-1 text-[10px] font-medium text-muted-foreground">
+              <legend className="mb-1 text-[11px] font-semibold tracking-[0.04em] text-foreground/70 uppercase">
                 Display
               </legend>
               <div className="grid grid-cols-3 items-center gap-2">
@@ -1458,20 +1493,42 @@ export function DashboardPage({
         >
           {renderTasks("planned")}
           <div className="col-span-full flex flex-wrap items-center gap-3 pt-1">
-            <h2 className="text-sm font-medium">Chat activity</h2>
-            <span className="text-xs tabular-nums text-muted-foreground">{allEntries.length}</span>
-            <div className="flex items-center gap-1">
-              <Button size="xs" variant="ghost-muted" onClick={() => openHistory("settled")}>
+            <h2 className="text-[15px] font-semibold text-foreground">Chat activity</h2>
+            <span className="min-w-6 rounded-full border border-border bg-background px-1.5 py-px text-center text-[11px] font-medium tabular-nums text-foreground/80">
+              {allEntries.length}
+            </span>
+            <div
+              className="flex items-center divide-x divide-border overflow-hidden rounded-lg border border-border bg-background"
+              role="group"
+              aria-label="Chat history"
+            >
+              <Button
+                size="xs"
+                variant="ghost"
+                className="rounded-none text-foreground/80"
+                onClick={() => openHistory("settled")}
+              >
                 <CheckCheckIcon className="size-3.5" />
-                Settled <span className="tabular-nums">{settled.length}</span>
+                Settled <span className="tabular-nums text-muted-foreground">{settled.length}</span>
               </Button>
-              <Button size="xs" variant="ghost-muted" onClick={() => openHistory("snoozed")}>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="rounded-none text-foreground/80"
+                onClick={() => openHistory("snoozed")}
+              >
                 <ClockIcon className="size-3.5" />
-                Snoozed <span className="tabular-nums">{snoozed.length}</span>
+                Snoozed <span className="tabular-nums text-muted-foreground">{snoozed.length}</span>
               </Button>
-              <Button size="xs" variant="ghost-muted" onClick={() => openHistory("tasks")}>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="rounded-none text-foreground/80"
+                onClick={() => openHistory("tasks")}
+              >
                 <ClipboardListIcon className="size-3.5" />
-                Task history <span className="tabular-nums">{taskHistoryCount}</span>
+                Task history{" "}
+                <span className="tabular-nums text-muted-foreground">{taskHistoryCount}</span>
               </Button>
             </div>
             <div
@@ -1515,29 +1572,20 @@ export function DashboardPage({
                 <div className="grid h-full auto-cols-[minmax(15rem,1fr)] grid-flow-col gap-2">
                   {visibleLanes.map((lane) => {
                     const entries = filteredBoard.lanes[lane];
+                    const laneStyle = LANE_STYLE[lane];
+                    const LaneIcon = laneStyle.icon;
                     return (
                       <section
                         key={lane}
                         aria-label={LANE_TILE_LABELS[lane]}
-                        className="flex min-h-0 min-w-0 flex-col rounded-lg border border-border/60 bg-muted/20"
+                        className="surface-canvas flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border shadow-[inset_0_1px_3px_rgb(0_0_0/0.05)]"
                       >
-                        <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border/50 px-3">
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              lane === "needs-you"
-                                ? "bg-amber-500"
-                                : lane === "running"
-                                  ? "bg-sky-500"
-                                  : lane === "monitoring"
-                                    ? "bg-violet-500"
-                                    : lane === "idle"
-                                      ? "bg-muted-foreground/50"
-                                      : "bg-emerald-500",
-                            )}
-                          />
-                          <h2 className="text-[13px] font-semibold">{LANE_TILE_LABELS[lane]}</h2>
-                          <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                        <div className="surface-lid flex min-h-11 shrink-0 items-center gap-2 px-3">
+                          <LaneIcon aria-hidden className="size-4 shrink-0 text-foreground/70" />
+                          <h2 className="text-sm font-semibold text-foreground">
+                            {LANE_TILE_LABELS[lane]}
+                          </h2>
+                          <span className="min-w-6 rounded-full border border-border bg-background px-1.5 py-px text-center text-[11px] font-medium tabular-nums text-foreground/80">
                             {entries.length}
                           </span>
                         </div>
@@ -1549,9 +1597,14 @@ export function DashboardPage({
                         >
                           {entries.map(renderCard)}
                           {!entries.length && (
-                            <p className="px-1 py-3 text-xs text-muted-foreground">
-                              {activeFilters.length ? "No matches" : "No chats"}
-                            </p>
+                            <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+                              <LaneIcon aria-hidden className="size-5 text-muted-foreground/70" />
+                              <p className="text-[13px] text-muted-foreground">
+                                {activeFilters.length
+                                  ? "No matches for these filters"
+                                  : laneStyle.empty}
+                              </p>
+                            </div>
                           )}
                         </div>
                       </section>
@@ -1575,9 +1628,9 @@ export function DashboardPage({
                 return (
                   <section
                     key={key}
-                    className="flex min-w-0 flex-col rounded-lg border border-border/60 bg-muted/10 p-2.5"
+                    className="surface-canvas flex min-w-0 flex-col rounded-xl border border-border p-2.5 shadow-[inset_0_1px_3px_rgb(0_0_0/0.05)]"
                   >
-                    <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-xs font-semibold">
+                    <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-sm font-semibold text-foreground">
                       {spaceOptions.find((space) => space.key === key)?.name ?? "Unsorted"}
                       <span className="text-muted-foreground">{entries.length}</span>
                     </h2>
@@ -1589,9 +1642,9 @@ export function DashboardPage({
               projectGroups.map((group) => (
                 <section
                   key={group.projectKey}
-                  className="flex min-w-0 flex-col rounded-lg border border-border/60 bg-muted/10 p-2.5"
+                  className="surface-canvas flex min-w-0 flex-col rounded-xl border border-border p-2.5 shadow-[inset_0_1px_3px_rgb(0_0_0/0.05)]"
                 >
-                  <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-xs font-semibold">
+                  <h2 className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-sm font-semibold text-foreground">
                     {projectByKey.get(group.projectKey)?.title ?? "Unknown project"}
                     <span className="text-muted-foreground">{group.entries.length}</span>
                   </h2>
@@ -1611,10 +1664,11 @@ export function DashboardPage({
         >
           <SheetPopup
             side="right"
-            className="w-[min(36rem,calc(100vw-2rem))] max-w-none"
+            className="w-[min(36rem,calc(100vw-2rem))] max-w-none bg-background"
             backdropClassName="bg-black/10 backdrop-blur-none"
+            initialFocus={historySearchRef}
           >
-            <SheetHeader className="gap-2 border-b border-border/60 px-4 pb-3 pt-4 pr-12">
+            <SheetHeader className="gap-1.5 border-b border-border px-5 pb-4 pt-5 pr-12">
               <SheetTitle className="sr-only">
                 {taskHistoryOpen
                   ? "Task history"
@@ -1638,7 +1692,7 @@ export function DashboardPage({
               >
                 <SelectTrigger
                   aria-label="History category"
-                  className="h-8 w-fit gap-3 border-0 bg-transparent px-0 text-base font-semibold shadow-none"
+                  className="h-8 w-fit gap-2 border-0 bg-transparent px-0 text-[17px] font-semibold shadow-none focus-visible:ring-0 data-popup-open:text-foreground"
                 >
                   <SelectValue>
                     {taskHistoryOpen
@@ -1657,7 +1711,7 @@ export function DashboardPage({
                   <SelectItem value="archived">Archived chats</SelectItem>
                 </SelectPopup>
               </Select>
-              <SheetDescription className="truncate text-xs">
+              <SheetDescription className="truncate text-[13px] text-foreground/65">
                 {activeProfile.id === ALL_PROFILE_ID ? "All profiles" : activeProfile.name} /{" "}
                 {effectiveSpaceFilter === "all"
                   ? "All spaces"
@@ -1667,9 +1721,9 @@ export function DashboardPage({
                       spaceOptions.find((space) => space.key === effectiveSpaceFilter)?.name)}
               </SheetDescription>
             </SheetHeader>
-            <div className="shrink-0 space-y-3 border-b border-border/60 p-4">
+            <div className="shrink-0 space-y-3 border-b border-border px-5 py-4">
               <Input
-                size="compact"
+                ref={historySearchRef}
                 type="search"
                 aria-label="Search history"
                 placeholder="Search this history"
@@ -1677,14 +1731,14 @@ export function DashboardPage({
                 onChange={(event) => setHistoryQuery(event.target.value)}
               />
               {activeFilters.length > 0 && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-foreground/65">
                   Dashboard filters apply: {activeFilters.map((filter) => filter.label).join(" · ")}
                 </p>
               )}
             </div>
             <div
               ref={historyRef}
-              className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 [scrollbar-width:thin]"
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [scrollbar-width:thin]"
               aria-label="History results"
             >
               {taskHistoryOpen
@@ -1704,7 +1758,9 @@ export function DashboardPage({
                           Loading archived chats...
                         </p>
                       )}
-                      <ul>{historyMatches.map((shell) => renderHistoryRow(shell, visibility))}</ul>
+                      <ul className="space-y-2">
+                        {historyMatches.map((shell) => renderHistoryRow(shell, visibility))}
+                      </ul>
                       {!historyMatches.length &&
                         !(visibility === "archived" && (archive.isLoading || archive.error)) && (
                           <p className="p-3 text-xs text-muted-foreground">

@@ -42,7 +42,7 @@ export function DashboardHistoryRow({
       ? `Returns in ${snoozeWakeLabel(shell.snoozedUntil!, { now })}`
       : `${view === "archived" ? "Archived" : "Settled"} ${formatRelativeTimeLabel((view === "archived" ? shell.archivedAt : shell.settledAt) ?? shell.updatedAt)}`;
   return (
-    <li className="flex items-center gap-3 border-b border-border/60 px-3 py-2 last:border-0">
+    <li className="surface-raised-sm flex items-center gap-4 rounded-xl px-4 py-3">
       <button
         type="button"
         data-dashboard-chat-key={`${shell.environmentId}:${shell.id}`}
@@ -50,10 +50,8 @@ export function DashboardHistoryRow({
         aria-busy={opening}
         className="min-w-0 flex-1 rounded-sm text-left outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <div className="truncate text-[13px] font-medium">
-          {opening ? "Opening..." : shell.title}
-        </div>
-        <div className="mt-1 flex min-w-0 items-center gap-x-2 overflow-hidden text-[11px] text-muted-foreground">
+        <div className="truncate text-sm font-medium">{opening ? "Opening..." : shell.title}</div>
+        <div className="mt-1 flex min-w-0 items-center gap-x-2.5 overflow-hidden text-xs text-foreground/65">
           <Tooltip>
             <TooltipTrigger render={<span className="max-w-40 truncate" />}>
               {projectTitle}
@@ -70,7 +68,7 @@ export function DashboardHistoryRow({
               <ProviderInstanceIcon
                 driverKind={provider.driverKind}
                 displayName={provider.displayName}
-                iconClassName="size-3"
+                iconClassName="size-3.5"
               />
               {provider.displayName}
             </span>
@@ -90,7 +88,7 @@ export function DashboardHistoryRow({
       </button>
       <div className="flex shrink-0 flex-col items-end gap-1">
         <Tooltip>
-          <TooltipTrigger render={<span className="text-[11px] text-muted-foreground" />}>
+          <TooltipTrigger render={<span className="text-xs text-foreground/65 tabular-nums" />}>
             {time}
           </TooltipTrigger>
           <TooltipPopup>
