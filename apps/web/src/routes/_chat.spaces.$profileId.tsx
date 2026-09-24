@@ -34,6 +34,8 @@ export const Route = createFileRoute("/_chat/spaces/$profileId")({
     focus?: string | undefined;
     workspace?: "space" | "board" | undefined;
     board?: string | undefined;
+    project?: string | undefined;
+    device?: string | undefined;
   } => ({
     space: typeof search.space === "string" ? search.space : undefined,
     unsorted: search.unsorted === true,
@@ -43,6 +45,8 @@ export const Route = createFileRoute("/_chat/spaces/$profileId")({
     board: typeof search.board === "string" ? search.board : undefined,
     focus: typeof search.focus === "string" ? search.focus : undefined,
     folder: typeof search.folder === "string" ? search.folder : undefined,
+    project: typeof search.project === "string" ? search.project : undefined,
+    device: typeof search.device === "string" ? search.device : undefined,
   }),
   component: SpaceOverview,
 });
@@ -58,6 +62,8 @@ function SpaceOverview() {
     focus,
     workspace,
     board,
+    project: projectFilter,
+    device: deviceFilter,
   } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { environments } = useEnvironments();
@@ -208,7 +214,17 @@ function SpaceOverview() {
                 allChats={threads}
                 focus={focus}
                 boardId={board}
-                scope={spaceColumns ? { profileId, spaceId, unsorted } : undefined}
+                scope={
+                  spaceColumns
+                    ? {
+                        profileId,
+                        spaceId,
+                        unsorted,
+                        projectKey: projectFilter,
+                        environmentId: deviceFilter,
+                      }
+                    : undefined
+                }
               />
             </Suspense>
           ) : !missing && view === "branches" && selectedFolder ? (

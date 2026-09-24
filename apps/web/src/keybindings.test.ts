@@ -1346,3 +1346,21 @@ it("keeps the global dashboard shortcut separate from the host picker", () => {
     );
   }
 });
+
+describe("columns mode shortcuts", () => {
+  const resolve = (input: ShortcutEventLike, columnsRail: boolean) =>
+    resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+      platform: "MacIntel",
+      context: { columnsRail },
+    });
+
+  it("take over digits, F, O and P only while the columns rail shows", () => {
+    assert.equal(resolve(event({ key: "2", metaKey: true }), true), "board.jump.2");
+    assert.equal(resolve(event({ key: "2", metaKey: true }), false), "space.jump.2");
+    assert.equal(resolve(event({ key: "f", metaKey: true }), true), "columns.focusSavedChat");
+    assert.equal(resolve(event({ key: "o", metaKey: true }), true), "columns.spaceDashboard");
+    assert.equal(resolve(event({ key: "o", metaKey: true }), false), "editor.openFavorite");
+    assert.equal(resolve(event({ key: "p", metaKey: true }), true), "columns.spaceColumns");
+    assert.equal(resolve(event({ key: "p", metaKey: true }), false), "filePicker.toggle");
+  });
+});

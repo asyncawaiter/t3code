@@ -10,6 +10,7 @@ import {
   THREAD_JUMP_KEYBINDING_COMMANDS,
   SPACE_JUMP_KEYBINDING_COMMANDS,
   PROFILE_JUMP_KEYBINDING_COMMANDS,
+  BOARD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
 
 type WhenToken =
@@ -88,6 +89,16 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     command,
     when: "modelPickerOpen",
   })),
+  // Columns mode takes these keys over from space jumps, the editor and the file picker.
+  // Listed last so they win while the columns rail is showing.
+  ...BOARD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `mod+${index + 1}`,
+    command,
+    when: "columnsRail && !terminalFocus && !modelPickerOpen",
+  })),
+  { key: "mod+f", command: "columns.focusSavedChat", when: "columnsRail && !terminalFocus" },
+  { key: "mod+o", command: "columns.spaceDashboard", when: "columnsRail && !terminalFocus" },
+  { key: "mod+p", command: "columns.spaceColumns", when: "columnsRail && !terminalFocus" },
 ];
 
 function normalizeKeyToken(token: string): string {

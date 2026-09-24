@@ -43,6 +43,8 @@ import { spaceColumnsNavigation } from "./columnNavigation";
 import { cn } from "../../lib/utils";
 
 /** Browsing profiles is local to this popup; choosing a destination changes scope. */
+
+const SPACE_LABEL_OPTIONS = { context: { columnsRail: false } };
 export function ProfileSpaceNavigator({ onNavigate }: { onNavigate: () => void }) {
   const rawProfiles = usePrimarySettings((settings) => settings.profiles);
   const profiles = useMemo(() => resolveProfiles(rawProfiles), [rawProfiles]);
@@ -111,7 +113,11 @@ export function ProfileSpaceNavigator({ onNavigate }: { onNavigate: () => void }
       document.querySelector('[role="dialog"][aria-modal="true"]')
     )
       return;
-    const command = resolveShortcutCommand(event, keybindings, { platform: navigator.platform });
+    // While this navigator is open, digits pick spaces even in columns mode.
+    const command = resolveShortcutCommand(event, keybindings, {
+      platform: navigator.platform,
+      context: { columnsRail: false },
+    });
     const direction = profileTraversalDirectionFromCommand(command);
     const index = PROFILE_JUMP_KEYBINDING_COMMANDS.findIndex((item) => item === command);
     if (direction || index >= 0) {
@@ -195,7 +201,11 @@ export function ProfileSpaceNavigator({ onNavigate }: { onNavigate: () => void }
                     count={counts.get(OUTSIDE_SPACES) ?? 0}
                     selected={selectedSpace === OUTSIDE_SPACES}
                     onSelect={() => visit(OUTSIDE_SPACES)}
-                    shortcut={shortcutLabelForCommand(keybindings, "space.jump.1")}
+                    shortcut={shortcutLabelForCommand(
+                      keybindings,
+                      "space.jump.1",
+                      SPACE_LABEL_OPTIONS,
+                    )}
                     onNewChat={() => {
                       revealChatLocation(profile.id, null);
                       openChatCreation();
@@ -225,6 +235,7 @@ export function ProfileSpaceNavigator({ onNavigate }: { onNavigate: () => void }
                           ? shortcutLabelForCommand(
                               keybindings,
                               SPACE_JUMP_KEYBINDING_COMMANDS[index + 1]!,
+                              SPACE_LABEL_OPTIONS,
                             )
                           : null
                       }

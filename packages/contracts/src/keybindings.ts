@@ -44,6 +44,25 @@ export const PROFILE_JUMP_KEYBINDING_COMMANDS = [
   "profile.jump.9",
 ] as const;
 
+/** Columns mode: jump to the Nth custom board. */
+export const BOARD_JUMP_KEYBINDING_COMMANDS = [
+  "board.jump.1",
+  "board.jump.2",
+  "board.jump.3",
+  "board.jump.4",
+  "board.jump.5",
+  "board.jump.6",
+  "board.jump.7",
+  "board.jump.8",
+  "board.jump.9",
+] as const;
+
+export const COLUMNS_KEYBINDING_COMMANDS = [
+  "columns.focusSavedChat",
+  "columns.spaceDashboard",
+  "columns.spaceColumns",
+] as const;
+
 export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [
   "modelPicker.jump.1",
   "modelPicker.jump.2",
@@ -122,6 +141,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   ...PROFILE_KEYBINDING_COMMANDS,
   ...PROFILE_JUMP_KEYBINDING_COMMANDS,
   ...SPACE_JUMP_KEYBINDING_COMMANDS,
+  ...BOARD_JUMP_KEYBINDING_COMMANDS,
+  ...COLUMNS_KEYBINDING_COMMANDS,
 ] as const;
 
 export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([

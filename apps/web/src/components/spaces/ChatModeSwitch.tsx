@@ -110,13 +110,13 @@ export function ChatModeSwitch({ large = false }: { large?: boolean }) {
                   size="icon"
                   variant="ghost"
                   aria-label={`Conversation layout: ${selectedColumns ? "Columns" : "Chat"}`}
-                  className={large ? "size-14 sm:size-14" : undefined}
+                  className={large ? "size-11 sm:size-11" : undefined}
                 />
               }
             />
           }
         >
-          <PanelsTopLeftIcon className={large ? "size-6" : "size-4"} />
+          <PanelsTopLeftIcon className={large ? "size-5" : "size-4"} />
         </TooltipTrigger>
         <TooltipPopup side="right">
           Conversation layout: {selectedColumns ? "Columns" : "Chat"}

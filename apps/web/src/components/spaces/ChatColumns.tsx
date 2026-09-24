@@ -1,3 +1,4 @@
+import { randomUUID } from "../../lib/utils";
 import { useChatColumnMemory } from "../../hooks/useChatColumnLocation";
 import { DndContext, PointerSensor, useSensor, useSensors, closestCenter } from "@dnd-kit/core";
 import {
@@ -54,7 +55,7 @@ import {
 import { threadShellHasStarted } from "../ChatView.logic";
 import { useColumnNavigation, spaceColumnsNavigation } from "./columnNavigation";
 import { scoreChatPickerMatch } from "./chatPickerSearch";
-import type { OverviewScope } from "../../lib/globalDashboardNavigation";
+import { scopedOverviewNavigation, type OverviewScope } from "../../lib/globalDashboardNavigation";
 import { profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
 import { OUTSIDE_SPACES } from "../sidebar/Spaces.logic";
 import { useThreadActions } from "../../hooks/useThreadActions";
@@ -64,7 +65,16 @@ import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { useChatBoards } from "../../hooks/useChatBoards";
 import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
-import { useEffect, useMemo, useLayoutEffect, useRef, useState, lazy, Suspense } from "react";
+import {
+  useEffect,
+  useMemo,
+  useLayoutEffect,
+  useRef,
+  useState,
+  lazy,
+  Suspense,
+  type CSSProperties,
+} from "react";
 import * as Schema from "effect/Schema";
 import {
   GripVerticalIcon,
@@ -95,7 +105,7 @@ import { Button } from "../ui/button";
 import { ChatPaneContext } from "../chat/ChatPaneContext";
 import { useProjects } from "../../state/entities";
 import { usePrimarySettings } from "../../hooks/useSettings";
-import { indexProfileSpaces } from "@t3tools/contracts";
+import { ALL_PROFILE_ID, indexProfileSpaces } from "@t3tools/contracts";
 import { Popover, PopoverTrigger, PopoverPopup } from "../ui/popover";
 import { Input } from "../ui/input";
 import {
@@ -304,8 +314,17 @@ function SpaceColumns({
     scope.profileId,
     scope.unsorted ? OUTSIDE_SPACES : (scope.spaceId ?? null),
   );
-  const scoped = allChats.filter((chat) => matches({ ...chat, pinnedAt: null }));
-  const id = `space:${scope.profileId}:${scope.spaceId ?? (scope.unsorted ? "unsorted" : "all")}`;
+  const scoped = allChats.filter(
+    (chat) =>
+      matches({ ...chat, pinnedAt: null }) &&
+      (!scope.projectKey || `${chat.environmentId}:${chat.projectId}` === scope.projectKey) &&
+      (!scope.environmentId || chat.environmentId === scope.environmentId),
+  );
+  const id = [
+    `space:${scope.profileId}:${scope.spaceId ?? (scope.unsorted ? "unsorted" : "all")}`,
+    ...(scope.projectKey ? [`project:${scope.projectKey}`] : []),
+    ...(scope.environmentId ? [`device:${scope.environmentId}`] : []),
+  ].join(":");
   const initial = useMemo(() => ({ ...DEFAULT_CHAT_BOARD, id }), [id]);
   const [arrangement, setArrangement] = useLocalStorage(
     `t3.space-columns.${id}`,
@@ -571,6 +590,18 @@ function BoardColumns({
     };
   };
 
+  /** The space (and its profile) a chat lives in, falling back to its profile's unsorted chats. */
+  const chatSpaceScope = (chat: ColumnChat) => {
+    const placement = placements.get(keyOf(chat));
+    if (placement) {
+      return { profileId: placement.profile.id, spaceId: placement.space.id, unsorted: false };
+    }
+    const owner = profiles.find((profile) =>
+      profile.projectKeys.includes(`${chat.environmentId}:${chat.projectId}`),
+    );
+    return { profileId: owner?.id ?? ALL_PROFILE_ID, unsorted: true };
+  };
+
   const [expanded, setExpanded] = useState<string | null>(null);
   const active = columns.some((chat) => keyOf(chat) === focused)
     ? focused
@@ -598,6 +629,20 @@ function BoardColumns({
         event.preventDefault();
         event.stopPropagation();
         createChat();
+        return;
+      }
+      if (command === "columns.spaceDashboard" || command === "columns.spaceColumns") {
+        const chat = columns.find((candidate) => keyOf(candidate) === active);
+        if (!chat) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const key = keyOf(chat);
+        const scope = chatSpaceScope(chat);
+        void navigate(
+          command === "columns.spaceDashboard"
+            ? scopedOverviewNavigation(scope)
+            : spaceColumnsNavigation(scope, key),
+        );
         return;
       }
       const jump = threadJumpIndexFromCommand(command ?? "");
@@ -632,6 +677,8 @@ function BoardColumns({
     createChat,
     rememberUse,
     openFocus,
+    chatSpaceScope,
+    navigate,
   ]);
   const [savedScroll, setSavedScroll] = useLocalStorage(
     `t3.columns-scroll.${state.board.id}`,
@@ -872,7 +919,7 @@ function BoardColumns({
                       if (!boardName.trim() || disabled) return;
                       const next = {
                         ...(naming === "new" ? DEFAULT_CHAT_BOARD : layout),
-                        id: naming === "rename" ? layout.id : crypto.randomUUID(),
+                        id: naming === "rename" ? layout.id : randomUUID(),
                         name: boardName.trim(),
                       };
                       const saved =
@@ -916,6 +963,35 @@ function BoardColumns({
               </DialogPopup>
             </Dialog>
           </>
+        )}
+        {scope && (scope.projectKey || scope.environmentId) && (
+          <Button
+            size="xs"
+            variant="outline"
+            aria-label="Clear project and device filter"
+            onClick={() =>
+              void navigate(
+                spaceColumnsNavigation({
+                  profileId: scope.profileId,
+                  spaceId: scope.spaceId,
+                  unsorted: scope.unsorted,
+                }),
+              )
+            }
+          >
+            {scope.projectKey ? (
+              <FolderIcon className="size-3.5" />
+            ) : (
+              <MonitorIcon className="size-3.5" />
+            )}
+            {scope.projectKey
+              ? (projects.find(
+                  (project) => `${project.environmentId}:${project.id}` === scope.projectKey,
+                )?.title ?? "Project")
+              : (environments.find((env) => env.environmentId === scope.environmentId)?.label ??
+                "Device")}
+            <XIcon className="size-3.5 text-muted-foreground" />
+          </Button>
         )}
         {scope && (
           <span className="px-2 font-medium text-foreground">
@@ -1436,7 +1512,7 @@ function BoardColumns({
             onScroll={(event) => {
               if (!expanded) scroll.current = event.currentTarget.scrollLeft;
             }}
-            className={`flex min-h-0 flex-1 ${draggingColumn ? "" : "snap-x snap-proximity"} gap-3 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:thin]`}
+            className={`flex min-h-0 flex-1 ${draggingColumn ? "" : "snap-x snap-proximity"} surface-canvas gap-4 overflow-x-auto overscroll-x-contain rounded-xl px-2.5 pt-2.5 pb-5 [scrollbar-width:thin]`}
           >
             {[...selectedKeys].map((key) => {
               const chat = columns.find((chat) => keyOf(chat) === key);
@@ -1446,7 +1522,7 @@ function BoardColumns({
                   <section
                     key={key}
                     style={{ width: columnWidth(widths[key] ?? 420) }}
-                    className={`${expanded ? "hidden" : "flex"} shrink-0 flex-col rounded-xl border border-border p-3`}
+                    className={`${expanded ? "hidden" : "flex"} shrink-0 flex-col rounded-xl surface-raised p-3`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-medium">
@@ -1477,6 +1553,29 @@ function BoardColumns({
                   key={key}
                   chat={chat}
                   context={detailsFor(chat)}
+                  onOpenScope={(kind) => {
+                    const detail = detailsFor(chat);
+                    void navigate(
+                      spaceColumnsNavigation(
+                        kind === "space"
+                          ? chatSpaceScope(chat)
+                          : kind === "profile"
+                            ? { profileId: chatSpaceScope(chat).profileId, unsorted: false }
+                            : kind === "project"
+                              ? {
+                                  profileId: ALL_PROFILE_ID,
+                                  unsorted: false,
+                                  projectKey: detail.folderId,
+                                }
+                              : {
+                                  profileId: ALL_PROFILE_ID,
+                                  unsorted: false,
+                                  environmentId: chat.environmentId,
+                                },
+                        keyOf(chat),
+                      ),
+                    );
+                  }}
                   width={columnWidth(widths[key] ?? 420)}
                   onResize={(width) =>
                     disabled
@@ -1717,6 +1816,7 @@ function Column({
   expanded,
   hidden,
   onFocus,
+  onOpenScope,
   onUse,
   device,
   connected,
@@ -1744,6 +1844,8 @@ function Column({
   expanded: boolean;
   hidden: boolean;
   onFocus: () => void;
+  /** Opens the columns view filtered to this chat's profile, space, project or device. */
+  onOpenScope: (kind: "profile" | "space" | "project" | "device") => void;
   onUse: () => void;
   device: string;
   connected: boolean;
@@ -1825,10 +1927,18 @@ function Column({
         zIndex: isDragging ? 10 : undefined,
         opacity: isDragging ? 0.85 : undefined,
       }}
-      className={`${hidden ? "hidden" : "flex"} relative min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl border ${active ? "border-primary/60 ring-1 ring-primary/20" : "border-border"}`}
+      className={`${hidden ? "hidden" : "flex"} relative min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl ${active && !expanded ? "surface-raised-strong" : "surface-raised"}`}
     >
-      <header className="flex flex-col gap-2.5 border-b border-border/60 bg-muted/15 px-3 pt-3 pb-2.5">
-        <div className="flex items-center gap-2">
+      {/* Expanded, the three header rows flow into one line: title, status, labels, review,
+          actions. `contents` lets each row's children join the header's single flex row. */}
+      <header
+        className={
+          expanded
+            ? "surface-lid flex items-center gap-3 px-4 py-2"
+            : "surface-lid flex flex-col gap-2.5 px-3 pt-3 pb-2.5"
+        }
+      >
+        <div className={expanded ? "contents" : "flex items-center gap-2"}>
           {!expanded && (
             <Tooltip>
               <TooltipTrigger
@@ -1856,12 +1966,19 @@ function Column({
               <TooltipPopup>Drag to reorder, or use Left and Right arrow keys.</TooltipPopup>
             </Tooltip>
           )}
+          {active && !expanded && (
+            <span
+              role="img"
+              aria-label="Focused column"
+              className="h-4 w-1 shrink-0 rounded-full bg-foreground/75"
+            />
+          )}
           {editingTitle !== null ? (
             <Input
               autoFocus
               aria-label="Chat title"
               defaultValue={editingTitle}
-              className="h-7 min-w-0 flex-1 text-sm font-semibold"
+              className={`h-7 min-w-0 flex-1 text-sm font-semibold ${expanded ? "order-1 max-w-[28rem]" : ""}`}
               onFocus={(event) => event.currentTarget.select()}
               onBlur={(event) => commitTitle(event.currentTarget.value)}
               onKeyDown={(event) => {
@@ -1889,7 +2006,7 @@ function Column({
                       }
                     }}
                     aria-label={`Rename ${chat.title}`}
-                    className="min-w-0 flex-1 truncate rounded px-1 -ml-1 text-left text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className={`min-w-0 truncate rounded px-1 -ml-1 text-left text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${expanded ? "order-1 max-w-[28rem] shrink" : "flex-1"}`}
                   />
                 }
               >
@@ -1898,13 +2015,19 @@ function Column({
               <TooltipPopup>{chat.draftId ? chat.title : "Click to rename chat"}</TooltipPopup>
             </Tooltip>
           )}
-          <div className="flex shrink-0 items-center gap-1">{children}</div>
+          <div className={`flex shrink-0 items-center gap-1 ${expanded ? "order-5" : ""}`}>
+            {children}
+          </div>
         </div>
         <div
-          className="flex min-h-7 max-w-2xl items-center justify-between gap-2"
+          className={
+            expanded ? "contents" : "flex min-h-7 max-w-2xl items-center justify-between gap-2"
+          }
           aria-label="Chat status and review"
         >
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div
+            className={`flex min-w-0 items-center gap-1.5 ${expanded ? "order-2 shrink-0" : ""}`}
+          >
             <span
               className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium ${statusLabel === "Needs input" ? "border-warning/25 bg-warning/10 text-foreground" : statusLabel === "Running" || statusLabel === "Ready to review" ? "border-primary/20 bg-primary/8 text-foreground" : "border-border/70 bg-muted/50 text-muted-foreground"}`}
             >
@@ -1913,21 +2036,41 @@ function Column({
             </span>
             {!connected && <span className="text-[10px] text-muted-foreground">Offline</span>}
           </div>
-          <DashboardReviewBar thread={chat} compact />
+          <div className={expanded ? "order-4 shrink-0" : "contents"}>
+            <DashboardReviewBar thread={chat} compact />
+          </div>
         </div>
-        <div aria-label="Chat context" className="flex min-w-0 max-w-2xl flex-wrap gap-1.5">
+        <div
+          aria-label="Chat context"
+          className={
+            expanded
+              ? "order-3 flex min-w-0 flex-1 gap-1.5 overflow-hidden"
+              : "flex min-w-0 max-w-2xl flex-wrap gap-1.5"
+          }
+        >
           <ContextLabel
             icon={UserRoundIcon}
             caption="Profile"
             value={context.profile}
             tone="indigo"
+            tooltip={`Show active chats in ${context.profile}`}
+            onClick={() => onOpenScope("profile")}
           />
-          <ContextLabel icon={LayersIcon} caption="Space" value={context.space} tone="violet" />
+          <ContextLabel
+            icon={LayersIcon}
+            caption="Space"
+            value={context.space}
+            tone="violet"
+            tooltip={`Show active chats in ${context.space}`}
+            onClick={() => onOpenScope("space")}
+          />
           <ContextLabel
             icon={FolderIcon}
             caption="Project"
             value={context.folder ?? "Unassigned"}
             tone="sky"
+            tooltip={`Show active chats in ${context.folder ?? "this project"}`}
+            onClick={() => onOpenScope("project")}
           />
           {chat.branch && (
             <ContextLabel
@@ -1937,7 +2080,14 @@ function Column({
               tone="emerald"
             />
           )}
-          <ContextLabel icon={MonitorIcon} caption="Device" value={context.device} tone="amber" />
+          <ContextLabel
+            icon={MonitorIcon}
+            caption="Device"
+            value={context.device}
+            tone="amber"
+            tooltip={`Show active chats on ${context.device}`}
+            onClick={() => onOpenScope("device")}
+          />
           {context.path && (
             <ContextLabel
               icon={TerminalSquareIcon}
@@ -2008,7 +2158,10 @@ function Column({
         />
       )}
       <ChatPaneContext value={{ active: active && !hidden, column: !expanded, columnActions }}>
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div
+          className="flex min-h-0 flex-1 flex-col"
+          style={expanded ? ({ "--chat-content-max-width": "72rem" } as CSSProperties) : undefined}
+        >
           {!connected ? (
             <div className="p-3">
               <Menu>

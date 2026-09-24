@@ -121,7 +121,13 @@ declare module "@tanstack/react-router" {
 
 /** Space membership is automatic; board membership is explicitly saved. */
 export function spaceColumnsNavigation(
-  scope: { profileId: string; spaceId?: string | undefined; unsorted: boolean },
+  scope: {
+    profileId: string;
+    spaceId?: string | undefined;
+    unsorted: boolean;
+    projectKey?: string | undefined;
+    environmentId?: string | undefined;
+  },
   focus?: string,
 ) {
   return {
@@ -132,6 +138,8 @@ export function spaceColumnsNavigation(
       workspace: "space" as const,
       space: scope.spaceId,
       unsorted: scope.unsorted,
+      ...(scope.projectKey ? { project: scope.projectKey } : {}),
+      ...(scope.environmentId ? { device: scope.environmentId } : {}),
       ...(focus ? { focus } : {}),
     },
   };

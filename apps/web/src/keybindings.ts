@@ -149,6 +149,9 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     previewOpen: false,
     isWeb: !isElectron,
     isDesktop: isElectron,
+    columnsRail:
+      typeof document !== "undefined" &&
+      document.querySelector('[data-columns-rail="true"]') !== null,
     ...options?.context,
   };
 }

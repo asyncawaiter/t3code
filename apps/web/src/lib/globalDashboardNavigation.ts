@@ -13,7 +13,15 @@ declare module "@tanstack/react-router" {
   }
 }
 
-export type OverviewScope = { profileId: string; spaceId?: string | undefined; unsorted: boolean };
+export type OverviewScope = {
+  profileId: string;
+  spaceId?: string | undefined;
+  unsorted: boolean;
+  /** Columns only: narrow to one project (`environmentId:projectId`). */
+  projectKey?: string | undefined;
+  /** Columns only: narrow to one device. */
+  environmentId?: string | undefined;
+};
 
 export function dashboardStorageScope(scope?: OverviewScope) {
   return scope

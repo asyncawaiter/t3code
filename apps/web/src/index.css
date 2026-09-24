@@ -271,6 +271,71 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* Raised surfaces shared by chat columns, dashboard cards and skills panels: a neutral edge,
+   a close hairline shadow for definition and a wide soft one for depth, plus a top highlight
+   that stands in for the shadow in dark themes. Static only; never animate these shadows. */
+@utility surface-raised {
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--foreground) 13%, transparent);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 8px 22px -6px rgb(0 0 0 / 0.14),
+    inset 0 1px 0 rgb(255 255 255 / 0.65);
+
+  &:is(.dark, .dark *) {
+    border-color: color-mix(in srgb, var(--foreground) 15%, transparent);
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.5),
+      0 10px 26px -6px rgb(0 0 0 / 0.6),
+      inset 0 1px 0 rgb(255 255 255 / 0.07);
+  }
+}
+
+@utility surface-raised-strong {
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--foreground) 30%, transparent);
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.08),
+    0 14px 34px -8px rgb(0 0 0 / 0.22),
+    inset 0 1px 0 rgb(255 255 255 / 0.65);
+
+  &:is(.dark, .dark *) {
+    border-color: color-mix(in srgb, var(--foreground) 32%, transparent);
+    box-shadow:
+      0 1px 3px rgb(0 0 0 / 0.55),
+      0 16px 36px -8px rgb(0 0 0 / 0.7),
+      inset 0 1px 0 rgb(255 255 255 / 0.1);
+  }
+}
+
+@utility surface-raised-sm {
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 4px 10px -3px rgb(0 0 0 / 0.1),
+    inset 0 1px 0 rgb(255 255 255 / 0.6);
+
+  &:is(.dark, .dark *) {
+    border-color: color-mix(in srgb, var(--foreground) 14%, transparent);
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.45),
+      0 6px 14px -4px rgb(0 0 0 / 0.5),
+      inset 0 1px 0 rgb(255 255 255 / 0.06);
+  }
+}
+
+/* The header strip of a raised surface. */
+@utility surface-lid {
+  background: color-mix(in srgb, var(--foreground) 3.5%, var(--card));
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent);
+}
+
+/* The slightly darker ground raised surfaces sit on. */
+@utility surface-canvas {
+  background: color-mix(in srgb, var(--foreground) 4%, var(--background));
+}
+
 @utility alert-glass {
   --alert-glass-tint: transparent;
   background:
