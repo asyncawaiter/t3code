@@ -353,11 +353,13 @@ export function TaskShelf({
               role="region"
               aria-label="Planned task cards"
               tabIndex={0}
-              className="relative flex h-56 min-w-0 gap-2 overflow-x-auto overflow-y-hidden pb-2 [scrollbar-width:thin]"
+              className={`relative flex min-w-0 gap-2 overflow-x-auto overflow-y-hidden p-1 [scrollbar-width:thin] rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${expanded ? "h-56" : "h-44"}`}
             >
               {shown.map((task) => {
                 const key = taskKey(task);
                 const isExpanded = expanded === key;
+                const preview = (task.item.brief || task.item.notes || "").trim();
+                const showPreview = preview && !preview.startsWith(task.item.title.trim());
                 const group = groups.find((group) => group.tasks.includes(task));
                 return (
                   <article
@@ -367,31 +369,32 @@ export function TaskShelf({
                     className={`flex h-full shrink-0 overflow-hidden rounded-xl border bg-card ${isExpanded ? "w-[min(64rem,100%)] border-primary/40 ring-1 ring-primary/10" : "w-64 border-border/60"}`}
                   >
                     <div
-                      className={`flex min-w-0 flex-col ${isExpanded ? "w-56 shrink-0 border-r border-border/60" : "w-full"}`}
+                      className={`relative flex min-w-0 flex-col ${isExpanded ? "w-56 shrink-0 border-r border-border/60" : "w-full"}`}
                     >
                       <button
                         type="button"
                         aria-label={`${isExpanded ? "Collapse" : "Expand"} task: ${task.item.title}`}
                         disabled={editorBusy}
                         aria-expanded={isExpanded}
-                        className="flex min-h-0 flex-1 flex-col gap-3 p-3 text-left outline-none hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        className="flex min-h-0 flex-1 flex-col gap-2 p-3 text-left outline-none hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                         onClick={() => setExpanded(isExpanded ? null : key)}
                       >
                         {!activeGroup && spaceId === undefined && (
-                          <span className="flex max-w-full items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                          <span className="flex max-w-full shrink-0 items-center gap-1.5 truncate pr-6 text-[11px] text-muted-foreground">
                             {group?.color && <ProfileDot color={group.color} />}
                             {group?.spaceName ?? "Unsorted"}
                           </span>
                         )}
-                        <span className="line-clamp-3 text-[13px] font-medium leading-5">
+                        <span className="line-clamp-2 shrink-0 break-words pr-5 text-[13px] font-medium leading-5">
                           {task.item.title}
                         </span>
-                        <span className="line-clamp-3 text-xs leading-5 text-muted-foreground">
-                          {task.item.brief ||
-                            (task.item.notes === task.item.title ? "" : task.item.notes)}
-                        </span>
-                        <span className="mt-auto flex w-full items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                          <span>
+                        {showPreview && (
+                          <span className="line-clamp-2 shrink-0 break-words text-xs leading-4 text-muted-foreground">
+                            {preview}
+                          </span>
+                        )}
+                        <span className="mt-auto flex w-full shrink-0 items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                          <span className="min-w-0 truncate">
                             {task.syncError ??
                               (task.localCaptureId
                                 ? "Saved on this device"
@@ -410,9 +413,7 @@ export function TaskShelf({
                           )}
                         </span>
                       </button>
-                      <div className="flex h-7 shrink-0 justify-end px-2">
-                        {renderActions(task)}
-                      </div>
+                      <div className="absolute right-1.5 top-1.5">{renderActions(task)}</div>
                     </div>
                     {isExpanded && (
                       <div className="min-w-0 flex-1">
