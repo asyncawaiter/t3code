@@ -67,7 +67,7 @@ function env(
   };
 }
 
-it("marks a personal install missing on a writable target that lacks it, and computes coverage", () => {
+it("marks a personal install missing on a writable target that lacks it, and does not count it as differing", () => {
   const environments: SkillEnvironmentInput[] = [
     env({
       environmentId: "e1",
@@ -92,8 +92,7 @@ it("marks a personal install missing on a writable target that lacks it, and com
 
   const [group] = buildSkillGroups(environments);
   expect(group!.name).toBe("writer");
-  expect(group!.status).toBe("gaps");
-  expect(group!.coverage).toEqual({ installed: 1, expected: 2 });
+  expect(group!.differs).toBe(false);
   expect(group!.cells.get("e1:codex-1")?.status).toBe("missing");
   expect(group!.cells.get("e1:claude-1")?.status).toBe("in-sync");
 });
@@ -122,7 +121,6 @@ it("does not treat a builtin-only skill as having gaps", () => {
   ];
 
   const [group] = buildSkillGroups(environments);
-  expect(group!.status).toBe("readonly");
   expect(group!.cells.get("e1:claude-1")?.status).toBe("readonly");
   expect(group!.cells.get("e1:codex-1")?.status).toBe("missing");
 });
@@ -159,7 +157,7 @@ it("flags drift when hashes differ from the majority variant, and picks the prim
 
   const [group] = buildSkillGroups(environments);
   expect(group!.primaryVariant.hash).toBe("h1");
-  expect(group!.status).toBe("drift");
+  expect(group!.differs).toBe(true);
   expect(group!.cells.get("e1:c")?.status).toBe("drift");
 });
 
@@ -213,7 +211,7 @@ it("unsupported target without an install stays unsupported even when online", (
   expect(group!.cells.get("e1:readonly-provider")?.status).toBe("unsupported");
 });
 
-it("filters by source, status and search", () => {
+it("filters by source, differences and search", () => {
   const environments: SkillEnvironmentInput[] = [
     env({
       environmentId: "e1",
@@ -237,20 +235,19 @@ it("filters by source, status and search", () => {
     filterSkillGroups(groups, {
       search: "review",
       source: "all",
-      environmentId: null,
-      instanceId: null,
-      status: "all",
+      differsOnly: false,
     }).map((g) => g.name),
   ).toEqual(["reviewer"]);
   expect(
     filterSkillGroups(groups, {
       search: "",
       source: "personal",
-      environmentId: null,
-      instanceId: null,
-      status: "all",
+      differsOnly: false,
     }),
   ).toHaveLength(2);
+  expect(filterSkillGroups(groups, { search: "", source: "all", differsOnly: true })).toHaveLength(
+    0,
+  );
 });
 
 it("treats a skill installed in a shared skills directory as installed for every instance pointed at it", () => {
@@ -278,9 +275,7 @@ it("treats a skill installed in a shared skills directory as installed for every
   ];
 
   const [group] = buildSkillGroups(environments);
-  expect(group!.status).toBe("in-sync");
   expect(group!.cells.get("e1:claude-2")?.status).toBe("in-sync");
-  expect(group!.coverage).toEqual({ installed: 2, expected: 2 });
 });
 
 it("dedupeWriteTargets collapses targets that share one environment + skills directory", () => {

@@ -1,48 +1,64 @@
-import { useState } from "react";
-import type { EnvironmentId, SkillBackup } from "@t3tools/contracts";
-import { ChevronRightIcon } from "lucide-react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { HistoryIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
-import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "../ui/collapsible";
+import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import type { SkillEnvironmentInput } from "./skillsModel";
 import { useSkillWriteActions } from "./useSkillWriteActions";
 
-/** Recent skill backups for one environment, each restorable in one click. */
-export function SkillBackupsPanel({
-  environmentId,
-  backups,
+const REASON_LABEL = { update: "Replaced", remove: "Removed" } as const;
+
+/** Recent replaced or removed copies across devices, each restorable in one click. */
+export function SkillBackupsMenu({
+  environments,
   onRefreshEnvironment,
 }: {
-  environmentId: EnvironmentId;
-  backups: readonly SkillBackup[];
+  environments: readonly SkillEnvironmentInput[];
   onRefreshEnvironment: (environmentId: EnvironmentId) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const { restoreBackup } = useSkillWriteActions();
-
-  if (backups.length === 0) return null;
+  const entries = environments.flatMap((env) =>
+    (env.inventory?.backups ?? []).map((backup) => ({ env, backup })),
+  );
+  if (entries.length === 0) return null;
+  const recent = entries
+    .toSorted((a, b) => b.backup.createdAt.localeCompare(a.backup.createdAt))
+    .slice(0, 20);
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="border-t px-3 py-2">
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <ChevronRightIcon className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
-        Recently changed ({backups.length})
-      </CollapsibleTrigger>
-      <CollapsiblePanel>
-        <ul className="flex flex-col gap-1 pt-2">
-          {backups.map((backup) => (
-            <li key={backup.id} className="flex items-center justify-between gap-2 text-xs">
-              <span className="truncate">
-                {backup.name} · {backup.reason} · {formatRelativeTimeLabel(backup.createdAt)}
-              </span>
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button size="icon-xs" variant="ghost-muted" aria-label="Recently changed skills" />
+        }
+      >
+        <HistoryIcon className="size-3.5" />
+      </PopoverTrigger>
+      <PopoverPopup align="end" className="w-80">
+        <PopoverTitle className="mb-2 text-[15px]">Recently changed</PopoverTitle>
+        <ul className="-mx-1 flex max-h-80 flex-col overflow-y-auto">
+          {recent.map(({ env, backup }) => (
+            <li
+              key={`${env.environmentId}:${backup.id}`}
+              className="flex items-center gap-3 rounded-md px-1 py-1.5"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{backup.name}</p>
+                <p className="truncate text-[13px] text-muted-foreground">
+                  {REASON_LABEL[backup.reason]} on {env.label} ·{" "}
+                  {formatRelativeTimeLabel(backup.createdAt)}
+                </p>
+              </div>
               <Button
                 size="xs"
-                variant="ghost"
+                variant="outline"
+                disabled={!env.online}
                 onClick={() =>
                   void restoreBackup({
-                    environmentId,
+                    environmentId: env.environmentId,
                     backupId: backup.id,
-                    onRefreshTarget: () => onRefreshEnvironment(environmentId),
+                    onRefreshTarget: () => onRefreshEnvironment(env.environmentId),
                   })
                 }
               >
@@ -51,7 +67,7 @@ export function SkillBackupsPanel({
             </li>
           ))}
         </ul>
-      </CollapsiblePanel>
-    </Collapsible>
+      </PopoverPopup>
+    </Popover>
   );
 }

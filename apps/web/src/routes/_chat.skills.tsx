@@ -1,10 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
-import { SkillsPage, type SkillsPageView } from "../components/skills/SkillsPage";
+import { SkillsPage } from "../components/skills/SkillsPage";
 
 interface SkillsSearch {
   skill?: string;
-  view?: SkillsPageView;
 }
 
 function SkillsRoute() {
@@ -13,7 +12,6 @@ function SkillsRoute() {
   return (
     <SkillsPage
       selectedSkill={search.skill ?? null}
-      view={search.view ?? "library"}
       onSelectSkill={(name) =>
         void navigate({
           search: (prev): SkillsSearch => {
@@ -22,17 +20,12 @@ function SkillsRoute() {
           },
         })
       }
-      onViewChange={(view) =>
-        void navigate({ search: (prev): SkillsSearch => ({ ...prev, view }) })
-      }
     />
   );
 }
 
 export const Route = createFileRoute("/_chat/skills")({
-  validateSearch: (raw: Record<string, unknown>): SkillsSearch => ({
-    ...(typeof raw.skill === "string" && raw.skill ? { skill: raw.skill } : {}),
-    ...(raw.view === "library" || raw.view === "gaps" ? { view: raw.view } : {}),
-  }),
+  validateSearch: (raw: Record<string, unknown>): SkillsSearch =>
+    typeof raw.skill === "string" && raw.skill ? { skill: raw.skill } : {},
   component: SkillsRoute,
 });

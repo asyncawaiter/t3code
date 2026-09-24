@@ -59,8 +59,6 @@ export interface SkillVariant {
   modifiedAt: string | null;
 }
 
-export type SkillStatus = "in-sync" | "drift" | "gaps" | "readonly";
-
 const SOURCE_RANK: Record<SkillSource, number> = {
   personal: 0,
   shared: 1,
@@ -75,8 +73,10 @@ export interface SkillGroup {
   variants: SkillVariant[];
   primaryVariant: SkillVariant;
   cells: Map<string, SkillCell>;
-  coverage: { installed: number; expected: number };
-  status: SkillStatus;
+  /** Some personal copy's content differs from the most common version. */
+  differs: boolean;
+  /** Newest modification time across every install. */
+  updatedAt: string | null;
 }
 
 function targetKey(environmentId: string, instanceId: string): string {
@@ -168,8 +168,8 @@ function cellStatusForInstall(
 }
 
 /**
- * Groups every install by skill name across targets, computing variants, per-target cell
- * state, coverage, and an overall status. Pure so the page can memoize on inputs.
+ * Groups every install by skill name across targets, computing variants and per-target cell
+ * state. A skill missing somewhere is a neutral fact, not a problem to fix. Pure so the page can memoize on inputs.
  */
 export function buildSkillGroups(environments: readonly SkillEnvironmentInput[]): SkillGroup[] {
   const targets = buildSkillTargets(environments);
@@ -216,10 +216,6 @@ export function buildSkillGroups(environments: readonly SkillEnvironmentInput[])
     for (const entry of entries) {
       if (SOURCE_RANK[entry.install.source] < SOURCE_RANK[source]) source = entry.install.source;
     }
-    const hasGapEligibleInstall = entries.some(
-      (entry) => entry.install.source === "personal" || entry.install.source === "shared",
-    );
-
     const installByTargetKey = new Map(entries.map((entry) => [entry.target.key, entry.install]));
     // A skill on disk in a shared skills directory belongs to every instance pointed at
     // that directory, even if only one of them reported it in its snapshot.
@@ -230,10 +226,7 @@ export function buildSkillGroups(environments: readonly SkillEnvironmentInput[])
       if (!installByDirKey.has(dirKey)) installByDirKey.set(dirKey, entry.install);
     }
     const cells = new Map<string, SkillCell>();
-    let hasMissing = false;
-    let hasDrift = false;
-    let installedCount = 0;
-    let expectedCount = 0;
+    let differs = false;
     for (const target of targets) {
       let install = installByTargetKey.get(target.key) ?? null;
       if (!install && target.skillsDirectory) {
@@ -243,20 +236,8 @@ export function buildSkillGroups(environments: readonly SkillEnvironmentInput[])
       const hasKnownState = knownEnvironmentIds.has(target.environmentId);
       const status = cellStatusForInstall(install, target, hasKnownState, primaryHash);
       cells.set(target.key, { status, install });
-      if (install) installedCount += 1;
-      if (install || target.writable) expectedCount += 1;
-      if (status === "missing") hasMissing = true;
-      if (status === "drift") hasDrift = true;
+      if (status === "drift") differs = true;
     }
-
-    const status: SkillStatus =
-      hasGapEligibleInstall && hasMissing
-        ? "gaps"
-        : hasDrift
-          ? "drift"
-          : hasGapEligibleInstall
-            ? "in-sync"
-            : "readonly";
 
     const description =
       primaryInstall.description ??
@@ -269,8 +250,8 @@ export function buildSkillGroups(environments: readonly SkillEnvironmentInput[])
       variants,
       primaryVariant,
       cells,
-      coverage: { installed: installedCount, expected: expectedCount },
-      status,
+      differs,
+      updatedAt: newestModifiedAt(entries),
     });
   }
 
@@ -278,42 +259,26 @@ export function buildSkillGroups(environments: readonly SkillEnvironmentInput[])
 }
 
 export type SkillSourceFilter = "all" | SkillSource;
-export type SkillStatusFilter = "all" | "gaps" | "drift" | "in-sync";
-
 export interface SkillFilters {
   search: string;
   source: SkillSourceFilter;
-  environmentId: string | null;
-  instanceId: string | null;
-  status: SkillStatusFilter;
+  differsOnly: boolean;
 }
 
 export const DEFAULT_SKILL_FILTERS: SkillFilters = {
   search: "",
   source: "all",
-  environmentId: null,
-  instanceId: null,
-  status: "all",
+  differsOnly: false,
 };
 
-/** Ranks and filters skills for the library list. Search reuses the chat picker's scorer. */
+/** Ranks and filters skills for the table. Search reuses the chat picker's scorer. */
 export function filterSkillGroups(
   groups: readonly SkillGroup[],
   filters: SkillFilters,
 ): SkillGroup[] {
   const filtered = groups.filter((group) => {
     if (filters.source !== "all" && group.source !== filters.source) return false;
-    if (filters.status !== "all" && group.status !== filters.status) return false;
-    if (filters.environmentId || filters.instanceId) {
-      const matchesTarget = [...group.cells.entries()].some(([key, cell]) => {
-        if (cell.install === null) return false;
-        const [environmentId, instanceId] = key.split(":");
-        if (filters.environmentId && environmentId !== filters.environmentId) return false;
-        if (filters.instanceId && instanceId !== filters.instanceId) return false;
-        return true;
-      });
-      if (!matchesTarget) return false;
-    }
+    if (filters.differsOnly && !group.differs) return false;
     return true;
   });
 

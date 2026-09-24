@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { EnvironmentId, ProviderInstanceId, SkillInstall } from "@t3tools/contracts";
-import { TriangleAlertIcon } from "lucide-react";
+import { ArrowRightIcon, TriangleAlertIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
 import {
@@ -17,6 +17,16 @@ import { useEnvironmentQuery } from "../../state/query";
 import { skillBundle } from "../../state/skills";
 import { diffBundleFiles, frontmatterWarnings, type SkillTarget } from "./skillsModel";
 import { useSkillWriteActions } from "./useSkillWriteActions";
+import { ProviderMark } from "./skillsUi";
+
+function TargetChip({ target }: { target: SkillTarget }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-sm text-foreground">
+      <ProviderMark target={target} />
+      {target.envLabel} · {target.providerLabel}
+    </span>
+  );
+}
 
 export interface SkillActionEndpoint {
   target: SkillTarget;
@@ -211,12 +221,19 @@ export function SkillActionDialog({
               ? `Removes the personal copy on ${request.target.envLabel} · ${request.target.providerLabel}.`
               : request.kind === "bulk"
                 ? `${request.items.length} target${request.items.length === 1 ? "" : "s"} will be updated.`
-                : `${request.source.target.envLabel} · ${request.source.target.providerLabel} → ${request.target.envLabel} · ${request.target.providerLabel}`}
+                : "Copies the most common version of this skill."}
           </DialogDescription>
+          {(request.kind === "install" || request.kind === "update") && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <TargetChip target={request.source.target} />
+              <ArrowRightIcon className="size-4 text-muted-foreground" />
+              <TargetChip target={request.target} />
+            </div>
+          )}
         </DialogHeader>
-        <DialogPanel className="flex max-h-96 flex-col gap-3 text-sm">
+        <DialogPanel className="flex max-h-96 flex-col gap-3 text-[15px]">
           {blockedReason && (
-            <p className="flex items-center gap-1.5 rounded-md bg-warning/8 p-2 text-xs text-warning-foreground">
+            <p className="flex items-center gap-2 rounded-md bg-warning/8 px-3 py-2 text-sm text-warning-foreground">
               <TriangleAlertIcon className="size-3.5 shrink-0" />
               {blockedReason}
             </p>
@@ -238,8 +255,10 @@ export function SkillActionDialog({
           )}
           {request.kind !== "bulk" && request.kind !== "remove" && sourceBundle.data && (
             <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">Files</p>
-              <ul className="flex flex-col gap-0.5 font-mono text-xs">
+              <p className="mb-1.5 text-xs font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+                Files
+              </p>
+              <ul className="flex flex-col gap-0.5 font-mono text-[13.5px] leading-5">
                 {sourceBundle.data.files.map((file) => (
                   <li key={file.path}>{file.path}</li>
                 ))}
@@ -248,8 +267,10 @@ export function SkillActionDialog({
           )}
           {fileDiff && (
             <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">Changes</p>
-              <ul className="flex flex-col gap-0.5 font-mono text-xs">
+              <p className="mb-1.5 text-xs font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+                Changes
+              </p>
+              <ul className="flex flex-col gap-0.5 font-mono text-[13.5px] leading-5">
                 {fileDiff
                   .filter((entry) => entry.kind !== "unchanged")
                   .map((entry) => (
@@ -263,7 +284,7 @@ export function SkillActionDialog({
             </div>
           )}
           {warnings.length > 0 && (
-            <ul className="flex flex-col gap-1 rounded-md bg-warning/8 p-2 text-xs text-warning-foreground">
+            <ul className="flex flex-col gap-1.5 rounded-md bg-warning/8 px-3 py-2 text-sm leading-5 text-warning-foreground">
               {warnings.map((warning) => (
                 <li key={warning} className="flex items-start gap-1.5">
                   <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
@@ -273,7 +294,7 @@ export function SkillActionDialog({
             </ul>
           )}
           {error && (
-            <p className="whitespace-pre-line text-xs text-destructive-foreground">{error}</p>
+            <p className="whitespace-pre-line text-[13px] text-destructive-foreground">{error}</p>
           )}
         </DialogPanel>
         <DialogFooter>
