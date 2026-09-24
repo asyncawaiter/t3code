@@ -3,6 +3,9 @@ import { DEFAULT_CHAT_BOARD, EnvironmentId, ThreadId } from "@t3tools/contracts"
 
 const state = vi.hoisted(() => ({
   mode: "columns",
+  remember: vi.fn(),
+  blocked: false,
+  notice: vi.fn(),
   router: { state: { location: { href: "/spaces/all?view=columns&workspace=board" } } },
   board: {},
   shell: { projectId: "project", title: "Reference", settledOverride: "settled", archivedAt: null },
@@ -10,6 +13,27 @@ const state = vi.hoisted(() => ({
   navigate: vi.fn(async () => undefined),
   dashboardReturn: { href: "/dashboard", label: "Global dashboard", threadKey: "device:reference" },
 }));
+vi.mock("./useChatColumnLocation", () => ({
+  useChatColumnMemory: () => ({ remember: state.remember }),
+  useChatColumnLocation: () => () => ({
+    location: { kind: "board", boardId: "last-used" },
+    label: "Board · Release",
+    blocked: state.blocked ? "Reconnect the device" : undefined,
+    navigation: {
+      to: "/spaces/$profileId",
+      params: { profileId: "all" },
+      search: {
+        view: "columns",
+        workspace: "board",
+        board: "last-used",
+        focus: "device:reference",
+        unsorted: false,
+        space: undefined,
+      },
+    },
+  }),
+}));
+vi.mock("../components/ui/toast", () => ({ toastManager: { add: state.notice } }));
 vi.mock("./useSettings", () => ({
   usePrimarySettings: () => [
     {
@@ -42,13 +66,16 @@ import { useOpenChatInColumns } from "./useOpenChatInColumns";
 const chat = { environmentId: EnvironmentId.make("device"), id: ThreadId.make("reference") };
 beforeEach(() => {
   state.mode = "columns";
+  state.blocked = false;
+  state.remember.mockClear();
+  state.notice.mockClear();
   state.router.state.location.href = "/spaces/all?view=columns&workspace=board";
   state.board = { ...DEFAULT_CHAT_BOARD, order: ["other:chat"], widths: { "other:chat": 570 } };
   state.update.mockReset().mockResolvedValue(true);
   state.navigate.mockClear();
 });
-it("opens a settled search result without unsetting it or replacing the mixed board", async () => {
-  expect(await useOpenChatInColumns()(chat)).toBe(true);
+it("adds an explicitly created chat without replacing the mixed board", async () => {
+  expect(await useOpenChatInColumns("create")(chat)).toBe(true);
   expect(state.update).toHaveBeenCalledWith(
     expect.objectContaining({
       order: ["other:chat", "device:reference"],
@@ -59,20 +86,27 @@ it("opens a settled search result without unsetting it or replacing the mixed bo
   );
   expect(state.navigate).toHaveBeenCalledWith(
     expect.objectContaining({
-      search: { view: "columns", space: undefined, unsorted: false, focus: "device:reference" },
+      search: {
+        view: "columns",
+        workspace: "board",
+        board: "default",
+        space: undefined,
+        unsorted: false,
+        focus: "device:reference",
+      },
       state: { dashboardReturn: state.dashboardReturn },
     }),
   );
 });
 it("leaves navigation and the board alone in Chat mode", async () => {
   state.mode = "chat";
-  expect(await useOpenChatInColumns()(chat)).toBe(false);
+  expect(await useOpenChatInColumns("create")(chat)).toBe(false);
   expect(state.update).not.toHaveBeenCalled();
   expect(state.navigate).not.toHaveBeenCalled();
 });
 it("does not navigate or lose the board when saving fails", async () => {
   state.update.mockResolvedValue(false);
-  await expect(useOpenChatInColumns()(chat)).rejects.toThrow("Could not save");
+  await expect(useOpenChatInColumns("create")(chat)).rejects.toThrow("Could not save");
   expect(state.navigate).not.toHaveBeenCalled();
 });
 it("focuses an existing reference without rewriting its order or width", async () => {
@@ -81,7 +115,7 @@ it("focuses an existing reference without rewriting its order or width", async (
     order: ["device:reference", "other:chat"],
     kept: ["device:reference"],
   };
-  expect(await useOpenChatInColumns()(chat)).toBe(true);
+  expect(await useOpenChatInColumns("create")(chat)).toBe(true);
   expect(state.update).not.toHaveBeenCalled();
   expect(state.navigate).toHaveBeenCalledOnce();
 });
@@ -91,13 +125,13 @@ it("does not pull the user back after they leave while the board saves", async (
     state.router.state.location.href = "/usage";
     return true;
   });
-  expect(await useOpenChatInColumns()(chat)).toBe(true);
+  expect(await useOpenChatInColumns("create")(chat)).toBe(true);
   expect(state.navigate).not.toHaveBeenCalled();
 });
 
 it("opens a scoped dashboard conversation without changing any saved board", async () => {
   state.router.state.location.href = "/spaces/work?space=pod&unsorted=false";
-  expect(await useOpenChatInColumns()(chat)).toBe(true);
+  expect(await useOpenChatInColumns("create")(chat)).toBe(true);
   expect(state.update).not.toHaveBeenCalled();
   expect(state.navigate).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -114,12 +148,46 @@ it("opens a scoped dashboard conversation without changing any saved board", asy
 });
 it("opens global dashboard conversations in the live all-chats workspace", async () => {
   state.router.state.location.href = "/dashboard";
-  expect(await useOpenChatInColumns()(chat)).toBe(true);
+  expect(await useOpenChatInColumns("create")(chat)).toBe(true);
   expect(state.update).not.toHaveBeenCalled();
   expect(state.navigate).toHaveBeenCalledWith(
     expect.objectContaining({
       params: { profileId: "all" },
       search: expect.objectContaining({ workspace: "space" }),
     }),
+  );
+});
+
+it("locates search results in the last-used board without writing membership", async () => {
+  await useOpenChatInColumns()(chat);
+  expect(state.update).not.toHaveBeenCalled();
+  expect(state.navigate).toHaveBeenCalledWith(
+    expect.objectContaining({ search: expect.objectContaining({ board: "last-used" }) }),
+  );
+  expect(state.remember).not.toHaveBeenCalled();
+});
+it("keeps an unavailable saved destination instead of silently falling back", async () => {
+  state.blocked = true;
+  await useOpenChatInColumns()(chat);
+  expect(state.navigate).not.toHaveBeenCalled();
+  expect(state.update).not.toHaveBeenCalled();
+  expect(state.notice).toHaveBeenCalledWith(
+    expect.objectContaining({ title: "Board unavailable" }),
+  );
+});
+it("remembers an explicit destination choice without adding membership", async () => {
+  await useOpenChatInColumns()(chat, { destination: { kind: "board", boardId: "last-used" } });
+  expect(state.update).not.toHaveBeenCalled();
+  expect(state.remember).toHaveBeenCalledWith("device:reference", {
+    kind: "board",
+    boardId: "last-used",
+  });
+});
+it("remembers a new board chat before its first interaction", async () => {
+  await useOpenChatInColumns("create")(chat);
+  expect(state.remember).toHaveBeenCalledWith(
+    "device:reference",
+    expect.objectContaining({ kind: "board", boardId: "default" }),
+    undefined,
   );
 });

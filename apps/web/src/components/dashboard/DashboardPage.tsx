@@ -1,3 +1,6 @@
+import { captureDashboardFilters } from "../../lib/globalDashboardNavigation";
+import { useOpenChatInColumns } from "../../hooks/useOpenChatInColumns";
+import { useChatColumnLocation, type ColumnLocation } from "../../hooks/useChatColumnLocation";
 import {
   CheckCheckIcon,
   ClockIcon,
@@ -8,7 +11,7 @@ import {
 } from "lucide-react";
 import { Sheet, SheetPopup, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet";
 import { filterTaskShelfItems } from "../tasks/TaskShelf.logic";
-import { useChatMode, spaceColumnsNavigation } from "../spaces/columnNavigation";
+import { useChatMode } from "../spaces/columnNavigation";
 import { workItemChats } from "@t3tools/contracts";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { dashboardStorageScope } from "../../lib/globalDashboardNavigation";
@@ -70,7 +73,11 @@ import { SidebarInset } from "../ui/sidebar";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import { cn } from "~/lib/utils";
 import { isElectron } from "../../env";
-import { useProjects, useThreadShells } from "../../state/entities";
+import {
+  useProjects,
+  useThreadShells,
+  useAllEnvironmentShellsBootstrapped,
+} from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { selectSidebarSpace, useUiStateStore } from "../../uiStateStore";
 import { WorkspaceViews } from "../spaces/WorkspaceViews";
@@ -124,6 +131,7 @@ export function DashboardPage({
   scope?: { profileId: string; spaceId?: string | undefined; unsorted: boolean };
 }) {
   const storageScope = dashboardStorageScope(scope);
+  const shellsReady = useAllEnvironmentShellsBootstrapped();
   const [globalProfileId, setDashboardProfileId] = useLocalStorage(
     "t3.dashboard.global.profileFilter",
     null,
@@ -141,6 +149,8 @@ export function DashboardPage({
   const navigate = useNavigate();
   const location = useLocation();
   const [chatMode] = useChatMode();
+  const columnLocation = useChatColumnLocation();
+  const openInColumns = useOpenChatInColumns();
   const [openingChat, setOpeningChat] = useState<string | null>(null);
   const opening = useRef(false);
   const mounted = useRef(true);
@@ -190,7 +200,7 @@ export function DashboardPage({
   const boardRef = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const node = boardRef.current;
-    if (!node) return;
+    if (!node || !shellsReady) return;
     const scrollKey = `${storageScope}.${groupBy}.scroll`;
     let position = 0;
     try {
@@ -235,7 +245,7 @@ export function DashboardPage({
       node.removeEventListener("scroll", track, true);
       window.removeEventListener("pagehide", save);
     };
-  }, [storageScope, groupBy]);
+  }, [storageScope, groupBy, shellsReady]);
   const { environments } = useEnvironments();
 
   const rawProfiles = usePrimarySettings((s) => s.profiles);
@@ -513,22 +523,7 @@ export function DashboardPage({
   const focusedReturn = useRef<string | undefined>(undefined);
   useEffect(() => {
     const key = location.state.dashboardFocusKey;
-    if (
-      !key ||
-      focusedReturn.current === key ||
-      (!allEntries.some((entry) => threadVisitedKey(entry.shell) === key) &&
-        !history.some((shell) => threadVisitedKey(shell) === key) &&
-        !settled.some((shell) => threadVisitedKey(shell) === key))
-    )
-      return;
-    if (
-      visibility === "active" &&
-      settled.some((shell) => threadVisitedKey(shell) === key) &&
-      !taskHistoryOpen
-    ) {
-      setVisibility("settled");
-      return;
-    }
+    if (!key || focusedReturn.current === key || !shellsReady || archive.isLoading) return;
     const card = (
       visibility === "active" ? boardRef.current : historyRef.current
     )?.querySelector<HTMLElement>(`[data-dashboard-chat-key="${CSS.escape(key)}"]`);
@@ -536,8 +531,27 @@ export function DashboardPage({
       card.focus({ preventScroll: true });
       card.scrollIntoView({ block: "nearest", inline: "nearest" });
       focusedReturn.current = key;
+    } else {
+      const moved = settled.some((shell) => threadVisitedKey(shell) === key)
+        ? "settled"
+        : snoozed.some((shell) => threadVisitedKey(shell) === key)
+          ? "snoozed"
+          : undefined;
+      focusedReturn.current = key;
+      toastManager.add({
+        type: "info",
+        title: moved ? `This chat is now ${moved}` : "This chat is outside the current view",
+        description: "Your dashboard filters and scroll positions were kept.",
+        timeout: 6000,
+        ...(moved
+          ? { actionProps: { children: `View ${moved}`, onClick: () => setVisibility(moved) } }
+          : {}),
+      });
     }
   }, [
+    shellsReady,
+    archive.isLoading,
+    snoozed,
     location.state.dashboardFocusKey,
     allEntries,
     history,
@@ -731,13 +745,28 @@ export function DashboardPage({
     );
   }
 
-  async function openDashboardChat(shell: EnvironmentThreadShell) {
+  async function openDashboardChat(shell: EnvironmentThreadShell, destination?: ColumnLocation) {
     if (opening.current) return;
     opening.current = true;
     const key = threadVisitedKey(shell);
     setOpeningChat(key);
     const dashboardReturn = {
       href: location.href,
+      snapshot: {
+        storageScope,
+        group: groupBy,
+        filters: captureDashboardFilters(storageScope),
+        detailed: detailedCards,
+        scroll: Object.fromEntries([
+          ["root", { top: boardRef.current?.scrollTop ?? 0, left: 0 }],
+          ...[
+            ...(boardRef.current?.querySelectorAll<HTMLElement>("[data-dashboard-scroll]") ?? []),
+          ].map((area) => [
+            area.dataset.dashboardScroll!,
+            { top: area.scrollTop, left: area.scrollLeft },
+          ]),
+        ]),
+      },
       threadKey: key,
       label: scope
         ? `${scope.unsorted ? "Unsorted" : (selectedSpace?.name ?? activeProfile.name)} overview`
@@ -755,10 +784,7 @@ export function DashboardPage({
           .map((item) => threadVisitedKey(item.shell)),
       });
       if (chatMode === "columns") {
-        await navigate({
-          ...spaceColumnsNavigation(scope ?? { profileId: "all", unsorted: false }, key),
-          state: { dashboardReturn },
-        });
+        await openInColumns(shell, { dashboardReturn, ...(destination ? { destination } : {}) });
       } else {
         await navigate({
           to: "/$environmentId/$threadId",
@@ -787,6 +813,15 @@ export function DashboardPage({
     );
     return (
       <DashboardCard
+        columnLocation={
+          chatMode === "columns"
+            ? columnLocation({
+                environmentId: entry.shell.environmentId,
+                threadId: entry.shell.id,
+                projectId: entry.shell.projectId,
+              })
+            : undefined
+        }
         key={`${entry.shell.environmentId}:${entry.shell.id}`}
         entry={entry}
         detailed={detailedCards}
@@ -801,6 +836,7 @@ export function DashboardPage({
             ),
         )}
         onOpen={() => void openDashboardChat(entry.shell)}
+        onOpenIn={(destination) => void openDashboardChat(entry.shell, destination)}
         opening={openingChat === threadVisitedKey(entry.shell)}
         spaceName={shellSpace(entry.shell)?.name ?? "Unsorted"}
         providerEntry={providers

@@ -1,3 +1,4 @@
+import type { ChatColumnDestination, ColumnLocation } from "../../hooks/useChatColumnLocation";
 import { workItemStage } from "@t3tools/contracts";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
 import { openWorkItem, type LocatedWorkItem } from "../../workItems";
@@ -62,11 +63,13 @@ export const DashboardCard = memo(function DashboardCard({
   detailed = false,
   tasks = NO_TASKS,
   onOpen,
+  onOpenIn,
   opening = false,
   unread,
   now,
   project,
   spaceName,
+  columnLocation,
   showMachineIcon,
   machineKind,
   providerEntry,
@@ -76,12 +79,14 @@ export const DashboardCard = memo(function DashboardCard({
   detailed?: boolean;
   tasks?: LocatedWorkItem[] | undefined;
   onOpen: () => void;
+  onOpenIn?: ((location: ColumnLocation) => void) | undefined;
   opening?: boolean;
   readonly unread: boolean;
   readonly entry: DashboardBoardEntry;
   readonly now: string;
   readonly project: ProjectFaviconProject;
   spaceName?: string | undefined;
+  columnLocation?: ChatColumnDestination | undefined;
   readonly showMachineIcon: boolean;
   readonly machineKind: EnvironmentMachineKind | null;
   readonly providerEntry: ProviderInstanceEntry | undefined;
@@ -328,10 +333,58 @@ export const DashboardCard = memo(function DashboardCard({
         >
           New task
         </Button>
+        {columnLocation && onOpenIn && (
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label={`Open ${shell.title} in another location`}
+                />
+              }
+            >
+              Open in...
+            </MenuTrigger>
+            <MenuPopup
+              align="start"
+              className="min-w-56 max-w-80"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {columnLocation.choices.map((choice) => (
+                <MenuItem
+                  key={JSON.stringify(choice.location)}
+                  onClick={() => onOpenIn(choice.location)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{choice.label}</span>
+                  {choice.lastUsed && (
+                    <span className="shrink-0 text-xs text-muted-foreground">Last used</span>
+                  )}
+                </MenuItem>
+              ))}
+            </MenuPopup>
+          </Menu>
+        )}
         {tasks.length === 1 && (
           <span className="capitalize text-muted-foreground">{workItemStage(tasks[0]!.item)}</span>
         )}
       </div>
+      {columnLocation && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className="min-w-0 truncate text-left text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                onClick={openClick}
+              />
+            }
+          >
+            {columnLocation.label}
+          </TooltipTrigger>
+          <TooltipPopup>{columnLocation.tooltip}</TooltipPopup>
+        </Tooltip>
+      )}
       {showDetails ? (
         <>
           <dl className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs">

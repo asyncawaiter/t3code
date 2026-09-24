@@ -1612,7 +1612,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
-  const openInColumns = useOpenChatInColumns();
+  const openInColumns = useOpenChatInColumns("create");
   const openCreatedThread = async (id: ThreadId) => {
     try {
       if (await openInColumns({ environmentId, id })) return;

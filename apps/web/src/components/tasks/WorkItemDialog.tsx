@@ -426,11 +426,14 @@ export function TaskForm({
       { environmentId: device, threadId },
     );
     if (
-      !(await openInColumns({
-        environmentId: device,
-        id: threadId,
-        title: linked?.title ?? saved.title,
-      }))
+      !(await openInColumns(
+        {
+          environmentId: device,
+          id: threadId,
+          title: linked?.title ?? saved.title,
+        },
+        { intent: linked ? "locate" : "create" },
+      ))
     )
       await navigate({
         to: "/$environmentId/$threadId",

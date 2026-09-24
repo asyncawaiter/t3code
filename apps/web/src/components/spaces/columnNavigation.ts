@@ -105,8 +105,16 @@ export function boardWithOpenedChat(
 
 declare module "@tanstack/react-router" {
   interface HistoryState {
-    dashboardReturn?: { href: string; label: string; threadKey: string } | undefined;
+    dashboardReturn?:
+      | {
+          href: string;
+          label: string;
+          threadKey: string;
+          snapshot?: import("../../lib/globalDashboardNavigation").DashboardReturnSnapshot;
+        }
+      | undefined;
     dashboardFocusKey?: string | undefined;
+    columnFocusRequest?: number | undefined;
   }
 }
 

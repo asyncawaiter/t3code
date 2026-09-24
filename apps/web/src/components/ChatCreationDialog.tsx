@@ -51,7 +51,7 @@ export function ChatCreationDialog() {
 function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const navigate = useNavigate();
   const [chatMode] = useChatMode();
-  const openInColumns = useOpenChatInColumns();
+  const openInColumns = useOpenChatInColumns("create");
   const projects = useProjects();
   const { environments } = useEnvironments();
   const profiles = usePrimarySettings((settings) => settings.profiles);

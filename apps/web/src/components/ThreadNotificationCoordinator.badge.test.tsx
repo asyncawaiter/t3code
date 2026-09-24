@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   environmentIds: ["one", "two"],
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: (id: string) => state.shells.get(id) }));
+vi.mock("../hooks/useWorkflowNavigation", () => ({ useWorkflowNavigation: () => state.navigate }));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => state.navigate,
   useParams: () => ({}),
@@ -226,10 +227,7 @@ it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
     expect(state.badge).toHaveBeenLastCalledWith(1);
     const notification = TestNotification.sent[0]!;
     notification.dispatchEvent(new Event("click"));
-    expect(state.navigate).toHaveBeenCalledWith({
-      to: "/$environmentId/$threadId",
-      params: { environmentId: EnvironmentId.make("one"), threadId: "thread" },
-    });
+    expect(state.navigate).toHaveBeenCalledWith("one:thread");
     state.mode = "sound";
     await render();
     expect(state.badge).toHaveBeenLastCalledWith(0);

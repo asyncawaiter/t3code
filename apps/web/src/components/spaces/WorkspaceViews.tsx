@@ -1,5 +1,6 @@
 import {
   globalDashboardNavigation,
+  restoreDashboardSnapshot,
   scopedOverviewNavigation,
 } from "../../lib/globalDashboardNavigation";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -115,12 +116,13 @@ export function WorkspaceViews({
               variant="ghost"
               className="max-w-full justify-start gap-1.5 px-1 text-muted-foreground"
               aria-label={`Return to ${dashboardReturn.label}`}
-              onClick={() =>
+              onClick={() => {
+                if (dashboardReturn.snapshot) restoreDashboardSnapshot(dashboardReturn.snapshot);
                 void navigate({
                   href: dashboardReturn.href,
                   state: { dashboardFocusKey: dashboardReturn.threadKey },
-                })
-              }
+                });
+              }}
             >
               <ArrowLeftIcon className="size-3.5 shrink-0" />
               <span className="truncate">{dashboardReturn.label}</span>

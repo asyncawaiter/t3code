@@ -51,6 +51,7 @@ vi.mock("@effect/atom-react", () => ({
     }),
   }),
 }));
+vi.mock("../hooks/useWorkflowNavigation", () => ({ useWorkflowNavigation: () => state.navigate }));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => state.navigate,
   useParams: () => state.active,
@@ -140,10 +141,7 @@ describe("thread notifications", () => {
     expect(toast?.description).toBe("Fix the login form");
     toast?.actionProps.onClick();
     expect(state.close).toHaveBeenCalledWith("toast-1");
-    expect(state.navigate).toHaveBeenCalledWith({
-      to: "/$environmentId/$threadId",
-      params: { environmentId: "env-1", threadId: "thread-1" },
-    });
+    expect(state.navigate).toHaveBeenCalledWith("env-1:thread-1");
     expect(state.notification).not.toHaveBeenCalled();
   });
 

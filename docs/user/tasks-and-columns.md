@@ -38,7 +38,7 @@ A Space's live view includes idle and reviewed conversations as well as running 
 
 The column toolbar provides the same chat actions, scoped pins, snooze, settlement, renaming, bookmarks, Git actions, folder tools, and scripts as Chat mode. Review actions are available beside task capture. Workspace tools open in a drawer at narrow column widths, so they do not squeeze the conversation. Task capture preserves selected text or the composer's draft and attachments.
 
-The rail includes chat and message search, saved-chat focus, pull requests, usage, settings, and Account and T3 Connect. Space navigation and scoped dashboard results stay in their live workspace. Chats opened while using a custom board join that board without replacing its arrangement. A draft's column menu also offers **Move draft** and **Discard draft**.
+The rail includes chat and message search, saved-chat focus, pull requests, usage, settings, and Account and T3 Connect. Space navigation opens its live workspace. Finding an existing chat through the dashboard, search, saved-chat locator, task links, or notifications returns to its remembered Columns destination. These actions never add it to the board you happen to be viewing. Use Add existing chat to change a board's membership. A draft's column menu also offers **Move draft** and **Discard draft**.
 
 **New chat** creates an editable draft directly on the board using the usual folder and device picker. Nothing is sent until you submit a message. Unsent drafts are local to this client; another device can open the conversation once it has been started.
 
@@ -47,6 +47,16 @@ Drag the grip beside a column title to reorder columns. Focus the grip and press
 Start with one board named Columns. Use **Manage** to rename it, create another board, duplicate an arrangement, or delete an extra board. Board names, selected chats, order, and individual widths are saved on the shared profile source and update on connected clients. Both clients and the shared source need a version that supports shared boards. Reconnect the source to edit an arrangement while it is offline. Conflicting edits to the same board are rejected so another device's changes are not overwritten.
 
 The selected board, reading positions, and unsent drafts remain local to each client.
+
+In Columns mode, dashboard cards show where they will open. Clicking a card or using Focus saved chat returns to the board or Space where you last interacted with that chat, and brings its column into view. Mouse interaction, keyboard navigation between columns, and creating a chat record that destination. Simply displaying a chat in another board does not change it. Drafts retain their destination when started or moved to another device. This memory stays on this client.
+
+Hover or focus the destination label for an explanation: a remembered destination says **Last used here**, while a default destination says where it opens. **Open in...** appears with the card's secondary actions and lets you choose its own Space, an existing board containing it, or All chats. The last-used location is marked. Choosing a destination updates this client's memory without adding the chat to a board.
+
+If the previous board was deleted or the chat was removed, the chat opens in its own Space, or All chats when it has no assigned profile. A notification explains the fallback. An unavailable shared profile device does not erase the remembered board. Reconnect it using the notification's **Connections** action.
+
+The saved-chat locator also checks archived chats. An archived reference stays archived, with a notification explaining that state. If the chat's device is offline, reconnect it; the bookmark is kept. If the connected device no longer has the chat, the locator explains that it may have been deleted and offers **Remove bookmark**. A failed lookup does not silently clear a bookmark.
+
+Use **Return to Global dashboard** or the scoped dashboard return button to restore the filters, Compact or Detailed setting, and independent lane positions from your departure. The originating card receives focus. If the chat became settled or snoozed, a notification offers to show that state instead of changing your filters automatically. The permanent Global dashboard rail button remains a fresh, unfiltered entry.
 
 Drag each column's right edge to resize it independently. You can also focus the resize edge and use the arrow keys. Double-click an edge to restore its default width, or use **Reset widths** to reset every column. Smaller windows scroll horizontally without changing saved widths. Expand one chat and return to the board afterward. Use **New task** in a chat to capture more work, even when that chat already has a task. The column menu lets you reorder chats or keep a chat on the board after you settle it. Keeping a column does not pin the chat in the sidebar. Unavailable chats retain their place until their device reconnects.
 

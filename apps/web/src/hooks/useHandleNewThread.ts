@@ -476,7 +476,7 @@ function useCreateDraft() {
 
 export function useNewThreadHandler() {
   const [mode] = useChatMode();
-  const openInColumns = useOpenChatInColumns();
+  const openInColumns = useOpenChatInColumns("create");
   const createDraft = useCreateDraft();
   const saveProfiles = useSaveProfiles();
   return useCallback(

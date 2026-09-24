@@ -1,3 +1,4 @@
+import { useChatColumnMemory } from "../../hooks/useChatColumnLocation";
 import { DndContext, PointerSensor, useSensor, useSensors, closestCenter } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -338,18 +339,21 @@ function SpaceColumns({
     ]),
   ];
   const appliedSpaceFocus = useRef<string | undefined>(undefined);
+  const focusRequest = useLocation({
+    select: (location) => `${focus}:${location.state.columnFocusRequest ?? ""}`,
+  });
   const focusAvailable = scoped.some((chat) => keyOf(chat) === focus);
   const focusActive = active.some((chat) => keyOf(chat) === focus);
   useEffect(() => {
-    if (!focus || !focusAvailable || appliedSpaceFocus.current === focus) return;
-    appliedSpaceFocus.current = focus;
+    if (!focus || !focusAvailable || appliedSpaceFocus.current === focusRequest) return;
+    appliedSpaceFocus.current = focusRequest;
     setArrangement((current) => ({
       ...current,
       hidden: current.hidden.filter((key) => key !== focus),
     }));
     if (!focusActive)
       setReferences((current) => (current.includes(focus) ? current : [...current, focus]));
-  }, [focus, focusAvailable, focusActive, setArrangement]);
+  }, [focus, focusRequest, focusAvailable, focusActive, setArrangement]);
   const board = { ...arrangement, id, order, kept: references };
   return (
     <BoardColumns
@@ -416,6 +420,14 @@ function BoardColumns({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { remember } = useChatColumnMemory();
+  const rememberUse = (key: string) =>
+    remember(
+      key,
+      scope
+        ? { kind: "space", ...scope }
+        : { kind: "board", boardId: state.board.id, boardName: state.board.name },
+    );
   const { unsettleThread, unsnoozeThread } = useThreadActions();
   const [spacePicker, setSpacePicker] = useState<"settled" | "hidden" | "snoozed" | null>(null);
   const [spaceSearch, setSpaceSearch] = useState("");
@@ -437,7 +449,10 @@ function BoardColumns({
         };
     void navigate({
       ...target,
-      state: { dashboardReturn: location.state.dashboardReturn },
+      state: (previous) => ({
+        dashboardReturn: location.state.dashboardReturn,
+        columnFocusRequest: (previous.columnFocusRequest ?? 0) + 1,
+      }),
       replace: true,
     });
   };
@@ -468,7 +483,18 @@ function BoardColumns({
     () => allChats.filter((chat) => layout.order.includes(keyOf(chat))),
     [allChats, layout.order],
   );
-  const columns = useMemo(() => columnOrder(candidates, layout), [candidates, layout]);
+  // A located reference remains visible without changing its state or saved membership.
+  const visibleLayout = useMemo(
+    () =>
+      focus && layout.order.includes(focus)
+        ? { ...layout, kept: [...new Set([...layout.kept, focus])] }
+        : layout,
+    [layout, focus],
+  );
+  const columns = useMemo(
+    () => columnOrder(candidates, visibleLayout),
+    [candidates, visibleLayout],
+  );
   const createChat = () => {
     useColumnNavigation.setState({ choosing: false });
     openChatCreation({
@@ -491,6 +517,7 @@ function BoardColumns({
           throw new Error(
             "The chat draft is saved, but could not be added to this board. Close this dialog and retry from Add existing chat.",
           );
+        rememberUse(key);
         setFocused(key);
         openFocus(key);
       },
@@ -576,16 +603,28 @@ function BoardColumns({
       if (!target) return;
       event.preventDefault();
       const key = keyOf(target);
+      rememberUse(key);
       setFocused(key);
       if (expanded) setExpanded(key);
-      else
+      openFocus(key);
+      if (!expanded)
         rail.current
           ?.querySelector(`[data-column-key="${CSS.escape(key)}"]`)
           ?.scrollIntoView({ block: "nearest", inline: "nearest" });
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [active, choosing, columns, expanded, keybindings, setFocused, createChat]);
+  }, [
+    active,
+    choosing,
+    columns,
+    expanded,
+    keybindings,
+    setFocused,
+    createChat,
+    rememberUse,
+    openFocus,
+  ]);
   const [savedScroll, setSavedScroll] = useLocalStorage(
     `t3.columns-scroll.${state.board.id}`,
     0,
@@ -596,24 +635,29 @@ function BoardColumns({
     if (rail.current) rail.current.scrollLeft = expanded ? 0 : scroll.current;
   }, [expanded]);
   const appliedFocus = useRef<string | undefined>(undefined);
+  const focusRequest = `${focus}:${location.state.columnFocusRequest ?? ""}`;
   useLayoutEffect(() => {
-    if (focus && focus !== appliedFocus.current && columns.length && rail.current) {
+    if (focus && focusRequest !== appliedFocus.current && columns.length && rail.current) {
+      if (expanded && expanded !== focus) {
+        setExpanded(null);
+        return;
+      }
       const node = rail.current.querySelector(`[data-column-key="${CSS.escape(focus)}"]`);
       if (node instanceof HTMLElement) {
         node.scrollIntoView({ block: "nearest", inline: "nearest" });
         node.querySelector<HTMLButtonElement>("header button")?.focus({ preventScroll: true });
-        appliedFocus.current = focus;
+        appliedFocus.current = focusRequest;
         setFocused(focus);
       }
     }
-  }, [focus, columns, setFocused]);
+  }, [focus, focusRequest, columns, expanded, setFocused]);
   useEffect(() => () => setSavedScroll(scroll.current), [setSavedScroll]);
   const [draggingColumn, setDraggingColumn] = useState(false);
   const dragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
   function reorder(key: string, delta: number) {
-    const visible = boardColumnKeys(allChats, layout);
+    const visible = boardColumnKeys(allChats, visibleLayout);
     const index = visible.indexOf(key),
       target = index + delta;
     if (index < 0 || target < 0 || target >= visible.length) return;
@@ -629,7 +673,7 @@ function BoardColumns({
       replace: true,
     });
   }
-  const selectedKeys = new Set(boardColumnKeys(allChats, layout));
+  const selectedKeys = new Set(boardColumnKeys(allChats, visibleLayout));
   const resetPickerFilters = () => {
     setProfileFilter("all");
     setSpaceFilter("all");
@@ -664,6 +708,7 @@ function BoardColumns({
     if (disabled || !pendingAdditions.length) return;
     if (!(await state.update(addChatsToBoard(layout, pendingAdditions)))) return;
     const first = pendingAdditions[0]!.key;
+    rememberUse(first);
     setPendingChats([]);
     setExpanded(null);
     appliedFocus.current = undefined;
@@ -1432,6 +1477,7 @@ function BoardColumns({
                   expanded={expanded === key}
                   hidden={expanded !== null && expanded !== key}
                   onFocus={() => setFocused(key)}
+                  onUse={() => rememberUse(key)}
                   connected={environments.some(
                     (env) =>
                       env.environmentId === chat.environmentId &&
@@ -1656,6 +1702,7 @@ function Column({
   expanded,
   hidden,
   onFocus,
+  onUse,
   device,
   connected,
   children,
@@ -1682,6 +1729,7 @@ function Column({
   expanded: boolean;
   hidden: boolean;
   onFocus: () => void;
+  onUse: () => void;
   device: string;
   connected: boolean;
   children: React.ReactNode;
@@ -1748,7 +1796,11 @@ function Column({
         setNodeRef(node);
       }}
       aria-label={`Chat column: ${chat.title}`}
-      onPointerDownCapture={onFocus}
+      onPointerDownCapture={() => {
+        onFocus();
+        onUse();
+      }}
+      onKeyDownCapture={onUse}
       onFocusCapture={onFocus}
       hidden={hidden}
       style={{

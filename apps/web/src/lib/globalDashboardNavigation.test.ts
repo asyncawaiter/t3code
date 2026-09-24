@@ -1,3 +1,4 @@
+import { captureDashboardFilters, restoreDashboardSnapshot } from "./globalDashboardNavigation";
 import { expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import {
@@ -78,4 +79,30 @@ it("opens profile and space overviews with independent fresh filters", () => {
     for (const key of [...keys, "t3.dashboard.savedViews", "t3.dashboard.global.search"])
       removeLocalStorageItem(key);
   }
+});
+
+it("restores the departing dashboard filters, density and independent lane offsets", () => {
+  const scope = "t3.dashboard.return-test";
+  setLocalStorageItem(`${scope}.search`, "release", Schema.String);
+  setLocalStorageItem(`${scope}.providerFilter`, "codex", Schema.String);
+  const filters = captureDashboardFilters(scope);
+  setLocalStorageItem(`${scope}.search`, "different", Schema.String);
+  restoreDashboardSnapshot({
+    storageScope: scope,
+    group: "state",
+    filters,
+    detailed: true,
+    scroll: {
+      running: { top: 240, left: 0 },
+      idle: { top: 110, left: 0 },
+      board: { left: 50, top: 0 },
+    },
+  });
+  expect(getLocalStorageItem(`${scope}.search`, Schema.String)).toBe("release");
+  expect(getLocalStorageItem(`${scope}.providerFilter`, Schema.String)).toBe("codex");
+  expect(getLocalStorageItem(`${scope}.state.scroll.running.top`, Schema.Finite)).toBe(240);
+  expect(getLocalStorageItem(`${scope}.state.scroll.idle.top`, Schema.Finite)).toBe(110);
+  expect(getLocalStorageItem(`${scope}.state.scroll.board.left`, Schema.Finite)).toBe(50);
+  expect(getLocalStorageItem("t3.dashboard.detailedCards", Schema.Boolean)).toBe(true);
+  removeLocalStorageItem("t3.dashboard.detailedCards");
 });

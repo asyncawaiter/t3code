@@ -1,5 +1,6 @@
+import { useWorkflowNavigation } from "../hooks/useWorkflowNavigation";
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useCallback, useEffect, useRef } from "react";
@@ -93,7 +94,7 @@ function EnvironmentNotifications({
   const inAppNotificationsEnabled = useClientSettings(
     (settings) => settings.inAppNotificationsEnabled,
   );
-  const navigate = useNavigate();
+  const openChat = useWorkflowNavigation();
   const { environmentId: activeEnvironmentId, threadId: activeThreadId } = useParams({
     strict: false,
   });
@@ -159,10 +160,7 @@ function EnvironmentNotifications({
             children: "Open thread",
             onClick: () => {
               toastManager.close(toastId);
-              void navigate({
-                to: "/$environmentId/$threadId",
-                params: { environmentId, threadId: thread.id },
-              });
+              openChat(`${environmentId}:${thread.id}`);
             },
           },
         });
@@ -185,10 +183,7 @@ function EnvironmentNotifications({
         notification.addEventListener("click", () => {
           notification.close();
           window.focus();
-          void navigate({
-            to: "/$environmentId/$threadId",
-            params: { environmentId, threadId: thread.id },
-          });
+          openChat(`${environmentId}:${thread.id}`);
         });
       } catch {
         // Some browsers expose Notification but reject desktop presentation.
@@ -201,7 +196,7 @@ function EnvironmentNotifications({
     environmentId,
     inAppNotificationsEnabled,
     mode,
-    navigate,
+    openChat,
     onNotification,
     shell,
   ]);
