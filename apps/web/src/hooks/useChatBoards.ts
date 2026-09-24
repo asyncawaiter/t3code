@@ -85,7 +85,7 @@ export function useChatBoards(boardId?: string) {
         return true;
       } catch (error) {
         setError(
-          error instanceof ServerSettingsError && error.cause instanceof Error
+          Schema.is(ServerSettingsError)(error) && error.cause instanceof Error
             ? error.cause.message
             : error instanceof Error
               ? error.message

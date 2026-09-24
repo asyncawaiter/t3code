@@ -122,6 +122,7 @@ it("tracks accepted handoffs without treating chat links or turn completion as t
   expect(() =>
     recordWorkItemHandoff({ ...pending, deletedAt: handoff.createdAt }, handoff),
   ).toThrow("Reopen");
-  const stale = { ...pending, handoffs: undefined };
+  // An older client's copy has no handoff history at all.
+  const { handoffs: _handoffs, ...stale } = pending;
   expect(() => mergeWorkItems([pending], [stale], [{ ...stale, title: "Old client" }])).toThrow();
 });

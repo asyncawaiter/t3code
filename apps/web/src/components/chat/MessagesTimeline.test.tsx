@@ -147,6 +147,26 @@ let MessagesTimeline: typeof import("./MessagesTimeline").MessagesTimeline;
 let resolvePreviewAnnotationImage: typeof import("./MessagesTimeline").resolvePreviewAnnotationImage;
 
 const ElementStub = class ElementStub {};
+const HTMLElementStub = class HTMLElementStub extends ElementStub {};
+// Base UI's buttons check `instanceof HTMLElement` when they mount, but a defined HTMLElement
+// makes some modules register custom elements on load, so it only appears after the import.
+let timelineModuleLoaded = false;
+
+/**
+ * The collapsed disclosure toggle. The fork's "Fork this chat" menu trigger also carries
+ * aria-expanded, so it is skipped; the host element wins over the component wrapping it.
+ */
+function findCollapsedToggle(renderer: ReactTestRenderer) {
+  const candidates = renderer.root.findAll(
+    (node) =>
+      node.props["aria-expanded"] === false &&
+      node.props["aria-haspopup"] === undefined &&
+      node.props["aria-label"] !== "Fork this chat",
+  );
+  const toggle = candidates.find((node) => typeof node.type === "string") ?? candidates[0];
+  if (!toggle) throw new Error("No collapsed toggle rendered");
+  return toggle;
+}
 
 function stubDomGlobals() {
   const classList = {
@@ -157,6 +177,7 @@ function stubDomGlobals() {
   };
 
   vi.stubGlobal("Element", ElementStub);
+  if (timelineModuleLoaded) vi.stubGlobal("HTMLElement", HTMLElementStub);
   vi.stubGlobal("localStorage", {
     getItem: () => null,
     setItem: () => {},
@@ -165,6 +186,7 @@ function stubDomGlobals() {
   });
   vi.stubGlobal("window", {
     Element: ElementStub,
+    ...(timelineModuleLoaded ? { HTMLElement: HTMLElementStub } : {}),
     matchMedia,
     addEventListener: () => {},
     removeEventListener: () => {},
@@ -186,6 +208,8 @@ function stubDomGlobals() {
 beforeAll(async () => {
   stubDomGlobals();
   ({ MessagesTimeline, resolvePreviewAnnotationImage } = await import("./MessagesTimeline"));
+  timelineModuleLoaded = true;
+  stubDomGlobals();
 }, 30_000);
 
 // The scroll-settling test clears every global stub; mounted timeline rows
@@ -456,7 +480,7 @@ describe("MessagesTimeline", () => {
         });
         // The user scrolled up to read, so the composer is resting.
         await act(() => composerState!.setIsComposerScrollCollapsed(true));
-        const toggle = renderer!.root.findByProps({ "aria-expanded": false });
+        const toggle = findCollapsedToggle(renderer!);
         await act(() => toggle.props.onClick());
         await flushFrame();
         await flushFrame();
@@ -1719,7 +1743,7 @@ describe("MessagesTimeline", () => {
             />,
           );
         });
-        await act(() => renderer!.root.findByProps({ "aria-expanded": false }).props.onClick());
+        await act(() => findCollapsedToggle(renderer!).props.onClick());
         const text = renderer!.root.findByProps({
           className: "relative min-w-0 flex-1 truncate text-secondary-label",
         });
@@ -2193,7 +2217,7 @@ describe("MessagesTimeline", () => {
           />,
         );
       });
-      await act(() => renderer!.root.findByProps({ "aria-expanded": false }).props.onClick());
+      await act(() => findCollapsedToggle(renderer!).props.onClick());
       const label = renderer!.root.findAll(
         (node) => node.type === "span" && String(node.props.className).includes("select-text"),
       )[0];
