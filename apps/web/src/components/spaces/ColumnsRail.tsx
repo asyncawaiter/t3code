@@ -1,5 +1,7 @@
 import { randomUUID } from "../../lib/utils";
 import { requestComposerFocus } from "../../lib/composerFocusRequest";
+import { recentChatTarget } from "../../lib/recentChats";
+import { isPreviewFocused } from "../../lib/previewFocus";
 import { takeColumnsReturn } from "../../lib/columnsReturn";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { openCommandPalette } from "../../commandPaletteBus";
@@ -7,7 +9,7 @@ import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
 import { useEnvironments } from "../../state/environments";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { useChatBoards } from "../../hooks/useChatBoards";
-import { spaceColumnsNavigation } from "./columnNavigation";
+import { spaceColumnsNavigation, useColumnNavigation } from "./columnNavigation";
 import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
 import { Input } from "../ui/input";
 import { ChatModeSwitch } from "./ChatModeSwitch";
@@ -155,6 +157,45 @@ export function ColumnsRail() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [profiles, keybindings, navigate, browsing, boards.boards, bookmark, openThread, router]);
+  // Cmd+L (back to the last chat) and Cmd+I (add existing chat) listen in the
+  // capture phase so they also work from the composer, whose rich-text editor
+  // would otherwise take Cmd+I as italic.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        browsing ||
+        event.repeat ||
+        isCommandPaletteOpen() ||
+        isModelPickerOpen() ||
+        document.querySelector('[role="dialog"][aria-modal="true"]')
+      )
+        return;
+      const command = resolveShortcutCommand(event, keybindings, {
+        platform: navigator.platform,
+        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
+      });
+      if (command === "columns.recentChat") {
+        const target = recentChatTarget();
+        if (!target) return;
+        event.preventDefault();
+        event.stopPropagation();
+        requestComposerFocus(target);
+        openThread(target);
+        return;
+      }
+      if (command === "columns.addExistingChat") {
+        event.preventDefault();
+        event.stopPropagation();
+        // The picker adds to a board; from anywhere else, go to the current board first.
+        const onBoard = router.state.location.search.workspace === "board";
+        const board = boards.boards.find((item) => item.id === boards.selected) ?? boards.boards[0];
+        if (!onBoard && board) visitBoard(board.id);
+        useColumnNavigation.setState({ choosing: true });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  });
   return (
     <aside
       aria-label="Columns navigation"

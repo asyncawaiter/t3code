@@ -83,6 +83,8 @@ interface RightPanelTabsProps {
   defaultWidth?: number;
   /** Forwarded to PreviewPanelShell: the panel widens its board column. */
   growsColumn?: boolean;
+  /** False when the panel is not at the top of the window, so it is not a title bar. */
+  atWindowTop?: boolean;
   layoutControls?: ReactNode;
   surfaces: readonly RightPanelSurface[];
   /** Fallback environment for surfaces that do not carry their own. */
@@ -819,7 +821,10 @@ function PullRequestSurfaceIcon({
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
-  const ownsDesktopTitleBar = isElectron && props.mode === "inline";
+  // Inline beside a chat at the top of the window, the tab bar doubles as the
+  // window's title bar. Inside the columns view it sits mid-window, where a drag
+  // region would swallow clicks on the layout controls floating over it.
+  const ownsDesktopTitleBar = isElectron && props.mode === "inline" && props.atWindowTop !== false;
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);

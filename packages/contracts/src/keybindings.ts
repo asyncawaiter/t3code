@@ -61,6 +61,8 @@ export const COLUMNS_KEYBINDING_COMMANDS = [
   "columns.focusSavedChat",
   "columns.spaceDashboard",
   "columns.spaceColumns",
+  "columns.recentChat",
+  "columns.addExistingChat",
 ] as const;
 
 export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [

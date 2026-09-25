@@ -13,8 +13,8 @@ const ColumnsPanelPlacementSchema = Schema.Literals(["side", "column"]);
 
 export function useColumnsPanelPlacement() {
   return useLocalStorage<ColumnsPanelPlacement, ColumnsPanelPlacement>(
-    "t3code:columns-panel-placement",
-    "side",
+    "t3code:columns-panel-placement:v2",
+    "column",
     ColumnsPanelPlacementSchema,
   );
 }

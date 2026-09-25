@@ -99,6 +99,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+f", command: "columns.focusSavedChat", when: "columnsRail && !terminalFocus" },
   { key: "mod+o", command: "columns.spaceDashboard", when: "columnsRail && !terminalFocus" },
   { key: "mod+p", command: "columns.spaceColumns", when: "columnsRail && !terminalFocus" },
+  {
+    key: "mod+l",
+    command: "columns.recentChat",
+    when: "columnsRail && !terminalFocus && !previewFocus",
+  },
+  { key: "mod+i", command: "columns.addExistingChat", when: "columnsRail && !terminalFocus" },
 ];
 
 function normalizeKeyToken(token: string): string {

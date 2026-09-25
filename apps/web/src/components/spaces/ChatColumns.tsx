@@ -105,6 +105,7 @@ import { useEnvironments } from "../../state/environments";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { ChatPaneContext } from "../chat/ChatPaneContext";
+import { Spinner } from "../ui/spinner";
 import { useSidePanelInset } from "./columnsPanel";
 import { useProjects } from "../../state/entities";
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -137,7 +138,10 @@ type ColumnChat = Pick<
   | "latestTurn"
 > &
   Partial<
-    Pick<EnvironmentThreadShell, "branch" | "worktreePath" | "updatedAt" | "snoozedUntil">
+    Pick<
+      EnvironmentThreadShell,
+      "branch" | "worktreePath" | "updatedAt" | "snoozedUntil" | "titleRegeneration"
+    >
   > & {
     draftId?: DraftId;
   };
@@ -1871,6 +1875,26 @@ function Column({
   columnActions: React.ReactNode;
 }) {
   const reviewedAt = useWorkflowState((state) => state.reviewed[keyOf(chat)]);
+  // The server finishes a regeneration without a title when the title model
+  // fails (or repeats the old title), so say so instead of looking like a no-op.
+  const regeneratingTitle = chat.titleRegeneration != null;
+  const regenerationStartTitle = useRef<string | null>(null);
+  useEffect(() => {
+    if (regeneratingTitle) {
+      regenerationStartTitle.current ??= chat.title;
+      return;
+    }
+    const startTitle = regenerationStartTitle.current;
+    regenerationStartTitle.current = null;
+    if (startTitle !== null && startTitle === chat.title) {
+      toastManager.add({
+        type: "warning",
+        title: "Title unchanged",
+        description:
+          "The title model could not produce a new title. Check its provider in Settings > Models, or rename the chat yourself.",
+      });
+    }
+  }, [regeneratingTitle, chat.title]);
   const statusLabel = columnStatus(chat, reviewedAt);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
@@ -2033,14 +2057,18 @@ function Column({
               <TooltipPopup>{chat.draftId ? chat.title : "Click to rename chat"}</TooltipPopup>
             </Tooltip>
           )}
+          {regeneratingTitle ? (
+            <Spinner
+              aria-label="Regenerating title"
+              className={`size-3.5 shrink-0 text-muted-foreground ${expanded ? "order-1" : ""}`}
+            />
+          ) : null}
           <div className={`flex shrink-0 items-center gap-1 ${expanded ? "order-5" : ""}`}>
             {children}
           </div>
         </div>
         <div
-          className={
-            expanded ? "contents" : "flex min-h-7 items-center justify-between gap-2"
-          }
+          className={expanded ? "contents" : "flex min-h-7 items-center justify-between gap-2"}
           aria-label="Chat status and review"
         >
           <div
