@@ -1020,3 +1020,28 @@ it("keeps overall and model-scoped quotas distinguishable in compact composers",
     ].map(compactUsageWindowLabel),
   ).toEqual(["5h", "Overall", "Fable", "Extra usage"]);
 });
+
+describe("collectLimitAccounts after a failed refresh", () => {
+  it("keeps showing the last reading instead of dropping the device's account", () => {
+    const failed = provider({
+      auth: { status: "authenticated", email: "me@example.com" },
+      usageLimits: {
+        checkedAt: "2026-09-03T11:00:00.000Z",
+        windows: [window],
+        unavailable: { reason: "probeFailed", message: "Rate limited (429)." },
+      },
+    });
+    const input = new Map([
+      [
+        EnvironmentId.make("godel"),
+        { entry: { target: { label: "godel" } }, serverConfig: { providers: [failed] } },
+      ],
+    ]);
+    const [account] = collectLimitAccounts(input);
+    expect(account?.environments.map((entry) => entry.label)).toEqual(["godel"]);
+    expect(account?.limits.windows).toHaveLength(1);
+    expect(collectLimitNotices(input)).toEqual([
+      "codex: Couldn't refresh (Rate limited (429).). Showing the last reading.",
+    ]);
+  });
+});

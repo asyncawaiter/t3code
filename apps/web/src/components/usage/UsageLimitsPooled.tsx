@@ -8,7 +8,6 @@ import {
   type LimitPool,
   type LimitPoolMember,
   type LimitPoolWindow,
-  remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { AlertTriangleIcon, MonitorIcon, TicketIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -31,6 +30,7 @@ import {
   barColor,
   resetCreditsSummary,
   useResetCredit,
+  usedPercentOf,
 } from "./UsageLimits";
 
 /** `someone@example.com` → `SE`: enough to tell accounts apart, too little to identify one. */
@@ -150,7 +150,7 @@ function SegmentPopover({
   readonly onRedeem: () => void;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const remaining = remainingPercent(window);
+  const used = usedPercentOf(window);
   const resetsIn = formatResetsIn(window, now);
   const where =
     account.environments.length > 0
@@ -184,7 +184,7 @@ function SegmentPopover({
         ) : null}
       </div>
       <div className="flex flex-col gap-1 border-t border-border/60 pt-2.5">
-        <Row label="Left">{remaining}%</Row>
+        <Row label="Used">{used}%</Row>
         {window.resetsAt ? (
           <Row label="Resets">
             {formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)}
@@ -192,7 +192,7 @@ function SegmentPopover({
           </Row>
         ) : null}
         {reset && reset.restoresPercent > 0 ? (
-          <Row label="Restores">+{reset.restoresPercent}% of pool</Row>
+          <Row label="Frees">{reset.restoresPercent}% of pool</Row>
         ) : null}
       </div>
       {credits && redeem ? (
@@ -237,7 +237,7 @@ function PoolSegment({
   readonly index: number;
 }) {
   const [open, setOpen] = useState(false);
-  const remaining = remainingPercent(window);
+  const used = usedPercentOf(window);
   const resetsIn = formatResetsIn(window, now);
   const credits = account.limits.resetCredits?.availableCount ?? 0;
   return (
@@ -248,26 +248,17 @@ function PoolSegment({
           <button
             type="button"
             style={{ gridColumn: index, gridRow: 1 }}
-            aria-label={`${account.displayName ?? (account.email ? accountInitials(account.email) : account.driver)}: ${remaining}% left${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
-            className="relative h-5 min-w-0 cursor-pointer overflow-hidden rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[popup-open]:ring-1 data-[popup-open]:ring-border @2xl/pool:h-8"
+            aria-label={`${account.displayName ?? (account.email ? accountInitials(account.email) : account.driver)}: ${used}% used${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
+            className="relative h-5 min-w-0 cursor-pointer overflow-hidden rounded-md border border-foreground/10 bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[popup-open]:ring-1 data-[popup-open]:ring-border @2xl/pool:h-8"
           />
         }
       >
-        {/* Translucent so the label reads over the fill for any provider colour and theme. */}
-        <div
-          aria-hidden
-          className="absolute inset-y-0 left-0 rounded-md opacity-35"
-          style={{ width: `${remaining}%`, backgroundColor: color }}
-        />
-        {/* The spent share is hatched, not blank: it is what the countdown restores. */}
-        {remaining < 100 && reset ? (
+        {/* The used share fills from the left; translucent so the label reads over any colour. */}
+        {used > 0 ? (
           <div
             aria-hidden
-            className="absolute inset-y-0 right-0 opacity-20"
-            style={{
-              width: `${100 - remaining}%`,
-              backgroundImage: `repeating-linear-gradient(135deg, ${color} 0 1px, transparent 1px 5px)`,
-            }}
+            className="absolute inset-y-0 left-0 rounded-md opacity-45"
+            style={{ width: `${used}%`, backgroundColor: color }}
           />
         ) : null}
         <span
@@ -278,7 +269,7 @@ function PoolSegment({
         </span>
         <div className="relative hidden h-full min-w-0 items-center gap-1.5 px-2 text-xs @2xl/pool:flex">
           <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />
-          <span className="shrink-0 font-semibold text-foreground tabular-nums">{remaining}%</span>
+          <span className="shrink-0 font-semibold text-foreground tabular-nums">{used}% used</span>
           {/* Countdown and badge get their own plate: fill and hatching run under them otherwise. */}
           <span className="ms-auto flex shrink-0 items-center gap-1.5 rounded-sm bg-background/85 px-1.5 py-0.5 text-[11px] text-foreground tabular-nums">
             {resetsIn?.replace("resets in ", "↻ ") ?? ""}
@@ -342,7 +333,7 @@ function LegendRow({
   readonly now: number;
   readonly index: number;
 }) {
-  const remaining = remainingPercent(window);
+  const used = usedPercentOf(window);
   const resetsIn = formatResetsIn(window, now);
   const credits = account.limits.resetCredits?.availableCount ?? 0;
   return (
@@ -360,7 +351,7 @@ function LegendRow({
         <span className="relative">{index}</span>
       </span>
       <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />
-      <span className="shrink-0 font-semibold text-foreground tabular-nums">{remaining}%</span>
+      <span className="shrink-0 font-semibold text-foreground tabular-nums">{used}% used</span>
       <span className="ms-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground tabular-nums">
         {resetsIn?.replace("resets in ", "↻ ") ?? ""}
         {credits ? (
@@ -489,18 +480,18 @@ function PoolWindowCard({
   // The soonest reset that hands anything back; an untouched account resets to no effect.
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
   return (
-    <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)]">
+    <div className="surface-raised-sm grid items-center gap-x-8 gap-y-3 rounded-xl p-5 md:grid-cols-[12rem_minmax(0,1fr)]">
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium text-foreground">{pool.label}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold text-foreground tabular-nums">
-            {pool.remainingPercent}%
+            {100 - pool.remainingPercent}%
           </span>
-          <span className="text-sm text-muted-foreground">left</span>
+          <span className="text-sm text-muted-foreground">used</span>
         </span>
         {nextRefill ? (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            <span className="font-medium text-foreground">↻ +{nextRefill.restoresPercent}%</span>{" "}
+          <span className="text-xs text-foreground/65 tabular-nums">
+            Frees <span className="font-medium text-foreground">{nextRefill.restoresPercent}%</span>{" "}
             {nextRefill.at <= now ? "now" : `in ${formatDuration(nextRefill.at - now)}`}
           </span>
         ) : null}
@@ -568,7 +559,7 @@ export function UsageLimitsPooled({
         </ToggleGroup>
         {view === "pooled" && (
           <p className="text-xs text-muted-foreground">
-            Weighted capacity across accounts. Each account keeps its own limits.
+            Usage weighted across accounts. Each account keeps its own limits.
           </p>
         )}
       </div>
@@ -594,9 +585,9 @@ export function UsageLimitsPooled({
             return (
               <section
                 key={account.key}
-                className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card"
+                className="surface-raised-sm min-w-0 overflow-hidden rounded-xl"
               >
-                <div className="flex flex-col gap-2 border-b border-border/60 bg-muted/20 px-4 py-3.5">
+                <div className="surface-lid flex flex-col gap-2 px-5 py-4">
                   <div className="flex items-center gap-2.5">
                     <AccountAvatar account={account} />
                     <h2 className="min-w-0 flex-1 text-sm">
@@ -622,16 +613,21 @@ export function UsageLimitsPooled({
                     </div>
                   )}
                 </div>
-                <div className="p-4">
+                <div className="px-5 py-4">
                   <LimitWindows
                     driver={account.driver}
                     windows={account.limits.windows}
                     now={now}
-                    used
                     cards
                   />
                 </div>
-                <div className="flex flex-col gap-3 border-t border-border/60 bg-muted/10 px-4 py-3">
+                <div className="flex flex-col gap-3 border-t border-border px-5 py-3">
+                  {account.limits.unavailable?.reason === "probeFailed" && (
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                      <AlertTriangleIcon aria-hidden className="size-3.5 shrink-0" />
+                      Couldn't refresh, showing the last reading
+                    </p>
+                  )}
                   <p
                     className={cn(
                       "text-[11px] text-muted-foreground",

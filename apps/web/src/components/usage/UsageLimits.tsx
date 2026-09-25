@@ -8,7 +8,14 @@ import {
   UsageProviderKind,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { formatDuration, formatResetsIn, remainingPercent } from "@t3tools/shared/usageLimits";
+import { AlertTriangleIcon, TrendingUpIcon } from "lucide-react";
+import {
+  elapsedShare,
+  formatDuration,
+  formatResetsIn,
+  paceOf,
+  remainingPercent,
+} from "@t3tools/shared/usageLimits";
 import { Fragment, useRef, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -37,26 +44,40 @@ export function barColor(driver: ServerProvider["driver"]): string {
   return kind ? PROVIDER_PRESENTATION[kind].color : "var(--foreground)";
 }
 
-/** Quota used or remaining, with the exact reset time on focus or hover. */
+/** Share of the quota used, 0..100. Everything on the usage screens reads as used. */
+export function usedPercentOf(window: ServerProviderUsageWindow): number {
+  return 100 - remainingPercent(window);
+}
+
+const NEAR_LIMIT_PERCENT = 90;
+
+const PACE_LABEL = {
+  ahead: "Ahead of pace",
+  on: "On pace",
+  under: "Under pace",
+} as const;
+
+/**
+ * Quota used, filling left to right. A thin tick marks how much of the window has elapsed,
+ * so a fill past the tick means spending faster than the window refills.
+ */
 function WindowBar({
   color,
   window,
   now,
-  used = false,
 }: {
-  readonly used?: boolean;
   readonly color: string;
   readonly window: ServerProviderUsageWindow;
   readonly now: number;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const remaining = used ? 100 - remainingPercent(window) : remainingPercent(window);
-  const unit = used ? "used" : "left";
+  const used = usedPercentOf(window);
+  const elapsed = elapsedShare(window, now);
   const resetsIn = formatResetsIn(window, now);
   const resetsAt = window.resetsAt
     ? formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)
     : null;
-  const summary = `${window.label}: ${remaining}% ${unit}${resetsIn ? `, ${resetsIn}` : ""}`;
+  const summary = `${window.label}: ${used}% used${resetsIn ? `, ${resetsIn}` : ""}`;
 
   return (
     <Tooltip>
@@ -66,23 +87,33 @@ function WindowBar({
             role="img"
             aria-label={summary}
             tabIndex={0}
-            className="relative h-6 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="relative h-4 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           />
         }
       >
-        <div className="absolute inset-x-0 inset-y-1.5 rounded-full bg-muted" />
-        {remaining > 0 ? (
+        <div className="absolute inset-x-0 inset-y-1 rounded-full border border-foreground/10 bg-muted" />
+        {used > 0 ? (
           <div
-            className="absolute inset-y-1.5 left-0 rounded-full"
-            style={{ width: `${remaining}%`, backgroundColor: color }}
+            className="absolute inset-y-1 left-0 rounded-full"
+            style={{ width: `${Math.max(used, 2)}%`, backgroundColor: color }}
+          />
+        ) : null}
+        {elapsed !== null ? (
+          <div
+            aria-hidden
+            className="absolute inset-y-0 w-0.5 -translate-x-1/2 rounded-full bg-foreground/60"
+            style={{ left: `${elapsed * 100}%` }}
           />
         ) : null}
       </TooltipTrigger>
       <TooltipPopup side="top" className="max-w-72 text-xs">
         <div className="flex flex-col gap-0.5">
-          <span className="text-foreground">
-            {remaining}% {unit}
-          </span>
+          <span className="text-foreground">{used}% used</span>
+          {elapsed !== null ? (
+            <span className="text-muted-foreground">
+              {Math.round(elapsed * 100)}% of the window has passed (the tick)
+            </span>
+          ) : null}
           {resetsAt ? (
             <span className="text-muted-foreground">
               Resets {resetsAt}
@@ -95,8 +126,41 @@ function WindowBar({
   );
 }
 
+/** "Near limit" or the pace against the clock, as text with an icon rather than color. */
+function WindowStatus({
+  window,
+  now,
+}: {
+  readonly window: ServerProviderUsageWindow;
+  readonly now: number;
+}) {
+  const used = usedPercentOf(window);
+  if (used >= NEAR_LIMIT_PERCENT) {
+    return (
+      <span className="inline-flex items-center gap-1 font-medium text-foreground">
+        <AlertTriangleIcon aria-hidden className="size-3.5" />
+        Near limit
+      </span>
+    );
+  }
+  const pace = paceOf(window, now);
+  if (!pace) return null;
+  return (
+    <span
+      className={
+        pace === "ahead"
+          ? "inline-flex items-center gap-1 font-medium text-foreground"
+          : "inline-flex items-center gap-1"
+      }
+    >
+      {pace === "ahead" ? <TrendingUpIcon aria-hidden className="size-3.5" /> : null}
+      {PACE_LABEL[pace]}
+    </span>
+  );
+}
+
 /**
- * One account's windows as rows: label and percent, bar and countdown.
+ * One account's windows as rows: label and percent used, bar and countdown.
  * Compact rows fit the composer panel with narrower columns.
  */
 export function LimitWindows({
@@ -104,11 +168,9 @@ export function LimitWindows({
   windows,
   now,
   compact = false,
-  used = false,
   cards = false,
 }: {
   readonly cards?: boolean;
-  readonly used?: boolean;
   readonly driver: ServerProvider["driver"];
   readonly windows: ReadonlyArray<ServerProviderUsageWindow>;
   readonly now: number;
@@ -117,26 +179,27 @@ export function LimitWindows({
   const color = barColor(driver);
   if (cards)
     return (
-      <div className="flex flex-col divide-y divide-border/50">
-        {windows.map((window) => {
-          return (
-            <div key={window.id} className="py-3 first:pt-0 last:pb-0">
-              <div className="flex items-baseline justify-between gap-3 text-sm">
-                <span className="min-w-0 font-medium">{window.label}</span>
-                <span className="shrink-0 tabular-nums">
-                  <strong className="text-base font-semibold">
-                    {used ? 100 - remainingPercent(window) : remainingPercent(window)}%
-                  </strong>{" "}
-                  <span className="text-xs text-muted-foreground">{used ? "used" : "left"}</span>
-                </span>
-              </div>
-              <WindowBar color={color} window={window} now={now} used={used} />
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>{formatResetsIn(window, now) ?? "Reset time unavailable"}</span>
-              </div>
+      <div className="flex flex-col divide-y divide-border">
+        {windows.map((window) => (
+          <div key={window.id} className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="min-w-0 text-sm font-medium text-foreground">{window.label}</span>
+              <span className="shrink-0 tabular-nums">
+                <strong className="text-xl font-semibold text-foreground">
+                  {usedPercentOf(window)}%
+                </strong>{" "}
+                <span className="text-[13px] text-muted-foreground">used</span>
+              </span>
             </div>
-          );
-        })}
+            <WindowBar color={color} window={window} now={now} />
+            <div className="flex items-center justify-between gap-3 text-xs text-foreground/65 tabular-nums">
+              <WindowStatus window={window} now={now} />
+              <span className="ms-auto">
+                {formatResetsIn(window, now) ?? "Reset time unavailable"}
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
     );
   return (
@@ -154,11 +217,10 @@ export function LimitWindows({
             <span className="flex min-w-0 items-center gap-2 text-xs">
               <span className="truncate text-muted-foreground">{window.label}</span>
               <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
-                {used ? 100 - remainingPercent(window) : remainingPercent(window)}%{" "}
-                {used ? "used" : "left"}
+                {usedPercentOf(window)}% used
               </span>
             </span>
-            <WindowBar color={color} window={window} now={now} used={used} />
+            <WindowBar color={color} window={window} now={now} />
             <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
               <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>
             </span>

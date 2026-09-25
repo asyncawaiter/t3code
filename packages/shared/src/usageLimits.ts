@@ -158,7 +158,14 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
   for (const [environmentId, presentation] of presentations) {
     const label = presentation.entry.target.label;
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
-      if (!provider.usageLimits || limitsNotice(provider.usageLimits) !== null) continue;
+      // A failed refresh keeps the last good windows, so the account still shows with them;
+      // only an account with nothing to show, or none to report, is left out.
+      if (
+        !provider.usageLimits ||
+        provider.usageLimits.windows.length === 0 ||
+        provider.usageLimits.unavailable?.reason === "unsupported"
+      )
+        continue;
       merge(
         accountKey(provider.driver, provider.auth.email) ??
           `${environmentId}:${provider.instanceId}`,
@@ -233,7 +240,14 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
       if (provider.usageLimits?.unavailable?.reason === "unsupported") continue;
       const notice = provider.usageLimits ? limitsNotice(provider.usageLimits) : null;
       const name = provider.displayName?.trim() || String(provider.driver);
-      if (notice) notices.push(`${label(environmentLabel, name)}: ${notice}`);
+      const stale = (provider.usageLimits?.windows.length ?? 0) > 0;
+      if (notice) {
+        notices.push(
+          stale
+            ? `${label(environmentLabel, name)}: Couldn't refresh (${notice}). Showing the last reading.`
+            : `${label(environmentLabel, name)}: ${notice}`,
+        );
+      }
     }
     for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
       if (source.error) {
