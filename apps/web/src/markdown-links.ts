@@ -24,6 +24,8 @@ export interface MarkdownFileLinkMeta {
   targetPath: string;
   displayPath: string;
   workspaceRelativePath: string | null;
+  /** The author wrote a relative path, so it may be short (`lib/x.ts`) and worth looking up. */
+  writtenRelative: boolean;
   basename: string;
   line?: number;
   column?: number;
@@ -103,16 +105,27 @@ export function resolveMarkdownFileLinkMeta(
 ): MarkdownFileLinkMeta | null {
   const targetPath = resolveMarkdownFileLinkTarget(href, cwd, baseDir);
   if (!targetPath) return null;
-  return buildFileLinkMetaFromTarget(targetPath, cwd);
+  const written = href ? parseMarkdownFileLink(href) : null;
+  const writtenPath = written ? formatFilePathPosition(written) : "";
+  return buildFileLinkMetaFromTarget(
+    targetPath,
+    cwd,
+    isRelativeFilePath(writtenPath) && !writtenPath.startsWith("~/"),
+  );
 }
 
-function buildFileLinkMetaFromTarget(targetPath: string, cwd?: string): MarkdownFileLinkMeta {
+function buildFileLinkMetaFromTarget(
+  targetPath: string,
+  cwd: string | undefined,
+  writtenRelative: boolean,
+): MarkdownFileLinkMeta {
   const { path, line, column } = splitFilePathPosition(targetPath);
   return {
     filePath: path,
     targetPath,
     displayPath: formatWorkspaceRelativePath(targetPath, cwd),
     workspaceRelativePath: workspaceRelativeFilePath(path, cwd),
+    writtenRelative,
     basename: fileBasename(path),
     ...(line !== undefined ? { line } : {}),
     ...(column !== undefined ? { column } : {}),

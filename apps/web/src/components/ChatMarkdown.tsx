@@ -49,7 +49,10 @@ import {
   classifyMarkdownImageSource,
   markdownImageSourceFragment,
 } from "@t3tools/client-runtime/markdown-images";
-import { inlineCodeFilePathCandidate } from "@t3tools/client-runtime/markdown-links";
+import {
+  formatFilePathPosition,
+  inlineCodeFilePathCandidate,
+} from "@t3tools/client-runtime/markdown-links";
 import { mediaFileReference, mediaUrlReference } from "@t3tools/client-runtime/media-reference";
 import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@t3tools/shared/filePreview";
 import * as Cause from "effect/Cause";
@@ -162,7 +165,7 @@ import { useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
 import { useRemoteOpenResolution, type RemoteOpenMode } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
-import { readThreadShell, useProjects } from "../state/entities";
+import { readThreadDetail, readThreadShell, useProjects } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { shellEnvironment } from "../state/shell";
 import { assetEnvironment } from "../state/assets";
@@ -172,11 +175,11 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { projectEnvironment } from "../state/projects";
 import {
-  claimWorkspaceBasenameLookup,
-  needsWorkspaceBasenameLookup,
-  pickWorkspaceBasenameMatch,
-  WORKSPACE_BASENAME_LOOKUP_LIMIT,
-} from "../workspaceBasenameLookup";
+  claimWorkspaceFileLookup,
+  matchWorkspaceFile,
+  WORKSPACE_FILE_CHOICE_LIMIT,
+  WORKSPACE_FILE_LOOKUP_LIMIT,
+} from "../workspaceFileLookup";
 import {
   findProjectForChangeRequest,
   parseChangeRequestUrl,
@@ -1139,21 +1142,89 @@ interface MarkdownFileLinkProps {
   /** What the files panel opens: workspace-relative inside the workspace, the
       absolute host path outside it, null when the panel cannot show the file. */
   panelPath: string | null;
+  /** The link as written, relative to the workspace; null outside it. */
+  workspaceRelativePath: string | null;
+  writtenRelative: boolean;
   line?: number | undefined;
+  column?: number | undefined;
   label: string;
   copyMarkdown: string;
   theme: "light" | "dark";
   threadRef?: ScopedThreadRef | undefined;
   onOpen?: ((targetPath: string) => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
+  /** Finds the file the link means before any action; null when the reader cancelled. */
+  resolveFileLink: (link: FileLinkTarget, position: MenuPosition) => Promise<FileLinkTarget | null>;
   openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenMedia?: (() => void) | undefined;
-  onReveal?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
+  onReveal?: ((filePath: string) => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   /** Platform-specific menu label ("Reveal in Finder", ...); required for the
       reveal item to show. */
   revealLabel?: string | undefined;
   className?: string | undefined;
+}
+
+interface FileLinkTarget {
+  readonly filePath: string;
+  readonly targetPath: string;
+  readonly workspaceRelativePath: string | null;
+  /** Only a relative link can be a shortened path; a full path opens as written. */
+  readonly writtenRelative: boolean;
+  readonly line?: number | undefined;
+  readonly column?: number | undefined;
+}
+
+type MenuPosition = { x: number; y: number };
+
+function eventMenuPosition(event: ReactMouseEvent<HTMLElement>): MenuPosition {
+  if (event.clientX !== 0 || event.clientY !== 0) return { x: event.clientX, y: event.clientY };
+  // Keyboard activation has no pointer; anchor under the link instead.
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return { x: bounds.left, y: bounds.bottom };
+}
+
+/** Lists the files a link could mean and returns the one the reader picks. */
+async function chooseWorkspaceFile(
+  paths: ReadonlyArray<string>,
+  position: MenuPosition,
+): Promise<string | null> {
+  const api = readLocalApi();
+  if (!api) return null;
+  const shown = paths.slice(0, WORKSPACE_FILE_CHOICE_LIMIT);
+  const hidden = paths.length - shown.length;
+  const picked = await api.contextMenu.show(
+    [
+      { id: "title", label: "Several files match. Open which?", disabled: true },
+      ...shown.map((path, index) => ({ id: `file:${index}`, label: path })),
+      ...(hidden > 0 ? [{ id: "more", label: `${hidden} more not shown`, disabled: true }] : []),
+    ],
+    position,
+  );
+  return picked?.startsWith("file:") ? (shown[Number(picked.slice(5))] ?? null) : null;
+}
+
+/**
+ * Whether the agent's tool calls in this thread name a workspace file, by its
+ * absolute path or as an exact relative string (a bare substring would let
+ * `src/foo.ts` claim `apps/web/src/foo.ts`). Read from the store only when a link
+ * is ambiguous, so rendering never pays for it.
+ * ponytail: stringifies the whole activity log once per ambiguous click; index the paths if threads get huge.
+ */
+function threadMentionsPath(
+  threadRef: ScopedThreadRef | undefined,
+  cwd: string,
+): (path: string) => boolean {
+  let text: string | null = null;
+  return (path) => {
+    text ??= threadRef
+      ? JSON.stringify(readThreadDetail(threadRef)?.activities.map((a) => a.payload) ?? [])
+      : "";
+    return (
+      text.includes(JSON.stringify(resolvePathLinkTarget(path, cwd))) ||
+      text.includes(JSON.stringify(path))
+    );
+  };
 }
 
 const MARKDOWN_FILE_CHIP_CLASS_NAME = "chat-markdown-file-link";
@@ -1880,13 +1951,17 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   iconPath,
   displayPath,
   panelPath,
+  workspaceRelativePath,
+  writtenRelative,
   line,
+  column,
   label,
   copyMarkdown,
   theme,
   threadRef,
   onOpen,
   onOpenInPanel,
+  resolveFileLink,
   openInEditorMenuLabel,
   onOpenInBrowser,
   onOpenMedia,
@@ -1894,55 +1969,74 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   revealLabel,
   className,
 }: MarkdownFileLinkProps) {
-  const handleOpenInEditor = useCallback(() => {
-    if (!onOpen) {
-      return;
-    }
-    void (async () => {
-      try {
-        const result = await onOpen(targetPath);
-        if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
-          return;
-        }
-        reportMarkdownActionFailure(
-          { operation: "open-file-in-editor", target: targetPath },
-          result.cause,
-        );
-        const error = squashAtomCommandFailure(result);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Unable to open file",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      } catch (cause) {
-        reportMarkdownActionFailure(
-          { operation: "open-file-in-editor", target: targetPath },
-          cause,
-        );
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Unable to open file",
-            description: cause instanceof Error ? cause.message : "An error occurred.",
-          }),
-        );
-      }
-    })();
-  }, [onOpen, targetPath]);
+  const resolve = useCallback(
+    (position: MenuPosition) =>
+      resolveFileLink(
+        { filePath: iconPath, targetPath, workspaceRelativePath, writtenRelative, line, column },
+        position,
+      ),
+    [column, iconPath, line, resolveFileLink, targetPath, workspaceRelativePath, writtenRelative],
+  );
 
-  const handleOpenInFilePreview = useCallback(() => {
-    if (threadRef && panelPath) {
-      onOpenInPanel(panelPath, line);
-      return;
-    }
-    if (onOpenMedia) {
-      onOpenMedia();
-      return;
-    }
-    handleOpenInEditor();
-  }, [handleOpenInEditor, line, onOpenInPanel, onOpenMedia, panelPath, threadRef]);
+  const handleOpenInEditor = useCallback(
+    (position: MenuPosition) => {
+      if (!onOpen) {
+        return;
+      }
+      void (async () => {
+        try {
+          const resolved = await resolve(position);
+          if (!resolved) return;
+          const result = await onOpen(resolved.targetPath);
+          if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
+            return;
+          }
+          reportMarkdownActionFailure(
+            { operation: "open-file-in-editor", target: targetPath },
+            result.cause,
+          );
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Unable to open file",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        } catch (cause) {
+          reportMarkdownActionFailure(
+            { operation: "open-file-in-editor", target: targetPath },
+            cause,
+          );
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Unable to open file",
+              description: cause instanceof Error ? cause.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [onOpen, resolve, targetPath],
+  );
+
+  const handleOpenInFilePreview = useCallback(
+    (position: MenuPosition) => {
+      if (threadRef && panelPath) {
+        void resolve(position).then((resolved) => {
+          if (resolved) onOpenInPanel(resolved.workspaceRelativePath ?? resolved.filePath, line);
+        });
+        return;
+      }
+      if (onOpenMedia) {
+        onOpenMedia();
+        return;
+      }
+      handleOpenInEditor(position);
+    },
+    [handleOpenInEditor, line, onOpenInPanel, onOpenMedia, panelPath, resolve, threadRef],
+  );
 
   const handleOpenInBrowser = useCallback(() => {
     if (!onOpenInBrowser) {
@@ -1982,43 +2076,48 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     })();
   }, [onOpenInBrowser, targetPath]);
 
-  const handleRevealInFileManager = useCallback(() => {
-    if (!onReveal) {
-      return;
-    }
-    void (async () => {
-      try {
-        const result = await onReveal();
-        if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
-          return;
-        }
-        reportMarkdownActionFailure(
-          { operation: "reveal-file-in-file-manager", target: targetPath },
-          result.cause,
-        );
-        const error = squashAtomCommandFailure(result);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Unable to reveal file",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      } catch (cause) {
-        reportMarkdownActionFailure(
-          { operation: "reveal-file-in-file-manager", target: targetPath },
-          cause,
-        );
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Unable to reveal file",
-            description: cause instanceof Error ? cause.message : "An error occurred.",
-          }),
-        );
+  const handleRevealInFileManager = useCallback(
+    (position: MenuPosition) => {
+      if (!onReveal) {
+        return;
       }
-    })();
-  }, [onReveal, targetPath]);
+      void (async () => {
+        try {
+          const resolved = await resolve(position);
+          if (!resolved) return;
+          const result = await onReveal(resolved.filePath);
+          if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
+            return;
+          }
+          reportMarkdownActionFailure(
+            { operation: "reveal-file-in-file-manager", target: targetPath },
+            result.cause,
+          );
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Unable to reveal file",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        } catch (cause) {
+          reportMarkdownActionFailure(
+            { operation: "reveal-file-in-file-manager", target: targetPath },
+            cause,
+          );
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Unable to reveal file",
+              description: cause instanceof Error ? cause.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [onReveal, resolve, targetPath],
+  );
 
   const handleCopy = useCallback(
     (value: string, title: string) => {
@@ -2084,7 +2183,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           return;
         }
         if (clicked === "open") {
-          handleOpenInEditor();
+          handleOpenInEditor(position);
           return;
         }
         if (clicked === "open-in-browser") {
@@ -2092,7 +2191,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           return;
         }
         if (clicked === "reveal") {
-          handleRevealInFileManager();
+          handleRevealInFileManager(position);
           return;
         }
         if (clicked === "copy-relative") {
@@ -2129,14 +2228,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     (event: ReactMouseEvent<HTMLElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      const position =
-        event.clientX === 0 && event.clientY === 0
-          ? (() => {
-              const bounds = event.currentTarget.getBoundingClientRect();
-              return { x: bounds.left, y: bounds.bottom };
-            })()
-          : { x: event.clientX, y: event.clientY };
-      void showFileContextMenu(position);
+      void showFileContextMenu(eventMenuPosition(event));
     },
     [showFileContextMenu],
   );
@@ -2173,15 +2265,16 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                const position = eventMenuPosition(event);
                 if (onOpen && shouldOpenMarkdownFileLinkInEditor(event)) {
-                  handleOpenInEditor();
+                  handleOpenInEditor(position);
                   return;
                 }
                 if (useBrowserPrimaryAction) {
                   handleOpenInBrowser();
                   return;
                 }
-                handleOpenInFilePreview();
+                handleOpenInFilePreview(position);
               }}
               onContextMenu={handleContextMenu}
             >
@@ -2231,7 +2324,11 @@ function areMarkdownFileLinkPropsEqual(
     previous.iconPath === next.iconPath &&
     previous.displayPath === next.displayPath &&
     previous.panelPath === next.panelPath &&
+    previous.workspaceRelativePath === next.workspaceRelativePath &&
+    previous.writtenRelative === next.writtenRelative &&
     previous.line === next.line &&
+    previous.column === next.column &&
+    previous.resolveFileLink === next.resolveFileLink &&
     previous.label === next.label &&
     previous.copyMarkdown === next.copyMarkdown &&
     previous.theme === next.theme &&
@@ -2279,6 +2376,9 @@ function useChatMarkdownState({
     refresh: true,
   });
   const searchProjectEntries = useAtomQueryRunner(projectEnvironment.searchEntries, {
+    reportFailure: false,
+  });
+  const listProjectEntries = useAtomQueryRunner(projectEnvironment.listEntries, {
     reportFailure: false,
   });
   const openPreview = useAtomCommand(previewEnvironment.open, {
@@ -2517,58 +2617,75 @@ function useChatMarkdownState({
     },
     [createAssetUrl, cwd, openPreview, preparedConnection, threadRef],
   );
-  const findWorkspaceBasenameMatch = useCallback(
-    async (workspaceRelativePath: string) => {
-      if (!cwd || environmentId === null || !needsWorkspaceBasenameLookup(workspaceRelativePath)) {
-        return null;
+  /**
+   * The file a chat link means: the path as written when it exists, else the one
+   * indexed file ending in it, else the reader's pick among several. Links
+   * outside the workspace and anything unindexed (ignored folders) open as
+   * written, so the panel can say plainly what it looked for.
+   */
+  const resolveFileLink = useCallback(
+    async (link: FileLinkTarget, position: MenuPosition): Promise<FileLinkTarget | null> => {
+      const requested = link.workspaceRelativePath;
+      if (!cwd || environmentId === null || requested === null || !link.writtenRelative) {
+        return link;
       }
-      const result = await searchProjectEntries({
-        environmentId,
-        input: {
-          cwd,
-          query: workspaceRelativePath,
-          limit: WORKSPACE_BASENAME_LOOKUP_LIMIT,
-          kind: "file",
-        },
-      });
-      return result._tag === "Success"
-        ? pickWorkspaceBasenameMatch(workspaceRelativePath, result.value.entries)
-        : null;
+      // Claimed on every click so a newer one supersedes a lookup in flight.
+      const isLatestLookup = claimWorkspaceFileLookup();
+      // The search index skips ignored and brand-new files, so "exists as written"
+      // is asked of the folder itself: it lists every child, ignored ones included.
+      const separator = requested.lastIndexOf("/");
+      const [listing, result] = await Promise.all([
+        listProjectEntries({
+          environmentId,
+          input: { cwd, directoryPath: separator === -1 ? "" : requested.slice(0, separator) },
+        }),
+        searchProjectEntries({
+          environmentId,
+          input: { cwd, query: requested, limit: WORKSPACE_FILE_LOOKUP_LIMIT, kind: "file" },
+        }),
+      ]);
+      if (!isLatestLookup()) return null;
+      if (
+        listing._tag === "Success" &&
+        listing.value.entries.some((entry) => entry.path === requested)
+      ) {
+        return link;
+      }
+      if (result._tag !== "Success") return link;
+      const lookup = matchWorkspaceFile(
+        requested,
+        result.value.entries,
+        threadMentionsPath(threadRef, cwd),
+      );
+      const path =
+        lookup.kind === "match"
+          ? lookup.path
+          : lookup.kind === "choose"
+            ? await chooseWorkspaceFile(lookup.paths, position)
+            : requested;
+      if (path === null) return null;
+      if (path === requested) return link;
+      const filePath = resolvePathLinkTarget(path, cwd);
+      return {
+        filePath,
+        workspaceRelativePath: path,
+        writtenRelative: true,
+        targetPath: formatFilePathPosition({
+          path: filePath,
+          ...(link.line !== undefined ? { line: link.line } : {}),
+          ...(link.column !== undefined ? { column: link.column } : {}),
+        }),
+        line: link.line,
+        column: link.column,
+      };
     },
-    [cwd, environmentId, searchProjectEntries],
+    [cwd, environmentId, listProjectEntries, searchProjectEntries, threadRef],
   );
-  // A bare filename resolves to the workspace root, which is rarely where the
-  // file is, so ask the index before opening. Absolute host paths open as-is.
   const openFileInPanel = useCallback(
     (panelPath: string, line: number | undefined) => {
-      if (!threadRef) return;
-      // Claimed on every open so a synchronous one supersedes a lookup already
-      // in flight.
-      const isLatestLookup = claimWorkspaceBasenameLookup();
-      const openAt = (path: string) =>
-        useRightPanelStore.getState().openFile(threadRef, path, line);
-      if (!cwd || !needsWorkspaceBasenameLookup(panelPath)) {
-        openAt(panelPath);
-        return;
-      }
-      void (async () => {
-        const match = await findWorkspaceBasenameMatch(panelPath);
-        if (!isLatestLookup()) return;
-        openAt(match ?? panelPath);
-      })();
+      if (threadRef) useRightPanelStore.getState().openFile(threadRef, panelPath, line);
     },
-    [cwd, findWorkspaceBasenameMatch, threadRef],
-  );
-  const revealMarkdownFileInFileManager = useCallback(
-    async (fileLinkMeta: MarkdownFileLinkMeta) => {
-      const workspaceRelativePath = fileLinkMeta.workspaceRelativePath;
-      const match = workspaceRelativePath
-        ? await findWorkspaceBasenameMatch(workspaceRelativePath)
-        : null;
-      const filePath = match && cwd ? resolvePathLinkTarget(match, cwd) : fileLinkMeta.filePath;
-      return revealFileInFileManager(filePath);
-    },
-    [cwd, findWorkspaceBasenameMatch, revealFileInFileManager],
+    [threadRef],
   );
   const fileLinkChip = useCallback(
     (
@@ -2607,13 +2724,17 @@ function useChatMarkdownState({
           iconPath={fileLinkMeta.filePath}
           displayPath={fileLinkMeta.displayPath}
           panelPath={panelPath}
+          workspaceRelativePath={fileLinkMeta.workspaceRelativePath}
+          writtenRelative={fileLinkMeta.writtenRelative}
           line={fileLinkMeta.line}
+          column={fileLinkMeta.column}
           label={labelParts.join(" · ")}
           copyMarkdown={copyMarkdown}
           theme={resolvedTheme}
           threadRef={threadRef}
           {...(canUseShellActions ? { onOpen: openInPreferredEditor } : {})}
           onOpenInPanel={openFileInPanel}
+          resolveFileLink={resolveFileLink}
           onOpenMedia={
             threadRef && canPreviewMedia
               ? () => openMarkdownMedia(mediaPath, fileLinkMeta.filePath)
@@ -2622,7 +2743,7 @@ function useChatMarkdownState({
           openInEditorMenuLabel={preferredEditorMenuLabel}
           onReveal={
             canUseShellActions && revealInFileManagerLabel !== undefined
-              ? () => revealMarkdownFileInFileManager(fileLinkMeta)
+              ? revealFileInFileManager
               : undefined
           }
           revealLabel={revealInFileManagerLabel}
@@ -2641,13 +2762,14 @@ function useChatMarkdownState({
       canUseShellActions,
       fileLinkParentSuffixByPath,
       openFileInPanel,
+      resolveFileLink,
       openInPreferredEditor,
       openMarkdownFileInPreview,
       openMarkdownMedia,
       preferredEditorMenuLabel,
       resolvedTheme,
       revealInFileManagerLabel,
-      revealMarkdownFileInFileManager,
+      revealFileInFileManager,
       threadRef,
     ],
   );
