@@ -7,8 +7,7 @@ import {
 import { act, type ReactNode } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, expect, it, vi } from "vite-plus/test";
-import { UsageLimitsPooled } from "./UsageLimitsPooled";
-import { ToggleGroup } from "../ui/toggle-group";
+import { UsageLimitAccounts } from "./UsageLimitAccounts";
 
 vi.mock("../../hooks/useSettings", () => ({ usePrimarySettings: () => "locale" }));
 vi.mock("../../state/server", () => ({ serverEnvironment: {} }));
@@ -24,10 +23,6 @@ vi.mock("../ui/tooltip", () => ({
     </>
   ),
 }));
-vi.mock("../ui/toggle-group", () => ({
-  ToggleGroup: ({ children }: { children: ReactNode }) => children,
-  Toggle: ({ children }: { children: ReactNode }) => <button>{children}</button>,
-}));
 vi.mock("../ui/popover", () => ({
   Popover: ({ children }: { children: ReactNode }) => children,
   PopoverPopup: () => null,
@@ -40,7 +35,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("shows granular windows by default, switches views and updates the account report", async () => {
+it("shows each window as used and follows a newer account report", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const now = Date.parse("2026-09-10T12:00:00.000Z");
   const account: ServerProvider = {
@@ -74,7 +69,7 @@ it("shows granular windows by default, switches views and updates the account re
     ],
   ]);
   await act(async () => {
-    renderer = create(<UsageLimitsPooled presentations={presentations} now={now} />);
+    renderer = create(<UsageLimitAccounts presentations={presentations} now={now} />);
   });
   const labels = () =>
     renderer!.root
@@ -83,10 +78,6 @@ it("shows granular windows by default, switches views and updates the account re
       .filter(Boolean);
   expect(labels()).toContain("Overall: 18% used");
   expect(labels()).toContain("Fable: 43% used");
-  await act(async () => renderer!.root.findByType(ToggleGroup).props.onValueChange(["pooled"]));
-  expect(labels()).not.toContain("Fable: 43% used");
-  expect(JSON.stringify(renderer!.toJSON())).toContain("left");
-  await act(async () => renderer!.root.findByType(ToggleGroup).props.onValueChange(["accounts"]));
   presentations.get(EnvironmentId.make("godel"))!.serverConfig.providers = [
     {
       ...account,
@@ -97,7 +88,7 @@ it("shows granular windows by default, switches views and updates the account re
     },
   ];
   await act(async () =>
-    renderer!.update(<UsageLimitsPooled presentations={new Map(presentations)} now={now} />),
+    renderer!.update(<UsageLimitAccounts presentations={new Map(presentations)} now={now} />),
   );
   expect(labels()).toContain("Fable: 7% used");
   expect(labels()).not.toContain("Overall: 18% used");

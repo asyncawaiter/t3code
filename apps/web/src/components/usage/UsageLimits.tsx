@@ -2,10 +2,8 @@ import {
   type EnvironmentId,
   type ProviderConsumeResetCreditOutcome,
   ProviderConsumeResetCreditInput,
-  ServerProvider,
   ServerProviderResetCredits,
   ServerProviderUsageWindow,
-  UsageProviderKind,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { AlertTriangleIcon, TrendingUpIcon } from "lucide-react";
@@ -34,15 +32,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { UsageLimitsPooled } from "./UsageLimitsPooled";
-import { PROVIDER_PRESENTATION } from "./usageProviders";
-
-/** The series colour the cost chart uses for this driver, so the two views read as one. */
-export function barColor(driver: ServerProvider["driver"]): string {
-  const kind: UsageProviderKind | undefined =
-    driver === "codex" ? "codex" : driver === "claudeAgent" ? "claude" : undefined;
-  return kind ? PROVIDER_PRESENTATION[kind].color : "var(--foreground)";
-}
+import { UsageLimitAccounts } from "./UsageLimitAccounts";
 
 /** Share of the quota used, 0..100. Everything on the usage screens reads as used. */
 export function usedPercentOf(window: ServerProviderUsageWindow): number {
@@ -51,22 +41,20 @@ export function usedPercentOf(window: ServerProviderUsageWindow): number {
 
 const NEAR_LIMIT_PERCENT = 90;
 
-const PACE_LABEL = {
-  ahead: "Ahead of pace",
-  on: "On pace",
-  under: "Under pace",
-} as const;
+/** "Resets in 3h" as a standalone line. */
+function resetsInLabel(window: ServerProviderUsageWindow, now: number): string {
+  const resetsIn = formatResetsIn(window, now);
+  return resetsIn ? resetsIn.charAt(0).toUpperCase() + resetsIn.slice(1) : "No reset time reported";
+}
 
 /**
- * Quota used, filling left to right. A thin tick marks how much of the window has elapsed,
- * so a fill past the tick means spending faster than the window refills.
+ * Quota used, filling left to right in one neutral tone for every provider. The
+ * hover card adds the exact reset time and how much of the window has passed.
  */
 function WindowBar({
-  color,
   window,
   now,
 }: {
-  readonly color: string;
   readonly window: ServerProviderUsageWindow;
   readonly now: number;
 }) {
@@ -87,22 +75,14 @@ function WindowBar({
             role="img"
             aria-label={summary}
             tabIndex={0}
-            className="relative h-4 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="relative h-2 cursor-default overflow-hidden rounded-full border border-foreground/10 bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           />
         }
       >
-        <div className="absolute inset-x-0 inset-y-1 rounded-full border border-foreground/10 bg-muted" />
         {used > 0 ? (
           <div
-            className="absolute inset-y-1 left-0 rounded-full"
-            style={{ width: `${Math.max(used, 2)}%`, backgroundColor: color }}
-          />
-        ) : null}
-        {elapsed !== null ? (
-          <div
-            aria-hidden
-            className="absolute inset-y-0 w-0.5 -translate-x-1/2 rounded-full bg-foreground/60"
-            style={{ left: `${elapsed * 100}%` }}
+            className="absolute inset-y-0 left-0 rounded-full bg-foreground/80"
+            style={{ width: `${Math.max(used, 1.5)}%` }}
           />
         ) : null}
       </TooltipTrigger>
@@ -111,7 +91,7 @@ function WindowBar({
           <span className="text-foreground">{used}% used</span>
           {elapsed !== null ? (
             <span className="text-muted-foreground">
-              {Math.round(elapsed * 100)}% of the window has passed (the tick)
+              {Math.round(elapsed * 100)}% of the window has passed
             </span>
           ) : null}
           {resetsAt ? (
@@ -126,7 +106,10 @@ function WindowBar({
   );
 }
 
-/** "Near limit" or the pace against the clock, as text with an icon rather than color. */
+/**
+ * Speaks only when it matters: near the limit, or spending faster than the
+ * window refills. Text and an icon, never color alone.
+ */
 function WindowStatus({
   window,
   now,
@@ -143,60 +126,50 @@ function WindowStatus({
       </span>
     );
   }
-  const pace = paceOf(window, now);
-  if (!pace) return null;
+  if (paceOf(window, now) !== "ahead") return null;
   return (
-    <span
-      className={
-        pace === "ahead"
-          ? "inline-flex items-center gap-1 font-medium text-foreground"
-          : "inline-flex items-center gap-1"
-      }
-    >
-      {pace === "ahead" ? <TrendingUpIcon aria-hidden className="size-3.5" /> : null}
-      {PACE_LABEL[pace]}
+    <span className="inline-flex items-center gap-1 font-medium text-foreground">
+      <TrendingUpIcon aria-hidden className="size-3.5" />
+      Ahead of pace
     </span>
   );
 }
 
 /**
- * One account's windows as rows: label and percent used, bar and countdown.
- * Compact rows fit the composer panel with narrower columns.
+ * One account's windows. Cards lay them side by side (label, percent used, bar,
+ * reset); compact rows fit the composer panel.
  */
 export function LimitWindows({
-  driver,
   windows,
   now,
   compact = false,
   cards = false,
 }: {
   readonly cards?: boolean;
-  readonly driver: ServerProvider["driver"];
   readonly windows: ReadonlyArray<ServerProviderUsageWindow>;
   readonly now: number;
   readonly compact?: boolean;
 }) {
-  const color = barColor(driver);
   if (cards)
     return (
-      <div className="flex flex-col divide-y divide-border">
+      <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
         {windows.map((window) => (
-          <div key={window.id} className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0">
+          <div key={window.id} className="flex min-w-0 flex-col gap-2">
             <div className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0 text-sm font-medium text-foreground">{window.label}</span>
+              <span className="min-w-0 truncate text-[13px] font-medium text-foreground/80">
+                {window.label}
+              </span>
               <span className="shrink-0 tabular-nums">
-                <strong className="text-xl font-semibold text-foreground">
+                <strong className="text-lg font-semibold text-foreground">
                   {usedPercentOf(window)}%
                 </strong>{" "}
-                <span className="text-[13px] text-muted-foreground">used</span>
+                <span className="text-xs text-muted-foreground">used</span>
               </span>
             </div>
-            <WindowBar color={color} window={window} now={now} />
-            <div className="flex items-center justify-between gap-3 text-xs text-foreground/65 tabular-nums">
+            <WindowBar window={window} now={now} />
+            <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground tabular-nums">
               <WindowStatus window={window} now={now} />
-              <span className="ms-auto">
-                {formatResetsIn(window, now) ?? "Reset time unavailable"}
-              </span>
+              <span className="ms-auto">{resetsInLabel(window, now)}</span>
             </div>
           </div>
         ))}
@@ -220,7 +193,7 @@ export function LimitWindows({
                 {usedPercentOf(window)}% used
               </span>
             </span>
-            <WindowBar color={color} window={window} now={now} />
+            <WindowBar window={window} now={now} />
             <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
               <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>
             </span>
@@ -393,5 +366,5 @@ export function UsageLimitsSection({
     selectedEnvironmentIds === null
       ? presentations
       : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
-  return <UsageLimitsPooled presentations={selected} now={now} />;
+  return <UsageLimitAccounts presentations={selected} now={now} />;
 }

@@ -150,7 +150,9 @@ export function UsageLimitsMeter({
   };
   useLiveRefresh(refresh, {
     key: `usage:${environmentId}:${instanceId}`,
-    intervalMs: 15_000,
+    // Turns stream fresh windows and every finished turn re-reads, so this only
+    // catches usage from elsewhere (another device, the web) while idle.
+    intervalMs: 60_000,
     idleAfterMs: Infinity,
   });
   useEffect(() => {

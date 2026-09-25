@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import { ProviderAdapterRequestError } from "../provider/Errors.ts";
-import { make } from "./UsageLimitsService.ts";
+import { make, nextReadDelayMs } from "./UsageLimitsService.ts";
 
 const codexInstance = ProviderInstanceId.make("codex");
 
@@ -148,6 +148,10 @@ describe("UsageLimitsService", () => {
         ["primary", "secondary"],
       );
       windows = windows.slice(0, 1);
+      // Subscribing again straight away reuses the fresh read; past the interval it re-reads.
+      const cached = yield* service.subscribe;
+      assert.strictEqual(cached.latest.providers[0]?.windows.length, 2);
+      yield* TestClock.adjust("30 seconds");
       const second = yield* service.subscribe;
       assert.deepStrictEqual(
         second.latest.providers[0]?.windows.map((window) => window.id),
@@ -195,6 +199,7 @@ describe("UsageLimitsService", () => {
       const good = yield* service.subscribe;
       assert.strictEqual(good.latest.providers[0]?.readError, null);
       fail = true;
+      yield* TestClock.adjust("30 seconds");
       const bad = yield* service.subscribe;
       const entry = bad.latest.providers[0];
       assert.strictEqual(entry?.windows[0]?.usedPercent, 40);
@@ -259,6 +264,9 @@ it.effect("refreshes the selected account, publishes shared usage, and coalesces
     upstreamPercent = 25;
     yield* TestClock.adjust("15 seconds");
     yield* service.refreshAccount(codexInstance);
+    assert.strictEqual(reads, 1);
+    yield* TestClock.adjust("15 seconds");
+    yield* service.refreshAccount(codexInstance);
     assert.strictEqual(displayedPercent, 25);
     assert.strictEqual(reads, 2);
     identity = "work";
@@ -266,7 +274,7 @@ it.effect("refreshes the selected account, publishes shared usage, and coalesces
     yield* service.refreshAccount(codexInstance);
     assert.strictEqual(displayedPercent, 3);
     fail = true;
-    yield* TestClock.adjust("15 seconds");
+    yield* TestClock.adjust("30 seconds");
     yield* service.refreshAccount(codexInstance);
     assert.strictEqual(displayedPercent, 3);
     const failedReads = reads;
@@ -277,5 +285,9 @@ it.effect("refreshes the selected account, publishes shared usage, and coalesces
     yield* TestClock.adjust("45 seconds");
     yield* service.refreshAccount(codexInstance);
     assert.strictEqual(reads, failedReads + 1);
+    assert.deepStrictEqual(
+      [0, 1, 2, 3, 4, 5, 9].map(nextReadDelayMs),
+      [30_000, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000],
+    );
   }).pipe(Effect.scoped),
 );

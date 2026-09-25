@@ -256,7 +256,7 @@ export function UsagePage() {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="expanded" className="gap-5 pt-5">
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/20 p-2">
+            <div className="flex flex-wrap items-center gap-3">
               <ToggleGroup
                 aria-label="Usage metric"
                 variant="segmented"

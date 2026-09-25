@@ -97,7 +97,6 @@ function UsageLimitsBannerBody({
               ) : (
                 <LimitWindows
                   compact
-                  driver={account.driver}
                   windows={account.limits.windows}
                   now={now}
                 />

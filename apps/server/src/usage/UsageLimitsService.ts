@@ -102,6 +102,17 @@ function errorDetail(cause: unknown): string {
 }
 
 /** Stamp keys for the account-level fields, beside the window ids. */
+/** Minimum spacing between account reads after a success. */
+const SUCCESS_READ_INTERVAL_MS = 30_000;
+const FAILURE_BACKOFF_BASE_MS = 60_000;
+const FAILURE_BACKOFF_MAX_MS = 10 * 60_000;
+
+/** How long an account waits before its next read: 30s after a success, then 1, 2, 4... up to 10 minutes after consecutive failures. */
+export function nextReadDelayMs(consecutiveFailures: number): number {
+  if (consecutiveFailures <= 0) return SUCCESS_READ_INTERVAL_MS;
+  return Math.min(FAILURE_BACKOFF_BASE_MS * 2 ** (consecutiveFailures - 1), FAILURE_BACKOFF_MAX_MS);
+}
+
 const PLAN_STAMP = "$plan";
 const CREDITS_STAMP = "$resetCredits";
 
@@ -303,13 +314,17 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
     yield* apply(instanceId, provider, read.success, startedAt, identity);
   });
 
-  // Coalesce foreground reads from multiple clients without slowing runtime events.
+  // Coalesce foreground reads from every client, page and composer without slowing
+  // runtime events. Account endpoints rate limit hard (Claude's answers 429 when
+  // polled), and turns already stream fresh windows, so a read is spent at most
+  // once per SUCCESS_READ_INTERVAL_MS per account, and failures back off.
   const accountReads = new Map<
     ProviderInstanceId,
     {
       lock: Semaphore.Semaphore;
       nextAt: number;
       identity: string | null;
+      failures: number;
     }
   >();
   const refreshAccount = Effect.fn("UsageLimitsService.refreshAccount")(function* (
@@ -318,7 +333,7 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
     if (!(yield* sources.listInstances).includes(instanceId)) return;
     let read = accountReads.get(instanceId);
     if (!read) {
-      read = { lock: Semaphore.makeUnsafe(1), nextAt: 0, identity: null };
+      read = { lock: Semaphore.makeUnsafe(1), nextAt: 0, identity: null, failures: 0 };
       accountReads.set(instanceId, read);
     }
     const entry = read;
@@ -330,7 +345,8 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
         yield* refreshInstance(instanceId).pipe(Effect.ignoreCause({ log: true }));
         const failed = (yield* Ref.get(state)).get(instanceId)?.limits.readError;
         entry.identity = identity;
-        entry.nextAt = (yield* Clock.currentTimeMillis) + (failed ? 60_000 : 5_000);
+        entry.failures = failed ? entry.failures + 1 : 0;
+        entry.nextAt = (yield* Clock.currentTimeMillis) + nextReadDelayMs(entry.failures);
       }),
     );
   });
@@ -401,7 +417,12 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
   const subscribe: UsageLimitsService["Service"]["subscribe"] = Effect.gen(function* () {
     // Read first so the initial snapshot already carries fresh numbers and a
     // client never mistakes the boot-time empty map for "nothing reported".
-    yield* refresh;
+    // Every client subscribes on open, so this read goes through the per-account
+    // throttle; an explicit Refresh (`refresh`) still reads straight away.
+    yield* Effect.forEach(yield* sources.listInstances, refreshAccount, {
+      concurrency: 4,
+      discard: true,
+    });
     return yield* subscribeBeforeSnapshotWithoutMutex(changes, snapshot);
   });
 
@@ -426,7 +447,9 @@ export const make = Effect.fn("UsageLimitsService.make")(function* (sources: Usa
           }),
       ),
     );
-    yield* refresh;
+    // The redeem changed the numbers; read now rather than waiting out the interval.
+    accountReads.delete(input.instanceId);
+    yield* refreshAccount(input.instanceId);
     return { outcome };
   });
 
