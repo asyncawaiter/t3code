@@ -1,4 +1,6 @@
 import { randomUUID } from "../../lib/utils";
+import { markColumnsReturnDestination, setColumnsReturn } from "../../lib/columnsReturn";
+import { requestComposerFocus } from "../../lib/composerFocusRequest";
 import { useChatColumnMemory } from "../../hooks/useChatColumnLocation";
 import { DndContext, PointerSensor, useSensor, useSensors, closestCenter } from "@dnd-kit/core";
 import {
@@ -45,7 +47,7 @@ import {
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { isTerminalFocused } from "../../lib/terminalFocus";
-import { useNavigate, useLocation } from "@tanstack/react-router";
+import { useNavigate, useLocation, useRouter } from "@tanstack/react-router";
 import { openChatCreation } from "../../chatCreationStore";
 import {
   useComposerDraftStore,
@@ -103,6 +105,7 @@ import { useEnvironments } from "../../state/environments";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { ChatPaneContext } from "../chat/ChatPaneContext";
+import { useSidePanelInset } from "./columnsPanel";
 import { useProjects } from "../../state/entities";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { ALL_PROFILE_ID, indexProfileSpaces } from "@t3tools/contracts";
@@ -145,6 +148,9 @@ const Layout = Schema.Struct({
   hidden: Schema.Array(Schema.String),
   kept: Schema.Array(Schema.String),
 });
+/** A column's CSS width: the chat's width plus the right panel docked inside it, if any. */
+const columnCssWidth = (width: number) => `calc(${width}px + var(--column-panel-width, 0px))`;
+
 export const columnWidth = (width: number) =>
   Math.max(340, Math.min(1000, Number.isFinite(width) ? width : 420));
 
@@ -446,6 +452,8 @@ function BoardColumns({
   focus?: string | undefined;
 }) {
   const navigate = useNavigate();
+  const router = useRouter();
+  const sidePanelInset = useSidePanelInset();
   const location = useLocation();
   const { remember } = useChatColumnMemory();
   const rememberUse = (key: string) =>
@@ -638,11 +646,16 @@ function BoardColumns({
         event.stopPropagation();
         const key = keyOf(chat);
         const scope = chatSpaceScope(chat);
+        // Escape on the destination comes back to this exact chat, ready to type.
+        setColumnsReturn(() => {
+          requestComposerFocus(key);
+          openFocus(key);
+        });
         void navigate(
           command === "columns.spaceDashboard"
             ? scopedOverviewNavigation(scope)
             : spaceColumnsNavigation(scope, key),
-        );
+        ).then(() => markColumnsReturnDestination(router.state.location));
         return;
       }
       const jump = threadJumpIndexFromCommand(command ?? "");
@@ -679,6 +692,7 @@ function BoardColumns({
     openFocus,
     chatSpaceScope,
     navigate,
+    router,
   ]);
   const [savedScroll, setSavedScroll] = useLocalStorage(
     `t3.columns-scroll.${state.board.id}`,
@@ -812,7 +826,11 @@ function BoardColumns({
           : !!chat.snoozedUntil && Date.parse(chat.snoozedUntil) > now),
   );
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div
+      className="flex min-h-0 flex-1 flex-col gap-2"
+      // The side panel floats over the window's right edge; keep the toolbar and columns clear of it.
+      style={sidePanelInset ? { marginRight: sidePanelInset } : undefined}
+    >
       <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/25 p-1.5 text-xs text-muted-foreground">
         {!scope && (
           <>
@@ -1921,13 +1939,13 @@ function Column({
       onFocusCapture={onFocus}
       hidden={hidden}
       style={{
-        width: expanded ? "100%" : width,
+        width: expanded ? "100%" : columnCssWidth(width),
         transform: DndCSS.Transform.toString(transform),
         transition,
         zIndex: isDragging ? 10 : undefined,
         opacity: isDragging ? 0.85 : undefined,
       }}
-      className={`${hidden ? "hidden" : "flex"} relative min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl ${active && !expanded ? "surface-raised-strong" : "surface-raised"}`}
+      className={`${hidden ? "hidden" : "flex"} relative min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl ${active && !expanded ? "surface-focused" : "surface-raised"}`}
     >
       {/* Expanded, the three header rows flow into one line: title, status, labels, review,
           actions. `contents` lets each row's children join the header's single flex row. */}
@@ -2021,7 +2039,7 @@ function Column({
         </div>
         <div
           className={
-            expanded ? "contents" : "flex min-h-7 max-w-2xl items-center justify-between gap-2"
+            expanded ? "contents" : "flex min-h-7 items-center justify-between gap-2"
           }
           aria-label="Chat status and review"
         >
@@ -2140,24 +2158,35 @@ function Column({
           }}
           onPointerMove={(event) => {
             if (resize.current && element.current)
-              element.current.style.width = `${columnWidth(resize.current.width + event.clientX - resize.current.x)}px`;
+              element.current.style.width = columnCssWidth(
+                columnWidth(resize.current.width + event.clientX - resize.current.x),
+              );
           }}
           onPointerUp={(event) => {
             if (resize.current) {
               const next = columnWidth(resize.current.width + event.clientX - resize.current.x);
               resize.current = null;
               void onResize(next).then((saved) => {
-                if (!saved && element.current) element.current.style.width = `${width}px`;
+                if (!saved && element.current) element.current.style.width = columnCssWidth(width);
               });
             }
           }}
           onLostPointerCapture={() => {
-            if (resize.current && element.current) element.current.style.width = `${width}px`;
+            if (resize.current && element.current)
+              element.current.style.width = columnCssWidth(width);
             resize.current = null;
           }}
         />
       )}
-      <ChatPaneContext value={{ active: active && !hidden, column: !expanded, columnActions }}>
+      <ChatPaneContext
+        value={{
+          active: active && !hidden,
+          column: !expanded,
+          columnActions,
+          columnWidth: width,
+          resizeColumn: (next) => void onResize(columnWidth(next)),
+        }}
+      >
         <div
           className="flex min-h-0 flex-1 flex-col"
           style={expanded ? ({ "--chat-content-max-width": "72rem" } as CSSProperties) : undefined}

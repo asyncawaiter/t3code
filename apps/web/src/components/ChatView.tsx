@@ -187,6 +187,7 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { claimComposerFocus, subscribeComposerFocusRequests } from "../lib/composerFocusRequest";
 import { subscribeSnapShotComposerFocus } from "../lib/desktopSnapShot";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -388,7 +389,12 @@ import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import { resolveComposerTimelineInset, resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
-import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
+import {
+  PanelLayoutControls,
+  RightPanelMaximizeControl,
+  RightPanelPlacementControl,
+} from "./chat/PanelLayoutControls";
+import { useColumnsPanelPlacement, useColumnsSidePanel } from "./spaces/columnsPanel";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
@@ -1793,7 +1799,10 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const narrowWorkspace = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
-  const shouldUseRightPanelSheet = pane.column || narrowWorkspace;
+  const [columnsPanelPlacement, setColumnsPanelPlacement] = useColumnsPanelPlacement();
+  // Columns mode puts the panel either in the board's side panel or inside the column.
+  const columnsSidePanel = pane.column && columnsPanelPlacement === "side";
+  const shouldUseRightPanelSheet = columnsSidePanel || narrowWorkspace;
   const isMobileViewport = useMediaQuery("max-sm");
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
@@ -2124,8 +2133,10 @@ export default function ChatView(props: ChatViewProps) {
     renderedRightPanelSurface,
   );
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
+  // A column hosts its chat without a thread route, so the pane's own chat is the key there.
+  const maximizeThreadKey = pane.column ? activeThreadKey : routeThreadKey;
   const rightPanelMaximized =
-    canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
+    canMaximizeRightPanel && maximizedRightPanelThreadKey === maximizeThreadKey;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUseRightPanelSheet;
 
   useEffect(() => {
@@ -3827,6 +3838,37 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
   const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
+  // Columns side panel: one open state for the board. Focusing a column shows its
+  // panel (Diff when it has none yet) or hides it, and opening or closing the panel
+  // in the focused column sets that state for every column.
+  const followsSidePanel = columnsSidePanel && pane.active && activeThreadRef !== null;
+  useEffect(() => {
+    if (!followsSidePanel || !activeThreadRef) return;
+    const board = useColumnsSidePanel.getState();
+    // First focused column after a load decides, so a reload keeps what was open.
+    if (board.open === null) {
+      board.setOpen(rightPanelOpen);
+      return;
+    }
+    if (board.open === rightPanelOpen) return;
+    const panels = useRightPanelStore.getState();
+    if (!board.open) {
+      panels.toggleVisibility(activeThreadRef);
+    } else if (rightPanelState.surfaces.length === 0 && isServerThread && isGitRepo) {
+      panels.toggle(activeThreadRef, "diff");
+    } else {
+      panels.toggleVisibility(activeThreadRef);
+    }
+    // Only a focus change syncs from the board; the panel's own toggles sync back below.
+  }, [followsSidePanel, activeThreadRef]);
+  const previousRightPanelOpen = useRef(rightPanelOpen);
+  useEffect(() => {
+    const wasOpen = previousRightPanelOpen.current;
+    previousRightPanelOpen.current = rightPanelOpen;
+    if (followsSidePanel && wasOpen !== rightPanelOpen) {
+      useColumnsSidePanel.getState().setOpen(rightPanelOpen);
+    }
+  }, [followsSidePanel, rightPanelOpen]);
   // Keep a hidden, off-flow strip mounted for existing threads so the composer
   // can measure whether its relocated controls fit. The visible chrome remains
   // content-driven: Git/environment context or controls that actually fit.
@@ -4091,6 +4133,16 @@ export default function ChatView(props: ChatViewProps) {
       focusComposer();
     });
   }, [focusComposer]);
+  // Shortcuts like columns mode's "focus saved chat" ask for this chat's composer before the
+  // pane is active; claim the request once it is.
+  useEffect(() => {
+    if (!pane.active || activeThreadKey === null) return;
+    const claim = () => {
+      if (claimComposerFocus(activeThreadKey)) scheduleComposerFocus();
+    };
+    claim();
+    return subscribeComposerFocusRequests(claim);
+  }, [pane.active, activeThreadKey, scheduleComposerFocus]);
   const useArtifactTemplate = useCallback(
     (template: CodexArtifactTemplate) => {
       const composer = composerRef.current;
@@ -5113,9 +5165,9 @@ export default function ChatView(props: ChatViewProps) {
   const toggleRightPanelMaximized = useCallback(() => {
     if (!canMaximizeRightPanel) return;
     setMaximizedRightPanelThreadKey((threadKey) =>
-      threadKey === routeThreadKey ? null : routeThreadKey,
+      threadKey === maximizeThreadKey ? null : maximizeThreadKey,
     );
-  }, [canMaximizeRightPanel, routeThreadKey]);
+  }, [canMaximizeRightPanel, maximizeThreadKey]);
   const cleanupRightPanelSurfaces = useCallback(
     (surfaces: readonly RightPanelSurface[]) => {
       if (!activeThreadRef) return;
@@ -9790,21 +9842,36 @@ export default function ChatView(props: ChatViewProps) {
   }
 
   const panelToggleControls = (
-    <PanelLayoutControls
-      terminalAvailable={activeProject !== null}
-      terminalOpen={terminalUiState.terminalOpen}
-      terminalShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
-      rightPanelAvailable={activeProject !== null}
-      rightPanelOpen={rightPanelOpen}
-      rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
-      // Suppressed while the Agents surface is visible: the roster itself is
-      // on screen, so the toggle badge would be pointing at nothing.
-      liveAgentCount={
-        rightPanelOpen && activeRightPanelSurface?.kind === "agents" ? 0 : agentPanelModel.liveCount
-      }
-      onToggleTerminal={toggleTerminalVisibility}
-      onToggleRightPanel={toggleRightPanel}
-    />
+    <>
+      {/* A narrow window always uses the overlay sheet, so there is nothing to switch. */}
+      {pane.column && rightPanelOpen && !narrowWorkspace ? (
+        <RightPanelPlacementControl
+          placement={columnsPanelPlacement}
+          onToggle={() => {
+            // Moving to the side keeps what is open now instead of the board's last state.
+            if (!columnsSidePanel) useColumnsSidePanel.getState().setOpen(rightPanelOpen);
+            setColumnsPanelPlacement(columnsSidePanel ? "column" : "side");
+          }}
+        />
+      ) : null}
+      <PanelLayoutControls
+        terminalAvailable={activeProject !== null}
+        terminalOpen={terminalUiState.terminalOpen}
+        terminalShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
+        rightPanelAvailable={activeProject !== null}
+        rightPanelOpen={rightPanelOpen}
+        rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
+        // Suppressed while the Agents surface is visible: the roster itself is
+        // on screen, so the toggle badge would be pointing at nothing.
+        liveAgentCount={
+          rightPanelOpen && activeRightPanelSurface?.kind === "agents"
+            ? 0
+            : agentPanelModel.liveCount
+        }
+        onToggleTerminal={toggleTerminalVisibility}
+        onToggleRightPanel={toggleRightPanel}
+      />
+    </>
   );
   const panelLayoutControls = (
     <div
@@ -9878,6 +9945,7 @@ export default function ChatView(props: ChatViewProps) {
           mode="embedded"
           composerDraftTarget={composerDraftTarget}
           workspaceMutationId={workspaceMutationId}
+          threadRef={isServerThread ? activeThreadRef : null}
         />
       </Suspense>
     ) : renderedRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
@@ -10652,6 +10720,7 @@ export default function ChatView(props: ChatViewProps) {
         <RightPanelTabs
           mode="inline"
           widthStorageKey={`t3code:preview-panel-width:${activeThreadKey}`}
+          growsColumn={pane.column}
           open={rightPanelOpen}
           maximized={rightPanelMaximized}
           surfaces={renderedRightPanelSurfaces}
@@ -10699,6 +10768,7 @@ export default function ChatView(props: ChatViewProps) {
           animationDurationMs={panelAnimationsActive ? panelAnimationDurationMs : 0}
           open={rightPanelOpen && pane.active}
           underFloatingPreview={previewMiniPlayerVisible}
+          sidePanelOwner={columnsSidePanel ? activeThreadKey : null}
           onClose={closePreviewPanel}
         >
           {!reserveTitleBarControlInset && (

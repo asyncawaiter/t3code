@@ -1,6 +1,7 @@
 import {
   type ReactNode,
   type RefObject,
+  use,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -10,6 +11,8 @@ import {
 import { isElectron } from "~/env";
 import { useResizableWidth } from "~/hooks/useResizableWidth";
 import { cn } from "~/lib/utils";
+
+import { ChatPaneContext } from "../chat/ChatPaneContext";
 
 import { RightPanelResizeHandle } from "./RightPanelResizeHandle";
 
@@ -32,6 +35,8 @@ const PREVIEW_PANEL_DEFAULT_WIDTH = 540;
  * sibling below its usable width and the composer overflowed.
  */
 const SIBLING_COLUMN_MIN_WIDTH = 360;
+/** Narrowest a board column's chat gets when its docked panel's divider is dragged (ChatColumns' columnWidth floor). */
+const COLUMN_CHAT_MIN_WIDTH = 340;
 
 export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: number): number {
   const fractionCap = Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION);
@@ -62,6 +67,11 @@ export function PreviewPanelShell(props: {
   widthStorageKey?: string;
   /** Overrides the initial width (px) before the user has resized the panel. */
   defaultWidth?: number;
+  /**
+   * Inline inside a board column: the column grows by the panel's width instead
+   * of the chat giving it up, so the row never caps the panel.
+   */
+  growsColumn?: boolean;
   children: ReactNode;
 }) {
   const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
@@ -72,7 +82,27 @@ export function PreviewPanelShell(props: {
   const hostRef = useRef<HTMLDivElement | null>(null);
   // Only inline non-maximized mode applies `width`/`maxWidth`; skip the
   // container measurement (and its re-renders) everywhere else.
-  const maxWidth = useClampedMaxWidth(hostRef, isInline && !maximized);
+  const pane = use(ChatPaneContext);
+  const growsColumn = isInline && props.growsColumn === true;
+  const viewportMaxWidth = useClampedMaxWidth(hostRef, isInline && !maximized && !growsColumn);
+  // Docked in a board column, the panel's edge is a divider: dragging it trades
+  // width between chat and panel while the column keeps its size. `columnShare`
+  // freezes the width the column adds for the length of a drag; at drag end the
+  // chat's new width is saved on the column and the share follows the panel again.
+  const chatWidth = pane.columnWidth;
+  const [frozenShare, setFrozenShare] = useState<{ share: number; chatWidth: number } | null>(null);
+  // Tied to the chat width it was frozen against: once the saved width lands the
+  // share follows the panel again, with no effect to reset it.
+  const columnShare =
+    frozenShare !== null && frozenShare.chatWidth === chatWidth ? frozenShare.share : null;
+  const dragStartShare = useRef<number | null>(null);
+  const maxWidth =
+    growsColumn && chatWidth !== undefined && columnShare !== null
+      ? Math.max(
+          PREVIEW_PANEL_MIN_WIDTH,
+          Math.min(viewportMaxWidth, chatWidth - COLUMN_CHAT_MIN_WIDTH + columnShare),
+        )
+      : viewportMaxWidth;
   const { width, handlers } = useResizableWidth({
     storageKey: props.widthStorageKey ?? PREVIEW_PANEL_WIDTH_STORAGE_KEY,
     defaultWidth: props.defaultWidth ?? PREVIEW_PANEL_DEFAULT_WIDTH,
@@ -80,6 +110,44 @@ export function PreviewPanelShell(props: {
     maxWidth,
     edge: "left",
   });
+  const latestWidth = useRef(width);
+  useLayoutEffect(() => {
+    latestWidth.current = width;
+  }, [width]);
+  const resizeColumn = growsColumn ? pane.resizeColumn : undefined;
+  const commitDivider = () => {
+    const start = dragStartShare.current;
+    if (start === null || !resizeColumn || chatWidth === undefined) return;
+    dragStartShare.current = null;
+    // The drag's last frame lands after pointerup; read the width once it has.
+    requestAnimationFrame(() => {
+      const nextChatWidth = chatWidth + start - latestWidth.current;
+      if (nextChatWidth === chatWidth) setFrozenShare(null);
+      else resizeColumn(nextChatWidth);
+    });
+  };
+  const resizeHandlers: typeof handlers = resizeColumn
+    ? {
+        ...handlers,
+        onPointerDown: (event) => {
+          dragStartShare.current = width;
+          if (chatWidth !== undefined) setFrozenShare({ share: width, chatWidth });
+          handlers.onPointerDown(event);
+        },
+        onPointerUp: (event) => {
+          handlers.onPointerUp(event);
+          commitDivider();
+        },
+        onPointerCancel: (event) => {
+          handlers.onPointerCancel(event);
+          commitDivider();
+        },
+        onLostPointerCapture: (event) => {
+          handlers.onLostPointerCapture(event);
+          commitDivider();
+        },
+      }
+    : handlers;
   // Derive suppression before the layout commits so the browser never creates
   // a width transition for resize or maximize changes.
   const [layoutTransition, setLayoutTransition] = useState(() => ({
@@ -104,6 +172,16 @@ export function PreviewPanelShell(props: {
     });
   }
   const suppressWidthTransition = layoutTransition.suppressed;
+  // Tell the board column how much wider to be (see ChatColumn's width).
+  useLayoutEffect(() => {
+    if (!growsColumn || !open) return;
+    const column = hostRef.current?.closest<HTMLElement>("[data-column-key]");
+    if (!column) return;
+    column.style.setProperty("--column-panel-width", `${columnShare ?? width}px`);
+    return () => {
+      column.style.removeProperty("--column-panel-width");
+    };
+  }, [columnShare, growsColumn, open, width]);
   useLayoutEffect(() => {
     if (!suppressWidthTransition) return;
     let restoreFrame = 0;
@@ -136,14 +214,16 @@ export function PreviewPanelShell(props: {
         isInline
           ? {
               width: maximized ? "100%" : collapsible && !open ? "0px" : `${width}px`,
-              transitionDuration: suppressWidthTransition ? "0ms" : undefined,
+              // A column resizes with the panel in one step; animating only the
+              // panel would re-lay out the chat on every frame.
+              transitionDuration: suppressWidthTransition || growsColumn ? "0ms" : undefined,
             }
           : undefined
       }
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={maximized ? "true" : "false"}
     >
-      {isInline && !maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
+      {isInline && !maximized ? <RightPanelResizeHandle handlers={resizeHandlers} /> : null}
       <div className={cn("h-full min-h-0 w-full", collapsible && "overflow-clip")}>
         <div
           className="flex h-full min-h-0 min-w-0 flex-col"

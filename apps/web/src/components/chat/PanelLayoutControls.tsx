@@ -1,4 +1,11 @@
-import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon } from "lucide-react";
+import {
+  Maximize2Icon,
+  Minimize2Icon,
+  PanelBottomIcon,
+  PanelRightIcon,
+  PanelRightOpenIcon,
+  SquareSplitHorizontalIcon,
+} from "lucide-react";
 import { memo } from "react";
 
 import { Toggle } from "../ui/toggle";
@@ -123,6 +130,40 @@ export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl
               <Minimize2Icon className="size-4" />
             ) : (
               <Maximize2Icon className="size-4" />
+            )}
+          </Toggle>
+        }
+      />
+      <TooltipPopup side="bottom">{label}</TooltipPopup>
+    </Tooltip>
+  );
+});
+
+/** Columns mode: moves the right panel between the board's side panel and inside the column. */
+export const RightPanelPlacementControl = memo(function RightPanelPlacementControl({
+  placement,
+  onToggle,
+}: {
+  placement: "side" | "column";
+  onToggle: () => void;
+}) {
+  const label = placement === "side" ? "Show panel inside this column" : "Show panel on the side";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Toggle
+            className="shrink-0 [-webkit-app-region:no-drag]"
+            pressed={false}
+            onPressedChange={onToggle}
+            aria-label={label}
+            variant="ghost"
+            size="sm"
+          >
+            {placement === "side" ? (
+              <SquareSplitHorizontalIcon className="size-4" />
+            ) : (
+              <PanelRightOpenIcon className="size-4" />
             )}
           </Toggle>
         }

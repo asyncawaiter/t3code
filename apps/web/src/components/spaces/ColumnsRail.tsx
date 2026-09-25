@@ -1,4 +1,6 @@
 import { randomUUID } from "../../lib/utils";
+import { requestComposerFocus } from "../../lib/composerFocusRequest";
+import { takeColumnsReturn } from "../../lib/columnsReturn";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { openCommandPalette } from "../../commandPaletteBus";
 import { useWorkflowNavigation } from "../../hooks/useWorkflowNavigation";
@@ -30,7 +32,7 @@ import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "@tanstack/react-router";
+import { useNavigate, useLocation, useRouter } from "@tanstack/react-router";
 import {
   SearchIcon,
   LocateFixedIcon,
@@ -53,6 +55,7 @@ import { SidebarAccountControls } from "../sidebar/SidebarChrome";
 /** Columns owns chat navigation. This rail only visits other parts of the app. */
 export function ColumnsRail() {
   const navigate = useNavigate();
+  const router = useRouter();
   const openThread = useWorkflowNavigation();
   const bookmark = useUiStateStore((state) => state.bookmarkedThreadKey);
   const { environments } = useEnvironments();
@@ -87,6 +90,22 @@ export function ColumnsRail() {
         document.querySelector('[role="dialog"][aria-modal="true"]')
       )
         return;
+      if (
+        event.key === "Escape" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !(event.target as HTMLElement | null)?.closest?.(
+          "input, textarea, select, [contenteditable=true], [role=menu], [role=listbox]",
+        )
+      ) {
+        const back = takeColumnsReturn(router.state.location);
+        if (back) {
+          event.preventDefault();
+          back();
+        }
+        return;
+      }
       const command = resolveShortcutCommand(event, keybindings, {
         platform: navigator.platform,
         context: { terminalFocus: isTerminalFocused() },
@@ -103,6 +122,7 @@ export function ColumnsRail() {
       if (command === "columns.focusSavedChat") {
         if (bookmark) {
           event.preventDefault();
+          requestComposerFocus(bookmark);
           openThread(bookmark);
         }
         return;
@@ -134,7 +154,7 @@ export function ColumnsRail() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [profiles, keybindings, navigate, browsing, boards.boards, bookmark, openThread]);
+  }, [profiles, keybindings, navigate, browsing, boards.boards, bookmark, openThread, router]);
   return (
     <aside
       aria-label="Columns navigation"
@@ -183,6 +203,7 @@ export function ColumnsRail() {
                 aria-label="Focus saved chat"
                 className="size-11 sm:size-11"
                 onClick={() => {
+                  requestComposerFocus(bookmark);
                   openThread(bookmark);
                 }}
               />
