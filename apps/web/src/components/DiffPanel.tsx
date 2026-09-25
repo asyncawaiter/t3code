@@ -6,7 +6,13 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import type {
+  OrchestrationCheckpointSummary,
+  OrchestrationMessage,
+  ScopedThreadRef,
+  TimestampFormat,
+  TurnId,
+} from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -49,6 +55,7 @@ import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefres
 import { useProject, useThread } from "../state/entities";
 import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
+import { promptPreview, turnPrompts } from "../lib/turnPrompts";
 import { DiffFilePathCopyButton } from "./DiffFilePathCopyButton";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { DiffStatLabel } from "./chat/DiffStatLabel";
@@ -122,6 +129,53 @@ interface DiffPanelProps {
   workspaceMutationId: string | null;
   /** The chat whose diffs to show. Comes from the pane, not the URL: column mode hosts many chats on one route. */
   threadRef: ScopedThreadRef | null;
+}
+
+const EMPTY_MESSAGES: ReadonlyArray<OrchestrationMessage> = [];
+
+/**
+ * The turn picker's rows: number, time, files changed, and the prompt that
+ * started the turn so a turn is recognisable without opening it. Mounted only
+ * while the submenu is open, so the prompt scan never runs during streaming.
+ */
+function TurnMenuItems(props: {
+  messages: ReadonlyArray<OrchestrationMessage>;
+  summaries: ReadonlyArray<OrchestrationCheckpointSummary>;
+  inferredTurnCounts: Record<string, number>;
+  selectedTurnId: TurnId | null;
+  timestampFormat: TimestampFormat;
+  onSelect: (turnId: TurnId) => void;
+}) {
+  const prompts = useMemo(() => turnPrompts(props.messages), [props.messages]);
+  return props.summaries.map((summary) => {
+    const turnCount =
+      summary.checkpointTurnCount ?? props.inferredTurnCounts[summary.turnId] ?? "?";
+    const prompt = prompts.get(summary.turnId);
+    const fileCount = summary.files.length;
+    return (
+      <DropdownMenuItem
+        key={summary.turnId}
+        className={cn(
+          "flex-col items-stretch gap-0.5",
+          summary.turnId === props.selectedTurnId && "bg-foreground/[0.08]",
+        )}
+        onClick={() => props.onSelect(summary.turnId)}
+      >
+        <span className="flex items-center gap-2">
+          <span className="font-medium">Turn {turnCount}</span>
+          <span className="text-xs text-muted-foreground">
+            {fileCount} {fileCount === 1 ? "file" : "files"}
+          </span>
+          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+            {formatShortTimestamp(summary.completedAt, props.timestampFormat)}
+          </span>
+        </span>
+        {prompt ? (
+          <span className="truncate text-xs text-muted-foreground">{promptPreview(prompt)}</span>
+        ) : null}
+      </DropdownMenuItem>
+    );
+  });
 }
 
 export default function DiffPanel({
@@ -210,8 +264,16 @@ export default function DiffPanel({
     );
   }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef]);
 
-  const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
-  const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
+  const latestTurn = orderedTurnDiffSummaries[0];
+  const selectedTurnId =
+    diffSelection.kind === "turn"
+      ? diffSelection.turnId
+      : diffSelection.kind === "latest"
+        ? (latestTurn?.turnId ?? null)
+        : null;
+  // "Latest" with no turns yet shows the working tree.
+  const selectedGitScope =
+    diffSelection.kind === "unstaged" || diffSelection.kind === "latest" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
   const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
   const selectedFileRevealRequestId =
@@ -224,7 +286,6 @@ export default function DiffPanel({
   const selectedCheckpointTurnCount =
     selectedTurn &&
     (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
-  const latestTurn = orderedTurnDiffSummaries[0];
   const selectedScopeLabel =
     selectedTurnId === null
       ? selectedGitScope === "unstaged"
@@ -677,39 +738,28 @@ export default function DiffPanel({
             </DropdownMenuItem>
             <DropdownMenuItem
               className={
-                selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId
+                diffSelection.kind === "latest" ||
+                (selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId)
                   ? "bg-foreground/[0.08]"
                   : undefined
               }
               onClick={() => {
-                if (latestTurn) selectTurn(latestTurn.turnId);
+                if (routeThreadRef) useDiffPanelStore.getState().selectLatestTurn(routeThreadRef);
               }}
             >
               <span>Latest turn</span>
             </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-64">
-                {orderedTurnDiffSummaries.map((summary) => {
-                  const turnCount =
-                    summary.checkpointTurnCount ??
-                    inferredCheckpointTurnCountByTurnId[summary.turnId] ??
-                    "?";
-                  return (
-                    <DropdownMenuItem
-                      key={summary.turnId}
-                      className={
-                        summary.turnId === selectedTurn?.turnId ? "bg-foreground/[0.08]" : undefined
-                      }
-                      onClick={() => selectTurn(summary.turnId)}
-                    >
-                      <span>Turn {turnCount}</span>
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
-                      </span>
-                    </DropdownMenuItem>
-                  );
-                })}
+              <DropdownMenuSubContent className="max-h-[70vh] w-96 overflow-y-auto">
+                <TurnMenuItems
+                  messages={activeThread?.messages ?? EMPTY_MESSAGES}
+                  summaries={orderedTurnDiffSummaries}
+                  inferredTurnCounts={inferredCheckpointTurnCountByTurnId}
+                  selectedTurnId={selectedTurn?.turnId ?? null}
+                  timestampFormat={settings.timestampFormat}
+                  onSelect={selectTurn}
+                />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           </DropdownMenuContent>

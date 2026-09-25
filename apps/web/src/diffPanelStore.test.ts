@@ -14,16 +14,24 @@ describe("diffPanelStore", () => {
     }),
   );
 
-  it("defaults each thread to working tree changes without requiring git status", () => {
+  it("defaults each thread to its latest turn without requiring git status", () => {
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "unstaged" });
+    ).toEqual({ kind: "latest" });
   });
 
-  it("defaults to working tree changes before a thread is selected", () => {
+  it("defaults to the latest turn before a thread is selected", () => {
     expect(selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, null)).toEqual({
-      kind: "unstaged",
+      kind: "latest",
     });
+  });
+
+  it("returns to following the latest turn after a specific turn was picked", () => {
+    useDiffPanelStore.getState().selectTurn(THREAD_REF, TurnId.make("turn-1"));
+    useDiffPanelStore.getState().selectLatestTurn(THREAD_REF);
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({ kind: "latest" });
   });
 
   it("preserves an explicit branch selection", () => {
