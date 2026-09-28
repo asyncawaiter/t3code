@@ -158,6 +158,9 @@ const columnCssWidth = (width: number) => `calc(${width}px + var(--column-panel-
 export const columnWidth = (width: number) =>
   Math.max(340, Math.min(1000, Number.isFinite(width) ? width : 420));
 
+/** How long a returned-to column stays pinned in view while the board lays out. */
+const FOCUS_PIN_MS = 4000;
+
 const keyOf = (chat: Pick<EnvironmentThreadShell, "environmentId" | "id">) =>
   `${chat.environmentId}:${chat.id}`;
 
@@ -534,15 +537,35 @@ function BoardColumns({
     () => columnOrder(candidates, visibleLayout),
     [candidates, visibleLayout],
   );
-  const createChat = () => {
+  /** A new chat copies the focused column's setup and opens right after it. */
+  const createChat = (instant = false) => {
     useColumnNavigation.setState({ choosing: false });
+    const source = columns.find((chat) => keyOf(chat) === active);
     openChatCreation({
       ...(scope ? { scope } : {}),
+      followFocus: true,
+      ...(source
+        ? {
+            source: {
+              environmentId: source.environmentId,
+              threadId: source.id,
+              projectId: source.projectId,
+              worktreePath: source.worktreePath ?? null,
+            },
+          }
+        : {}),
+      ...(instant ? { instant } : {}),
       onCreated: async ({ threadId, projectRef }) => {
         const key = `${projectRef.environmentId}:${threadId}`;
+        // A reused draft already on the board keeps its place; a new one goes right after the focus.
+        const order = [...layout.order];
+        if (!order.includes(key)) {
+          const after = active === null ? -1 : order.indexOf(active);
+          order.splice(after === -1 ? order.length : after + 1, 0, key);
+        }
         const saved = await state.update({
           ...layout,
-          order: [...new Set([...layout.order, key])],
+          order,
           hidden: layout.hidden.filter((item) => item !== key),
           labels: {
             ...layout.labels,
@@ -558,6 +581,7 @@ function BoardColumns({
           );
         rememberUse(key);
         setFocused(key);
+        requestComposerFocus(key);
         openFocus(key);
       },
     });
@@ -640,7 +664,7 @@ function BoardColumns({
       if (command === "chat.new" || command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
-        createChat();
+        createChat(command === "chat.newLocal");
         return;
       }
       if (command === "columns.spaceDashboard" || command === "columns.spaceColumns") {
@@ -720,10 +744,43 @@ function BoardColumns({
         node.scrollIntoView({ block: "nearest", inline: "nearest" });
         node.querySelector<HTMLButtonElement>("header button")?.focus({ preventScroll: true });
         appliedFocus.current = focusRequest;
+        pinnedFocus.current = { key: focus, until: Date.now() + FOCUS_PIN_MS };
         setFocused(focus);
       }
     }
   }, [focus, focusRequest, columns, expanded, setFocused]);
+  // Columns mount their chat once scrolled into view, and a docked panel then
+  // widens them, pushing the focused column away (or letting scroll snapping
+  // pull the rail back to the first column). Keep the focused column revealed
+  // while the board settles, until the reader scrolls, clicks, or types.
+  const pinnedFocus = useRef<{ key: string; until: number } | null>(null);
+  useEffect(() => {
+    const node = rail.current;
+    if (!node) return;
+    const reveal = () => {
+      const pin = pinnedFocus.current;
+      if (!pin) return;
+      if (Date.now() > pin.until) {
+        pinnedFocus.current = null;
+        return;
+      }
+      node
+        .querySelector(`[data-column-key="${CSS.escape(pin.key)}"]`)
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    const observer = new ResizeObserver(reveal);
+    for (const child of node.children) observer.observe(child);
+    const release = () => {
+      pinnedFocus.current = null;
+    };
+    const events = ["wheel", "pointerdown", "touchstart", "keydown"] as const;
+    for (const type of events) node.addEventListener(type, release, { passive: true });
+    return () => {
+      observer.disconnect();
+      for (const type of events) node.removeEventListener(type, release);
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-observe when the column set changes.
+  }, [columns]);
   useEffect(() => () => setSavedScroll(scroll.current), [setSavedScroll]);
   const [draggingColumn, setDraggingColumn] = useState(false);
   const dragSensors = useSensors(
@@ -1078,7 +1135,7 @@ function BoardColumns({
               </Button>
             </>
           )}
-          <Button size="xs" variant="outline" disabled={disabled} onClick={createChat}>
+          <Button size="xs" variant="outline" disabled={disabled} onClick={() => createChat()}>
             <MessageSquarePlusIcon className="size-3.5" />
             New chat
           </Button>

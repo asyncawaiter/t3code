@@ -9,8 +9,14 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
 import { FavoriteSetupPicker } from "./FavoriteSetupPicker";
 import { useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
-import { ALL_PROFILE_ID, moveThreadsToSpace, spaceForThread } from "@t3tools/contracts";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { WifiOffIcon } from "lucide-react";
+import * as Schema from "effect/Schema";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
+import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
+import { seedPlacement, seedWorkspace, type ChatSeed } from "../lib/chatCreation";
+import { ALL_PROFILE_ID, moveThreadsToSpace } from "@t3tools/contracts";
 import {
   scopedProjectKey,
   scopedThreadKey,
@@ -22,7 +28,7 @@ import {
   revealChatLocation,
   type ChatCreationRequest,
 } from "../chatCreationStore";
-import { useComposerDraftStore } from "../composerDraftStore";
+import { useComposerDraftStore, type DraftThreadState } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { usePrimarySettings, useClientSettings } from "../hooks/useSettings";
 import {
@@ -36,7 +42,7 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { useEnvironments } from "../state/environments";
-import { useProjects, readProjects } from "../state/entities";
+import { useProjects, readProjects, readThreadShell } from "../state/entities";
 import { useUiStateStore } from "../uiStateStore";
 import { ProjectLocationPicker } from "./ProjectLocationPicker";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
@@ -48,6 +54,58 @@ export function ChatCreationDialog() {
   return request ? <ChatCreationForm request={request} /> : null;
 }
 
+const LAST_CHAT_LOCATION_KEY = "t3code:last-chat-location";
+const LastChatLocation = Schema.Struct({
+  projectKey: Schema.String,
+  profileId: Schema.String,
+  spaceId: Schema.NullOr(Schema.String),
+});
+
+/** Where the last new chat opened, the fallback when no chat is focused. */
+function readLastChatLocation() {
+  try {
+    return getLocalStorageItem(LAST_CHAT_LOCATION_KEY, LastChatLocation);
+  } catch {
+    return null;
+  }
+}
+
+function resolveSeed(
+  request: ChatCreationRequest,
+  draft: DraftThreadState | null,
+  routed: Parameters<typeof shellSeed>[0] | null | undefined,
+): ChatSeed | null {
+  if (request.source) {
+    const ref = scopeThreadRef(request.source.environmentId, request.source.threadId);
+    const shell = readThreadShell(ref);
+    if (shell) return shellSeed(shell);
+    const source = useComposerDraftStore.getState().getDraftSessionByRef(ref);
+    // An archived reference column is in neither store; its column row still knows where it ran.
+    return source
+      ? draftSeed(source)
+      : shellSeed({ ...request.source, id: request.source.threadId });
+  }
+  if (draft) return draftSeed(draft);
+  return routed ? shellSeed(routed) : null;
+}
+
+const shellSeed = (
+  shell: Pick<EnvironmentThreadShell, "environmentId" | "projectId" | "id" | "worktreePath">,
+): ChatSeed => ({
+  environmentId: shell.environmentId,
+  projectId: shell.projectId,
+  threadId: shell.id,
+  worktreePath: shell.worktreePath,
+});
+
+const draftSeed = (draft: DraftThreadState): ChatSeed => ({
+  environmentId: draft.environmentId as EnvironmentId,
+  projectId: draft.projectId,
+  threadId: draft.threadId,
+  worktreePath: null,
+  draft: { envMode: draft.envMode, branch: draft.branch, startFromOrigin: draft.startFromOrigin },
+});
+
 function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const navigate = useNavigate();
   const [chatMode] = useChatMode();
@@ -58,59 +116,128 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const { activeThread, activeDraftThread, profileProjects, handleNewThread } =
     useHandleNewThread();
   const ui = useUiStateStore((state) => state);
+  const grouping = useClientSettings(selectProjectGroupingSettings);
   const session = useComposerDraftStore((state) =>
     request.draftId ? (state.draftThreadsByThreadKey[request.draftId] ?? null) : null,
   );
-  const current = session ?? activeDraftThread ?? activeThread;
-  const preferred =
-    request.projectRef ??
-    (current ? scopeProjectRef(current.environmentId, current.projectId) : null);
-  const initialProject =
-    projects.find(
-      (project) =>
-        preferred?.projectId === project.id &&
-        preferred.environmentId === project.environmentId &&
-        (request.draftId || profileProjects.includes(project)),
-    ) ?? profileProjects[0];
-  const initialKey = initialProject
-    ? scopedProjectKey(scopeProjectRef(initialProject.environmentId, initialProject.id))
-    : null;
+  // The board (followFocus) starts from the focused column's chat, else the last
+  // new chat's location. A relocated draft starts from itself. Other entry
+  // points keep the sidebar's profile and space. Read once, at open.
+  const follow = Boolean(request.followFocus || request.source);
+  const [seed] = useState(() =>
+    request.draftId
+      ? session && draftSeed(session)
+      : follow
+        ? resolveSeed(request, activeDraftThread, activeThread)
+        : null,
+  );
+  const routed = follow || request.draftId ? null : (activeDraftThread ?? activeThread);
+  const [storedLocation] = useState(readLastChatLocation);
+  const projectKeyOf = (project: { environmentId: string; id: string }) =>
+    `${project.environmentId}:${project.id}`;
+  // A scoped board keeps its own space's default over a remembered location.
+  const lastLocation =
+    follow &&
+    !seed &&
+    !request.scope &&
+    storedLocation &&
+    projects.some((project) => projectKeyOf(project) === storedLocation.projectKey)
+      ? storedLocation
+      : null;
+  const preferredKey = request.projectRef
+    ? scopedProjectKey(request.projectRef)
+    : seed
+      ? projectKeyOf({ environmentId: seed.environmentId, id: seed.projectId })
+      : routed
+        ? projectKeyOf({ environmentId: routed.environmentId, id: routed.projectId })
+        : (lastLocation?.projectKey ?? null);
+  const preferredProject = projects.find(
+    (project) =>
+      projectKeyOf(project) === preferredKey &&
+      (!routed || request.projectRef || profileProjects.includes(project)),
+  );
+  const isConnected = (environmentId: string) =>
+    environments.some(
+      (environment) =>
+        environment.environmentId === environmentId && environment.connection.phase === "connected",
+    );
+  const environmentLabel = (environmentId: string) =>
+    environments.find((environment) => environment.environmentId === environmentId)?.label ??
+    "another device";
+  // An offline device hands over to the same project on a connected one. A
+  // scoped board is left alone: a chat on another device would fall outside it.
+  const fallbackProject =
+    follow && seed && !request.scope && preferredProject && !isConnected(seed.environmentId)
+      ? projects.find(
+          (project) =>
+            isConnected(project.environmentId) &&
+            deriveLogicalProjectKeyFromSettings(project, grouping) ===
+              deriveLogicalProjectKeyFromSettings(preferredProject, grouping),
+        )
+      : undefined;
+  const [offlineHandover] = useState(() =>
+    preferredProject && fallbackProject
+      ? {
+          from: environmentLabel(preferredProject.environmentId),
+          to: environmentLabel(fallbackProject.environmentId),
+        }
+      : null,
+  );
+  const initialProject = fallbackProject ?? preferredProject ?? profileProjects[0];
+  const seedPlace = seed ? seedPlacement(profiles, seed) : null;
+  // The handover checkout may belong to another profile; follow it rather than
+  // asking to move it on submit.
+  const handoverProfileId = fallbackProject
+    ? (profiles.find(
+        (profile) =>
+          profile.id === seedPlace?.profileId &&
+          profile.projectKeys.includes(projectKeyOf(fallbackProject)),
+      )?.id ??
+      profiles.find((profile) => profile.projectKeys.includes(projectKeyOf(fallbackProject)))?.id)
+    : undefined;
+  const followsChat = Boolean(seed || lastLocation);
   const initialProfileId =
     request.scope?.profileId ??
-    (session
-      ? profiles.find((profile) => initialKey && profile.projectKeys.includes(initialKey))?.id
-      : ui.activeProfileId) ??
+    (fallbackProject
+      ? handoverProfileId
+      : seed
+        ? seedPlace?.profileId
+        : lastLocation
+          ? lastLocation.profileId
+          : ui.activeProfileId) ??
     ALL_PROFILE_ID;
   const initialProfile = profiles.find((profile) => profile.id === initialProfileId);
   const initialSpace = request.scope
     ? request.scope.spaceId
-    : session && initialKey && initialProfile
-      ? spaceForThread(
-          initialProfile,
-          scopedThreadKey(scopeThreadRef(session.environmentId, session.threadId)),
-          initialKey,
-        )?.id
-      : initialProfile?.spaces?.find(
-          (space) =>
-            ui.spaceSelection?.profileId === initialProfile.id &&
-            ui.spaceSelection.filter === space.id,
-        )?.id;
+    : seed
+      ? seedPlace?.profileId === initialProfileId
+        ? seedPlace.spaceId
+        : undefined
+      : lastLocation
+        ? initialProfile?.spaces?.find((space) => space.id === lastLocation.spaceId)?.id
+        : initialProfile?.spaces?.find(
+            (space) =>
+              ui.spaceSelection?.profileId === initialProfile.id &&
+              ui.spaceSelection.filter === space.id,
+          )?.id;
   const initialSelectedSpace = initialProfile?.spaces?.find((space) => space.id === initialSpace);
   const initialSpaceKeys = initialSelectedSpace ? spaceProjectKeys(initialSelectedSpace) : null;
   const initialDefaults = initialSelectedSpace ? spaceDeviceDefaults(initialSelectedSpace) : {};
   const initialDefaultKey =
     (initialProject ? initialDefaults[initialProject.environmentId] : undefined)?.projectKey ??
     Object.values(initialDefaults)[0]?.projectKey;
-  const initialLocationProject = request.draftId
-    ? initialProject
-    : initialSpaceKeys
-      ? (projects.find(
-          (project) => `${project.environmentId}:${project.id}` === initialDefaultKey,
-        ) ??
-        projects.find((project) =>
-          initialSpaceKeys.includes(`${project.environmentId}:${project.id}`),
-        ))
-      : initialProject;
+  // A chat to follow keeps its own project; otherwise a space's device default wins.
+  const initialLocationProject =
+    (followsChat || request.draftId) && initialProject
+      ? initialProject
+      : initialSpaceKeys
+        ? (projects.find(
+            (project) => `${project.environmentId}:${project.id}` === initialDefaultKey,
+          ) ??
+          projects.find((project) =>
+            initialSpaceKeys.includes(`${project.environmentId}:${project.id}`),
+          ))
+        : initialProject;
   const [profileId, setProfileId] = useState(initialProfileId);
   const [spaceId, setSpaceId] = useState<string | null>(initialSpace ?? null);
   const [location, setLocation] = useState<ChatLocation | null>(
@@ -137,7 +264,6 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
   const [error, setError] = useState<string | null>(null);
   const resolveProject = useResolveChatProject();
   const saveProfiles = useSaveProfiles();
-  const grouping = useClientSettings(selectProjectGroupingSettings);
   const profile = profiles.find((item) => item.id === profileId);
   const selectedSpace = profile?.spaces?.find((space) => space.id === spaceId);
   const spaceKeys = selectedSpace ? spaceProjectKeys(selectedSpace) : null;
@@ -167,6 +293,24 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
     if (favorite && favorite.environmentId !== next?.environmentId) setFavorite(null);
   };
   const close = () => useChatCreationStore.setState({ request: null });
+  /** The seed chat's working mode, and its checkout choice when the project is the same one. */
+  const seedOptions = (projectRef: ScopedProjectRef) => {
+    if (!seed) return {};
+    const carryFrom = scopeThreadRef(seed.environmentId, seed.threadId);
+    const all = readProjects();
+    const from = all.find(
+      (item) => item.environmentId === seed.environmentId && item.id === seed.projectId,
+    );
+    const to = all.find(
+      (item) => item.environmentId === projectRef.environmentId && item.id === projectRef.projectId,
+    );
+    const sameLogicalProject =
+      from &&
+      to &&
+      deriveLogicalProjectKeyFromSettings(from, grouping) ===
+        deriveLogicalProjectKeyFromSettings(to, grouping);
+    return sameLogicalProject ? { carryFrom, ...seedWorkspace(seed, from === to) } : { carryFrom };
+  };
   const submit = async () => {
     if (!location || !locationAvailable || pending.current) return;
     pending.current = true;
@@ -281,7 +425,9 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
             ? boardDraft.current.opened
             : await handleNewThread(resolved.projectRef, {
                 spaceId,
-                ...(request.onCreated ? { navigate: false, forceNew: true } : {}),
+                ...seedOptions(resolved.projectRef),
+                // An untouched draft already at this location is reused, not duplicated.
+                ...(request.onCreated ? { navigate: false } : {}),
                 ...(favoriteSelection ? { modelSelection: favoriteSelection } : {}),
               });
         if (opened && request.onCreated) boardDraft.current = { locationKey, opened };
@@ -292,6 +438,11 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
             replaceOptions: true,
           });
         await request.onCreated?.({ ...opened, projectRef: resolved.projectRef });
+        setLocalStorageItem(
+          LAST_CHAT_LOCATION_KEY,
+          { projectKey, profileId, spaceId },
+          LastChatLocation,
+        );
       }
       if (!request.onCreated) revealChatLocation(profileId, spaceId);
       close();
@@ -302,6 +453,11 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
       setBusy(false);
     }
   };
+  // ⌘⇧N: open straight away when the copied setup is ready; otherwise stay open to say why.
+  const submitInstantly = useEffectEvent(() => {
+    if (request.instant && (seed || lastLocation)) void submit();
+  });
+  useEffect(() => submitInstantly(), []);
   return (
     <Dialog
       open
@@ -413,6 +569,12 @@ function ChatCreationForm({ request }: { request: ChatCreationRequest }) {
               }}
               disabled={busy}
             />
+            {offlineHandover ? (
+              <p role="status" className="flex items-start gap-1.5 text-xs text-foreground">
+                <WifiOffIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+                {offlineHandover.from} is offline, so this opens on {offlineHandover.to}.
+              </p>
+            ) : null}
           </fieldset>
           {error && (
             <p

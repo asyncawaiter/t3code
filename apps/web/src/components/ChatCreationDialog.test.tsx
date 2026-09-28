@@ -11,6 +11,8 @@ const state = vi.hoisted(() => {
   ];
   return {
     projects,
+    request: {} as Record<string, unknown>,
+    shell: null as Record<string, unknown> | null,
     resolveProject: vi.fn(),
     profiles: [
       {
@@ -43,6 +45,8 @@ vi.mock("react", async (original) => {
     ...(await original<typeof import("react")>()),
     useState: reactHookHarness.useState,
     useRef: reactHookHarness.useRef,
+    useEffect: () => undefined,
+    useEffectEvent: <T,>(callback: T) => callback,
   };
 });
 vi.mock("react/compiler-runtime", async () => {
@@ -55,6 +59,7 @@ vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("../state/entities", () => ({
   useProjects: () => state.projects,
   readProjects: () => state.projects,
+  readThreadShell: () => state.shell,
 }));
 vi.mock("../state/environments", () => ({
   useEnvironments: () => ({
@@ -82,9 +87,13 @@ vi.mock("../uiStateStore", () => ({
     spaceSelection: { profileId: "work", filter: "evals" },
   }),
 }));
-vi.mock("../composerDraftStore", () => ({ useComposerDraftStore: () => null }));
+vi.mock("../composerDraftStore", () => ({
+  useComposerDraftStore: Object.assign(() => null, {
+    getState: () => ({ getDraftSessionByRef: () => null }),
+  }),
+}));
 vi.mock("../chatCreationStore", () => ({
-  useChatCreationStore: () => ({}),
+  useChatCreationStore: (select: (s: unknown) => unknown) => select({ request: state.request }),
   revealChatLocation: vi.fn(),
 }));
 vi.mock("../hooks/useChatCreation", () => ({
@@ -130,6 +139,28 @@ function picker(tree: ReturnType<typeof render>) {
 beforeEach(() => {
   hooks.reset();
   vi.clearAllMocks();
+  state.request = {};
+  state.shell = null;
+});
+it("copies the focused chat's space and project over the sidebar's selection", () => {
+  state.request = {
+    source: { environmentId: "laptop", threadId: "c", projectId: "pod", worktreePath: null },
+  };
+  state.shell = { environmentId: "laptop", projectId: "pod", id: "c", worktreePath: null };
+  const tree = render();
+  expect(picker(tree).props.value).toEqual({ environmentId: "laptop", workspaceRoot: "/work/pod" });
+  expect(
+    visitElements(tree, (element) => element.type === "select" && element.props.value === "pod"),
+  ).toBeTruthy();
+});
+it("copies an archived column's project from its row when the chat is in no store", () => {
+  state.request = {
+    source: { environmentId: "laptop", threadId: "gone", projectId: "pod", worktreePath: null },
+  };
+  expect(picker(render()).props.value).toEqual({
+    environmentId: "laptop",
+    workspaceRoot: "/work/pod",
+  });
 });
 it("prefills a folder from the selected space instead of the first profile folder", () => {
   const tree = render();

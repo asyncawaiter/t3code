@@ -17,6 +17,7 @@ import {
   findProfile,
   isProjectInProfile,
   type ScopedProjectRef,
+  type ScopedThreadRef,
   type ModelSelection,
   DEFAULT_SERVER_SETTINGS,
   type ThreadId,
@@ -49,7 +50,7 @@ import {
 } from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
 import { primaryServerSettingsAtom, environmentServerConfigsAtom } from "../state/server";
-import { resolveThreadRouteTarget } from "../threadRoutes";
+import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings, usePrimarySettings, useLegacySidebarEnabled } from "./useSettings";
 
@@ -95,6 +96,8 @@ function useCreateDraft() {
         spaceId?: string | null;
         useProjectDefaults?: boolean;
         modelSelection?: ModelSelection;
+        /** The chat whose working mode carries, when it is not the routed one (a board column). */
+        carryFrom?: ScopedThreadRef;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
@@ -110,6 +113,7 @@ function useCreateDraft() {
         getComposerDraft,
         getDraftSessionByLogicalProjectKey,
         getDraftSession,
+        getDraftIdByRef,
         getDraftThread,
         applyStickyState,
         setDraftThreadContext,
@@ -123,19 +127,24 @@ function useCreateDraft() {
       // viewed. The target project's configured model still wins; interaction
       // mode carries independently. Permissions, branch, worktree, and env mode
       // come from configured defaults unless the caller passes them explicitly.
-      const carrySourceShell =
-        currentRouteTarget?.kind === "server"
-          ? readThreadShell(currentRouteTarget.threadRef)
+      const carryFromDraftId =
+        options?.carryFrom && readThreadShell(options.carryFrom) === null
+          ? getDraftIdByRef(options.carryFrom)
           : null;
+      const carryTarget: ThreadRouteTarget | null = options?.carryFrom
+        ? carryFromDraftId
+          ? { kind: "draft", draftId: carryFromDraftId }
+          : { kind: "server", threadRef: options.carryFrom }
+        : currentRouteTarget;
+      const carrySourceShell =
+        carryTarget?.kind === "server" ? readThreadShell(carryTarget.threadRef) : null;
       const carrySourceDraft =
-        currentRouteTarget?.kind === "draft" ? getDraftSession(currentRouteTarget.draftId) : null;
+        carryTarget?.kind === "draft" ? getDraftSession(carryTarget.draftId) : null;
       // Composer overrides win over the persisted thread state — they are
       // what the user currently sees in the composer controls.
-      const carrySourceComposer = currentRouteTarget
+      const carrySourceComposer = carryTarget
         ? getComposerDraft(
-            currentRouteTarget.kind === "server"
-              ? currentRouteTarget.threadRef
-              : currentRouteTarget.draftId,
+            carryTarget.kind === "server" ? carryTarget.threadRef : carryTarget.draftId,
           )
         : null;
       const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
@@ -172,8 +181,7 @@ function useCreateDraft() {
         resolveNewThreadModelSelectionOverride({
           projectDefaultSelection: projectDefaultModelSelection ?? null,
           carrySelection: options?.useProjectDefaults ? null : carryModelSelection,
-          carrySourceDraftId:
-            currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+          carrySourceDraftId: carryTarget?.kind === "draft" ? carryTarget.draftId : null,
           destinationDraftId,
         });
       // The shared resolver owns the priority order. The t3.json read is
@@ -232,9 +240,11 @@ function useCreateDraft() {
         : null;
       if (emptyStoredDraftThread && !options?.forceNew) {
         return (async () => {
+          // The draft being copied is on screen too, as the focused board column.
           const isDraftAlreadyOpen =
-            currentRouteTarget?.kind === "draft" &&
-            currentRouteTarget.draftId === emptyStoredDraftThread.draftId;
+            (currentRouteTarget?.kind === "draft" &&
+              currentRouteTarget.draftId === emptyStoredDraftThread.draftId) ||
+            carryFromDraftId === emptyStoredDraftThread.draftId;
           const hasExplicitWorkspaceOption =
             hasBranchOption ||
             hasWorktreePathOption ||
