@@ -64,9 +64,11 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  use,
   useState,
   useSyncExternalStore,
 } from "react";
+import { ChatPaneContext } from "./ChatPaneContext";
 import { createPortal, flushSync } from "react-dom";
 import {
   clampCollapsedComposerCursor,
@@ -2147,6 +2149,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
    * the next draft.
    */
   const pendingImageCompressionsRef = useRef<Map<string, number>>(new Map());
+  const paneActive = use(ChatPaneContext).active;
   const isRevertingCheckpointRef = useRef(isRevertingCheckpoint);
   isRevertingCheckpointRef.current = isRevertingCheckpoint;
 
@@ -5180,6 +5183,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [prompt]);
 
   useEffect(() => {
+    // Every board column mounts a composer; only the selected one owns the
+    // shortcut, or the next column would restore the entry just stashed.
+    if (!paneActive) return;
     const handler = (event: globalThis.KeyboardEvent) => {
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
@@ -5212,6 +5218,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isComposerApprovalState,
     isComposerModelPickerOpen,
     keybindings,
+    paneActive,
     pendingUserInputs.length,
     projectSelectionRequired,
     stashCurrentPrompt,
