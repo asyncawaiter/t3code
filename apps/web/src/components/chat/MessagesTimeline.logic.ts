@@ -42,7 +42,9 @@ import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 
 const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
-const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
+// Relative to the timeline pane, not the window: a board column or split pane is
+// far shorter than the viewport. The margin leaves room for the turn arrows.
+const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100% - 5rem)";
 const TIMELINE_CONTENT_MAX_WIDTH = 768;
 const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 

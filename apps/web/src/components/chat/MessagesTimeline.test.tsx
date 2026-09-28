@@ -632,7 +632,7 @@ describe("MessagesTimeline", () => {
     // Geometry missing (older state shape): fall back to the strict flag.
     expect(resolveTimelineIsAtEnd({ isAtEnd: false })).toBe(false);
 
-    expect(resolveTimelineMinimapHeightStyle(5)).toBe("min(32px, calc(100vh - 18rem))");
+    expect(resolveTimelineMinimapHeightStyle(5)).toBe("min(32px, calc(100% - 5rem))");
     expect(resolveTimelineMinimapTopPercent(2, 5)).toBe(50);
     expect(
       resolveTimelineMinimapIndexFromPointer({
