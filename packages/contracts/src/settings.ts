@@ -302,6 +302,9 @@ export const LoadBalancingWeights = Schema.Record(
 
 export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
 
+/** Display names this client shows for environments, keyed by environment id. */
+export const EnvironmentAliases = Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString);
+
 export const ClientSettingsSchema = Schema.Struct({
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("notifications" as const)),
@@ -312,6 +315,7 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   loadBalancingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   loadBalancingWeights: LoadBalancingWeights.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  environmentAliases: EnvironmentAliases.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   appearanceContrast: AppearanceContrast.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_APPEARANCE_CONTRAST)),
   ),
@@ -1545,6 +1549,7 @@ export const ClientSettingsPatch = Schema.Struct({
   diffColorScheme: Schema.optionalKey(DiffColorScheme),
   loadBalancingEnabled: Schema.optionalKey(Schema.Boolean),
   loadBalancingWeights: Schema.optionalKey(LoadBalancingWeights),
+  environmentAliases: Schema.optionalKey(EnvironmentAliases),
   appearanceContrast: Schema.optionalKey(AppearanceContrast),
   panelAnimationDurationMs: Schema.optionalKey(PanelAnimationDurationMs),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),

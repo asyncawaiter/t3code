@@ -74,6 +74,7 @@ import {
   environmentTransportLabel,
   formatDesktopSshTarget,
 } from "./EnvironmentRow";
+import { DeviceNamesSettings } from "./DeviceNamesSettings";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
 import { GitHubRoutingSettings } from "./GitHubRoutingSettings";
@@ -1910,6 +1911,10 @@ export function ConnectionsSettings() {
   // load balancing and GitHub sharing lists. The WSL backend has no row in
   // the Environments list but does take threads, so it stays in here. This
   // machine leads the list.
+  const deviceNameEnvironments = useMemo(
+    () => [...(primaryEnvironment ? [primaryEnvironment] : []), ...savedEnvironments],
+    [primaryEnvironment, savedEnvironments],
+  );
   const loadBalancingEnvironments = useMemo(
     () => [
       ...(primaryEnvironment ? [primaryEnvironment] : []),
@@ -3776,6 +3781,7 @@ export function ConnectionsSettings() {
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      <DeviceNamesSettings environments={deviceNameEnvironments} />
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <GitHubRoutingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>

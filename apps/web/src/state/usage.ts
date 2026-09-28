@@ -21,6 +21,7 @@ import { useCallback, useMemo } from "react";
 
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@t3tools/shared/usageMerge";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { aliasedEnvironmentLabel, environmentAliasesAtom } from "./environmentAliases";
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
 
@@ -43,13 +44,14 @@ const usageByWindowAtom = Atom.family((windowKey: string) =>
   Atom.make((get): readonly EnvironmentUsageStatus[] => {
     const input = JSON.parse(windowKey) as UsageSummaryInput;
     const presentations = get(environmentPresentations.presentationsAtom);
+    const aliases = get(environmentAliasesAtom);
 
     const statuses: EnvironmentUsageStatus[] = [];
     for (const [environmentId, presentation] of presentations) {
       const result = get(serverEnvironment.usageSummary({ environmentId, input }));
       statuses.push({
         environmentId,
-        label: presentation.entry.target.label,
+        label: aliasedEnvironmentLabel(aliases, environmentId, presentation.entry.target.label),
         isPending: result.waiting,
         error: result._tag === "Failure" ? "This environment could not report usage." : null,
         summary: Option.getOrNull(AsyncResult.value(result)),
@@ -173,13 +175,14 @@ interface EnvironmentLimitsStatus {
  */
 const usageLimitsAtom = Atom.make((get) => {
   const presentations = get(environmentPresentations.presentationsAtom);
+  const aliases = get(environmentAliasesAtom);
   const statuses: EnvironmentLimitsStatus[] = [];
   for (const [environmentId, presentation] of presentations) {
     const result = get(serverEnvironment.usageLimits({ environmentId, input: {} }));
     const snapshot = Option.getOrNull(AsyncResult.value(result));
     statuses.push({
       environmentId,
-      label: presentation.entry.target.label,
+      label: aliasedEnvironmentLabel(aliases, environmentId, presentation.entry.target.label),
       isPending: result.waiting,
       failed: result._tag === "Failure",
       providers: snapshot?.providers ?? null,

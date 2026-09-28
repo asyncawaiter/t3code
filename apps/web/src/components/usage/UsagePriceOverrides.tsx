@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
+import { aliasedEnvironmentLabel, environmentAliasesAtom } from "../../state/environmentAliases";
 import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { environmentSession } from "../../state/session";
@@ -46,38 +47,41 @@ import {
   type UsagePriceWriteResult,
 } from "./usagePriceTargets";
 
-const priceTargetsAtom = Atom.make((get): readonly UsagePriceTarget[] =>
-  [...get(environmentPresentations.presentationsAtom)].map(([environmentId, environment]) => {
-    const settings = get(serverEnvironment.settingsValueAtom(environmentId));
-    const session = get(environmentSession.sessionStateAtom(environmentId));
-    const sessionAccess = {
-      session: Option.getOrNull(AsyncResult.value(session)),
-      isPending: session.waiting,
-      hasError: session._tag === "Failure",
-    };
-    const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
-    const access = isPrimary
-      ? resolvePrimaryOperateAccess({ ...sessionAccess, isPrimary, hasDesktopBridge: isElectron })
-      : resolveRemoteOperateAccess(sessionAccess);
-    return {
-      environmentId,
-      label: environment.entry.target.label,
-      prices: settings?.usagePriceOverrides ?? null,
-      unavailable:
-        environment.connection.phase !== "connected"
-          ? "Offline"
-          : settings === null
-            ? "Prices not loaded"
-            : environment.serverConfig?.environment.capabilities.usagePriceOverrides !== true
-              ? "Update server to edit prices"
-              : access === "pending"
-                ? "Checking permissions…"
-                : access === "denied"
-                  ? "Read-only access"
-                  : null,
-    };
-  }),
-);
+const priceTargetsAtom = Atom.make((get): readonly UsagePriceTarget[] => {
+  const aliases = get(environmentAliasesAtom);
+  return [...get(environmentPresentations.presentationsAtom)].map(
+    ([environmentId, environment]) => {
+      const settings = get(serverEnvironment.settingsValueAtom(environmentId));
+      const session = get(environmentSession.sessionStateAtom(environmentId));
+      const sessionAccess = {
+        session: Option.getOrNull(AsyncResult.value(session)),
+        isPending: session.waiting,
+        hasError: session._tag === "Failure",
+      };
+      const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
+      const access = isPrimary
+        ? resolvePrimaryOperateAccess({ ...sessionAccess, isPrimary, hasDesktopBridge: isElectron })
+        : resolveRemoteOperateAccess(sessionAccess);
+      return {
+        environmentId,
+        label: aliasedEnvironmentLabel(aliases, environmentId, environment.entry.target.label),
+        prices: settings?.usagePriceOverrides ?? null,
+        unavailable:
+          environment.connection.phase !== "connected"
+            ? "Offline"
+            : settings === null
+              ? "Prices not loaded"
+              : environment.serverConfig?.environment.capabilities.usagePriceOverrides !== true
+                ? "Update server to edit prices"
+                : access === "pending"
+                  ? "Checking permissions…"
+                  : access === "denied"
+                    ? "Read-only access"
+                    : null,
+      };
+    },
+  );
+});
 
 type SaveAttempt = {
   readonly drafts: readonly UsagePriceDraft[];

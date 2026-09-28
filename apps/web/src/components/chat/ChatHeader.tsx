@@ -18,7 +18,13 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { BookmarkIcon, ChevronDownIcon, EllipsisIcon, FolderOpenIcon } from "lucide-react";
+import {
+  BookmarkIcon,
+  ChevronDownIcon,
+  EllipsisIcon,
+  FolderOpenIcon,
+  FolderXIcon,
+} from "lucide-react";
 import {
   Fragment,
   memo,
@@ -43,7 +49,7 @@ import ProjectScriptsControl, {
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
 import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
-import { usePrimaryEnvironmentId } from "../../state/environments";
+import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { readLocalApi } from "~/localApi";
@@ -759,6 +765,9 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipPopup>{bookmarkLabel}</TooltipPopup>
             </Tooltip>
           )}
+          {remoteOpenState.mode !== "local-exec" ? (
+            <RemoteFolderBadge environmentId={activeThreadEnvironmentId} />
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -847,3 +856,26 @@ export const ChatHeader = memo(function ChatHeader({
     </div>
   );
 });
+
+/** The machine that holds the chat's folder, shown while this device cannot open it. */
+function RemoteFolderBadge({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const environment = useEnvironment(environmentId);
+  if (environment === null) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            aria-label={`Folder on ${environment.label}`}
+            className="inline-flex max-w-28 items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] font-medium leading-4 text-muted-foreground"
+          />
+        }
+      >
+        <FolderXIcon aria-hidden className="size-3 shrink-0" />
+        <span className="truncate">{environment.label}</span>
+      </TooltipTrigger>
+      <TooltipPopup>{environment.label}</TooltipPopup>
+    </Tooltip>
+  );
+}

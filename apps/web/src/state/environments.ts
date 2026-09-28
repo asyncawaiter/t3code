@@ -9,6 +9,7 @@ import * as Option from "effect/Option";
 import { useMemo } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
+import { aliasedEnvironmentLabel, environmentAliasesAtom } from "./environmentAliases";
 import { environmentPresentations, useEnvironmentPresentation } from "./presentation";
 import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { relayEnvironmentDiscovery } from "./relay";
@@ -24,11 +25,12 @@ export interface EnvironmentPresentation extends BaseEnvironmentPresentation {
 function projectEnvironmentPresentation(
   environmentId: EnvironmentId,
   presentation: BaseEnvironmentPresentation,
+  aliases: Readonly<Record<string, string>>,
 ): EnvironmentPresentation {
   return {
     ...presentation,
     environmentId,
-    label: presentation.entry.target.label,
+    label: aliasedEnvironmentLabel(aliases, environmentId, presentation.entry.target.label),
     displayUrl: connectionCatalogDisplayUrl(presentation.entry),
     relayManaged: presentation.entry.target._tag === "RelayConnectionTarget",
   };
@@ -38,13 +40,14 @@ export function useEnvironments() {
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   const networkStatus = useAtomValue(environmentCatalog.networkStatusValueAtom);
   const presentationById = useAtomValue(environmentPresentations.presentationsAtom);
+  const aliases = useAtomValue(environmentAliasesAtom);
 
   const environments = useMemo(
     () =>
       [...presentationById.entries()].map(([environmentId, presentation]) =>
-        projectEnvironmentPresentation(environmentId, presentation),
+        projectEnvironmentPresentation(environmentId, presentation, aliases),
       ),
-    [presentationById],
+    [presentationById, aliases],
   );
 
   return {
@@ -63,12 +66,13 @@ export function useEnvironment(
   environmentId: EnvironmentId | null,
 ): EnvironmentPresentation | null {
   const { presentation } = useEnvironmentPresentation(environmentId);
+  const aliases = useAtomValue(environmentAliasesAtom);
   return useMemo(
     () =>
       environmentId === null || presentation === null
         ? null
-        : projectEnvironmentPresentation(environmentId, presentation),
-    [environmentId, presentation],
+        : projectEnvironmentPresentation(environmentId, presentation, aliases),
+    [environmentId, presentation, aliases],
   );
 }
 

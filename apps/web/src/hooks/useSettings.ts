@@ -47,6 +47,7 @@ import {
   primaryServerSettingsAtom,
   serverEnvironment,
 } from "~/state/server";
+import { publishEnvironmentAliases } from "~/state/environmentAliases";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useTheme } from "./useTheme";
@@ -85,6 +86,7 @@ function getClientSettingsSnapshot(): ClientSettings {
 
 function replaceClientSettingsSnapshot(settings: ClientSettings): void {
   clientSettingsSnapshot = settings;
+  publishEnvironmentAliases(settings.environmentAliases);
   emitClientSettingsChange();
 }
 

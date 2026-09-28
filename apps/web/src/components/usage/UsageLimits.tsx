@@ -11,12 +11,14 @@ import {
   elapsedShare,
   formatDuration,
   formatResetsIn,
+  type LimitPresentations,
   paceOf,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { Fragment, useRef, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
+import { aliasedEnvironmentLabel, environmentAliasesAtom } from "../../state/environmentAliases";
 import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -362,9 +364,21 @@ export function UsageLimitsSection({
   readonly now: number;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
-  const selected =
-    selectedEnvironmentIds === null
-      ? presentations
-      : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
+  const aliases = useAtomValue(environmentAliasesAtom);
+  const selected: LimitPresentations = new Map(
+    [...presentations]
+      .filter(([id]) => selectedEnvironmentIds === null || selectedEnvironmentIds.has(id))
+      .map(([id, presentation]) => [
+        id,
+        {
+          ...presentation,
+          entry: {
+            target: {
+              label: aliasedEnvironmentLabel(aliases, id, presentation.entry.target.label),
+            },
+          },
+        },
+      ]),
+  );
   return <UsageLimitAccounts presentations={selected} now={now} />;
 }
