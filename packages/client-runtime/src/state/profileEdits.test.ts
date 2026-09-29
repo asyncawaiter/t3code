@@ -202,3 +202,21 @@ it("persists a fork's source Space while the profile host is offline and syncs a
   ]);
   expect(restarted.snapshot().draft).toBeNull();
 });
+
+it("stops a sync whose draft never settles instead of writing forever", async () => {
+  const test = setup();
+  const queue = createProfileEditQueue(test.storage);
+  await queue.edit(sourceId, base, addSpace("0"));
+  let saves = 0;
+  await queue.flush({
+    ...test.io,
+    save: async (id, profiles) => {
+      await test.io.save(id, profiles);
+      saves += 1;
+      void queue.edit(sourceId, base, addSpace(String(saves)));
+    },
+  });
+  expect(saves).toBe(8);
+  expect(queue.snapshot().error).toContain("keep changing");
+  expect(queue.snapshot().draft).not.toBeNull();
+});

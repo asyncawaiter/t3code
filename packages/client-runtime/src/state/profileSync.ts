@@ -189,6 +189,8 @@ export type ProfileEditState = {
   error: string | null;
 };
 
+const MAX_FLUSH_PASSES = 8;
+
 /** Persist organization edits before exposing them, then merge against fresh shared settings. */
 export function createProfileEditQueue(storage: {
   read: () => Promise<string | null>;
@@ -271,7 +273,12 @@ export function createProfileEditQueue(storage: {
       if (draining) return draining;
       draining = lock("sync", async () => {
         await change(async () => {});
+        let passes = 0;
         while (state.draft && io.canSync(state.draft.sourceId)) {
+          // ponytail: a draft that still differs after this many writes is not converging;
+          // stop and surface it instead of hammering the source device.
+          if (++passes > MAX_FLUSH_PASSES)
+            throw new Error("Organization edits keep changing during sync. Retry to send them.");
           const sent = state.draft;
           const remote = await io.read(sent.sourceId);
           if (!io.canSync(sent.sourceId)) return;

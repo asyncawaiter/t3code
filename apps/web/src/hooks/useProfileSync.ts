@@ -133,8 +133,12 @@ export function useSyncProfileEdits() {
       }),
     [connected, persist, read],
   );
+  // Retry only when the draft, connection, or sync capability changes. Keying on
+  // the settings snapshot re-ran a failed flush on every save it caused, which
+  // looped a lost acknowledgement into dozens of settings writes per second.
+  const syncable = source.config?.environment.capabilities.profileSynchronization === true;
   useEffect(() => {
-    if (connected && source.config && edits.draft) void flush();
-  }, [connected, edits.draft, source.config, flush]);
+    if (connected && syncable && edits.draft) void flush();
+  }, [connected, edits.draft, syncable, flush]);
   return { ...edits, retry: flush };
 }
