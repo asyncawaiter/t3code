@@ -69,6 +69,7 @@ import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import {
   useEffect,
+  useEffectEvent,
   useMemo,
   useLayoutEffect,
   useRef,
@@ -149,6 +150,10 @@ type ColumnChat = Pick<
 // Memoized: a column passes only primitive props, so board re-renders (any
 // thread's shell changing) no longer re-render every visible chat.
 const ChatView = memo(lazy(() => import("../ChatView")));
+// Recently viewed columns keep their chat mounted after scrolling away, so going
+// back is instant and keeps its scroll position.
+// ponytail: fixed cap, tune if memory or background streaming shows up in profiles.
+const WARM_COLUMNS = 8;
 const OptionalChatKey = Schema.NullOr(Schema.String);
 const Layout = Schema.Struct({
   order: Schema.Array(Schema.String),
@@ -466,6 +471,11 @@ function BoardColumns({
   const sidePanelInset = useSidePanelInset();
   const location = useLocation();
   const { remember } = useChatColumnMemory();
+  const [warmKeys, setWarmKeys] = useState<readonly string[]>([]);
+  const markSeen = (key: string) =>
+    setWarmKeys((keys) =>
+      keys[0] === key ? keys : [key, ...keys.filter((item) => item !== key)].slice(0, WARM_COLUMNS),
+    );
   const rememberUse = (key: string) =>
     remember(
       key,
@@ -1672,6 +1682,8 @@ function BoardColumns({
                   active={active === key}
                   expanded={expanded === key}
                   hidden={expanded !== null && expanded !== key}
+                  warm={warmKeys.includes(key)}
+                  onSeen={() => markSeen(key)}
                   onFocus={() => setFocused(key)}
                   onUse={() => rememberUse(key)}
                   connected={environments.some(
@@ -1897,6 +1909,8 @@ function Column({
   active,
   expanded,
   hidden,
+  warm,
+  onSeen,
   onFocus,
   onOpenScope,
   onUse,
@@ -1925,6 +1939,9 @@ function Column({
   active: boolean;
   expanded: boolean;
   hidden: boolean;
+  /** Recently viewed, so the chat stays mounted while offscreen. */
+  warm: boolean;
+  onSeen: () => void;
   onFocus: () => void;
   /** Opens the columns view filtered to this chat's profile, space, project or device. */
   onOpenScope: (kind: "profile" | "space" | "project" | "device") => void;
@@ -2011,15 +2028,27 @@ function Column({
     [paneActive, expanded, width],
   );
   const [visible, setVisible] = useState(false);
+  const seen = useEffectEvent(onSeen);
   useEffect(() => {
     const node = element.current;
     if (!node) return;
-    const observer = new IntersectionObserver(([entry]) => setVisible(!!entry?.isIntersecting), {
+    // Mounts a chat about one rail width before it scrolls in, and keeps it until
+    // it is about one rail width out, so normal scrolling never shows the placeholder.
+    const near = new IntersectionObserver(([entry]) => setVisible(!!entry?.isIntersecting), {
+      root: node.parentElement,
+      rootMargin: "0px 100%",
+    });
+    // Only columns actually scrolled into view count as recently viewed.
+    const onScreen = new IntersectionObserver(([entry]) => entry?.isIntersecting && seen(), {
       root: node.parentElement,
       threshold: 0.05,
     });
-    observer.observe(node);
-    return () => observer.disconnect();
+    near.observe(node);
+    onScreen.observe(node);
+    return () => {
+      near.disconnect();
+      onScreen.disconnect();
+    };
   }, []);
   return (
     <section
@@ -2300,7 +2329,7 @@ function Column({
                   Reconnect {device} to load this conversation.
                 </p>
               </div>
-            ) : visible && !hidden ? (
+            ) : (visible || warm) && !hidden ? (
               <Suspense
                 fallback={<p className="p-3 text-xs text-muted-foreground">Loading chat...</p>}
               >
