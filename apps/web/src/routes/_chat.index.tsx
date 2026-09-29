@@ -1,6 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -13,6 +13,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useChatMode } from "../components/spaces/columnNavigation";
 import { useAllEnvironmentShellsBootstrapped, useThreadShells } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
@@ -33,7 +34,9 @@ function ChatIndexRouteView() {
 /**
  * Landing on the index route drops straight into a draft thread for the most
  * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
+ * end. Falls back to an add-project hero when no project exists yet. In columns
+ * mode it opens the last board instead: a draft there would be added to the board
+ * as a new column on every launch.
  */
 function IndexDraftLanding() {
   const { profileProjects: projects, handleNewThread } = useHandleNewThread();
@@ -41,6 +44,8 @@ function IndexDraftLanding() {
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
+  const [mode] = useChatMode();
+  const navigate = useNavigate();
 
   const mostRecentProject = useMemo(
     () =>
@@ -55,13 +60,23 @@ function IndexDraftLanding() {
       return;
     }
     startingRef.current = true;
+    if (mode === "columns") {
+      // No board param: the columns view opens the last selected board.
+      void navigate({
+        to: "/spaces/$profileId",
+        params: { profileId: "all" },
+        search: { view: "columns", workspace: "board", space: undefined, unsorted: false },
+        replace: true,
+      });
+      return;
+    }
     void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
       replace: true,
     }).catch(() => {
       startingRef.current = false;
       setStartState((state) => ({ ...state, failed: true }));
     });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+  }, [handleNewThread, mode, mostRecentProject, navigate, startState.retryRequest]);
 
   if (!bootstrapped) {
     return null;
