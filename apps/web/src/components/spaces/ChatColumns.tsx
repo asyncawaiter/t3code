@@ -74,6 +74,7 @@ import {
   useRef,
   useState,
   lazy,
+  memo,
   Suspense,
   type CSSProperties,
 } from "react";
@@ -104,7 +105,7 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useEnvironments } from "../../state/environments";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Button } from "../ui/button";
-import { ChatPaneContext } from "../chat/ChatPaneContext";
+import { ChatColumnActionsContext, ChatPaneContext } from "../chat/ChatPaneContext";
 import { Spinner } from "../ui/spinner";
 import { useSidePanelInset } from "./columnsPanel";
 import { useProjects } from "../../state/entities";
@@ -145,7 +146,9 @@ type ColumnChat = Pick<
   > & {
     draftId?: DraftId;
   };
-const ChatView = lazy(() => import("../ChatView"));
+// Memoized: a column passes only primitive props, so board re-renders (any
+// thread's shell changing) no longer re-render every visible chat.
+const ChatView = memo(lazy(() => import("../ChatView")));
 const OptionalChatKey = Schema.NullOr(Schema.String);
 const Layout = Schema.Struct({
   order: Schema.Array(Schema.String),
@@ -1993,6 +1996,20 @@ function Column({
   });
   const element = useRef<HTMLElement>(null);
   const resize = useRef<{ x: number; width: number } | null>(null);
+  const latestOnResize = useRef(onResize);
+  useLayoutEffect(() => {
+    latestOnResize.current = onResize;
+  });
+  const paneActive = active && !hidden;
+  const pane = useMemo(
+    () => ({
+      active: paneActive,
+      column: !expanded,
+      columnWidth: width,
+      resizeColumn: (next: number) => void latestOnResize.current(columnWidth(next)),
+    }),
+    [paneActive, expanded, width],
+  );
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     const node = element.current;
@@ -2263,48 +2280,44 @@ function Column({
           }}
         />
       )}
-      <ChatPaneContext
-        value={{
-          active: active && !hidden,
-          column: !expanded,
-          columnActions,
-          columnWidth: width,
-          resizeColumn: (next) => void onResize(columnWidth(next)),
-        }}
-      >
-        <div
-          className="flex min-h-0 flex-1 flex-col"
-          style={expanded ? ({ "--chat-content-max-width": "72rem" } as CSSProperties) : undefined}
-        >
-          {!connected ? (
-            <div className="p-3">
-              <Menu>
-                <MenuTrigger render={<Button size="xs" variant="outline" />}>
-                  Actions <ChevronDownIcon />
-                </MenuTrigger>
-                <MenuPopup>{columnActions}</MenuPopup>
-              </Menu>
-              <p className="mt-3 text-sm text-muted-foreground">
-                Reconnect {device} to load this conversation.
-              </p>
-            </div>
-          ) : visible && !hidden ? (
-            <Suspense
-              fallback={<p className="p-3 text-xs text-muted-foreground">Loading chat...</p>}
-            >
-              <ChatView
-                environmentId={chat.environmentId}
-                threadId={chat.id}
-                {...(chat.draftId
-                  ? { routeKind: "draft", draftId: chat.draftId }
-                  : { routeKind: "server" })}
-                reserveTitleBarControlInset={false}
-              />
-            </Suspense>
-          ) : (
-            <p className="p-3 text-xs text-muted-foreground">{chat.title}</p>
-          )}
-        </div>
+      <ChatPaneContext value={pane}>
+        <ChatColumnActionsContext value={columnActions}>
+          <div
+            className="flex min-h-0 flex-1 flex-col"
+            style={
+              expanded ? ({ "--chat-content-max-width": "72rem" } as CSSProperties) : undefined
+            }
+          >
+            {!connected ? (
+              <div className="p-3">
+                <Menu>
+                  <MenuTrigger render={<Button size="xs" variant="outline" />}>
+                    Actions <ChevronDownIcon />
+                  </MenuTrigger>
+                  <MenuPopup>{columnActions}</MenuPopup>
+                </Menu>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Reconnect {device} to load this conversation.
+                </p>
+              </div>
+            ) : visible && !hidden ? (
+              <Suspense
+                fallback={<p className="p-3 text-xs text-muted-foreground">Loading chat...</p>}
+              >
+                <ChatView
+                  environmentId={chat.environmentId}
+                  threadId={chat.id}
+                  {...(chat.draftId
+                    ? { routeKind: "draft", draftId: chat.draftId }
+                    : { routeKind: "server" })}
+                  reserveTitleBarControlInset={false}
+                />
+              </Suspense>
+            ) : (
+              <p className="p-3 text-xs text-muted-foreground">{chat.title}</p>
+            )}
+          </div>
+        </ChatColumnActionsContext>
       </ChatPaneContext>
     </section>
   );

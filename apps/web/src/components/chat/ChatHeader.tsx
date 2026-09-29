@@ -1,4 +1,4 @@
-import { ChatPaneContext } from "./ChatPaneContext";
+import { ChatColumnActionsContext } from "./ChatPaneContext";
 import type { ThreadActionMenuId } from "../threadActionMenu.logic";
 import { TaskReviewActions } from "../tasks/TaskReviewActions";
 import { useUiStateStore } from "../../uiStateStore";
@@ -215,7 +215,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
-  const { columnActions } = useContext(ChatPaneContext);
+  const columnActions = useContext(ChatColumnActionsContext);
   const headerActionsRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const actions = headerActionsRef.current;
