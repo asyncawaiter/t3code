@@ -1,9 +1,10 @@
 import {
   type DesktopPendingSnapShot,
+  type DesktopSnapShotEvent,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef } from "react";
 
 import {
   type DraftId,
@@ -329,11 +330,11 @@ export function SnapShotCoordinator() {
     return operation;
   }, [playCaptureSound, resolveCaptureTarget, routeThreadRef]);
 
-  useEffect(() => {
-    const bridge = getDesktopSnapShotBridge();
-    if (!bridge) return;
-    void drain();
-    const unsubscribe = bridge.onSnapShotEvent((event) => {
+  // Effect events read the latest route and callbacks, so the bridge listener
+  // subscribes once instead of on every streamed thread update.
+  const drainNow = useEffectEvent(() => void drain());
+  const onSnapShotEvent = useEffectEvent(
+    (bridge: DesktopSnapShotBridge, event: DesktopSnapShotEvent) => {
       switch (event.type) {
         case "requested": {
           const current = lastTargetRef.current;
@@ -363,7 +364,7 @@ export function SnapShotCoordinator() {
           return;
         }
         case "ready":
-          void drain();
+          drainNow();
           return;
         case "failed": {
           if (event.id) captureTargetsRef.current.delete(event.id);
@@ -386,19 +387,25 @@ export function SnapShotCoordinator() {
         case "shortcut-changed":
           return;
       }
-    });
-    return unsubscribe;
-  }, [animateCaptures, drain, playCaptureSound, resolveCaptureTarget, routeThreadRef]);
+    },
+  );
+
+  useEffect(() => {
+    const bridge = getDesktopSnapShotBridge();
+    if (!bridge) return;
+    drainNow();
+    return bridge.onSnapShotEvent((event) => onSnapShotEvent(bridge, event));
+  }, []);
 
   useEffect(() => {
     const dismissOnBlur = () => {
       pendingAnimationStartsRef.current.clear();
       dismissAllSnapShotAnimations();
     };
-    const drainOnFocus = () => void drain();
+    const drainOnFocus = () => drainNow();
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") dismissOnBlur();
-      else void drain();
+      else drainNow();
     };
     window.addEventListener("blur", dismissOnBlur);
     window.addEventListener("focus", drainOnFocus);
@@ -408,7 +415,7 @@ export function SnapShotCoordinator() {
       window.removeEventListener("focus", drainOnFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [drain]);
+  }, []);
 
   return null;
 }
