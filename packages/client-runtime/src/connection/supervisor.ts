@@ -48,7 +48,7 @@ type SupervisorSignal =
   | { readonly _tag: "Wakeup"; readonly reason: ConnectionWakeups.ConnectionWakeup };
 
 interface PendingRetryTrace {
-  readonly previousAttempt: Tracer.Span;
+  readonly previousAttempt: Tracer.ExternalSpan;
   readonly failureCount: number;
   readonly delayMs: number;
   readonly reason: ConnectionAttemptError["reason"];
@@ -307,8 +307,12 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     generation: number,
     pendingRetry: Option.Option<PendingRetryTrace>,
   ) => {
+    // The span fails with the bare error. Failing it with the span itself made
+    // every exported attempt serialize the whole retry chain, growing without
+    // bound while an environment stayed offline.
+    let attemptSpan = Option.none<Tracer.Span>();
     const traced = Effect.gen(function* () {
-      const attemptSpan = yield* Effect.currentSpan.pipe(Effect.orDie);
+      attemptSpan = Option.some(yield* Effect.currentSpan.pipe(Effect.orDie));
       yield* annotateTarget(target);
       yield* Effect.annotateCurrentSpan({
         "connection.attempt": attempt,
@@ -318,13 +322,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           onSome: (retry) => retry.failureCount,
         }),
       });
-      const lease = yield* effect.pipe(
-        Effect.mapError((error): TracedAttemptFailure => ({
-          error,
-          attemptSpan: Option.some(attemptSpan),
-        })),
-      );
-      return { attemptSpan: Option.some(attemptSpan), lease };
+      return yield* effect;
     }).pipe(Effect.withSpan("relay.connection.attempt", { root: true }));
 
     return Option.match(pendingRetry, {
@@ -336,7 +334,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
             "connection.retry.reason": retry.reason,
           }),
         ),
-    }).pipe(withRelayClientTracing);
+    }).pipe(
+      withRelayClientTracing,
+      Effect.mapBoth({
+        onFailure: (error): TracedAttemptFailure => ({ error, attemptSpan }),
+        onSuccess: (lease) => ({ attemptSpan, lease }),
+      }),
+    );
   };
 
   const establishTracedConnection = Effect.fnUntraced(function* (
@@ -722,8 +726,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
       failureCount += 1;
       const delayMs = retryDelayMs(failureCount - 1);
-      pendingRetry = Option.map(attemptSpan, (previousAttempt) => ({
-        previousAttempt,
+      pendingRetry = Option.map(attemptSpan, (span) => ({
+        // Link by id only, so each attempt does not retain every earlier one.
+        previousAttempt: Tracer.externalSpan({
+          spanId: span.spanId,
+          traceId: span.traceId,
+          sampled: span.sampled,
+        }),
         failureCount,
         delayMs,
         reason: error.reason,

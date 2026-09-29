@@ -1,7 +1,9 @@
 import { AuthStandardClientScopes, EnvironmentId } from "@t3tools/contracts";
 import { RelayClientTracer } from "@t3tools/shared/relayTracing";
 import { describe, expect, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
+import * as Exit from "effect/Exit";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -269,6 +271,18 @@ describe("EnvironmentSupervisor", () => {
       expect(attempts).toHaveLength(2);
       expect(attempts[0]?.traceId).not.toBe(attempts[1]?.traceId);
       expect(attempts[1]?.links.map((link) => link.span.spanId)).toContain(attempts[0]?.spanId);
+      // Links carry only ids and failures carry only the error, so exported
+      // attempts stay the same size however many retries came before.
+      expect(attempts[1]?.links.map((link) => link.span._tag)).toEqual(["ExternalSpan"]);
+      const failure = attempts[0]?.status._tag === "Ended" ? attempts[0].status.exit : undefined;
+      expect(failure && Exit.isFailure(failure) ? Cause.squash(failure.cause) : null).toMatchObject(
+        {
+          _tag: "ConnectionTransientError",
+        },
+      );
+      expect(
+        failure && Exit.isFailure(failure) ? Cause.squash(failure.cause) : null,
+      ).not.toHaveProperty("attemptSpan");
       expect(yield* Ref.get(harness.releaseCount)).toBe(0);
     }).pipe(Effect.provide(TestClock.layer())),
   );
