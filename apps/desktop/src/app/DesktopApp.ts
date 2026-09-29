@@ -328,6 +328,16 @@ const startup = Effect.gen(function* () {
   yield* DesktopRemoteUpdates.listen;
   yield* linuxUrlHandler.register;
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
+  // The first safeStorage call on macOS reads the Keychain key, which blocks the
+  // main process for seconds on self-signed builds. Pay it while the backend
+  // boots, not after the window asks for its saved connections.
+  if (environment.platform === "darwin") {
+    yield* Effect.forkScoped(
+      safeStorage
+        .encryptString("warm")
+        .pipe(Effect.ignore, Effect.withSpan("desktop.safeStorage.warmKeychain")),
+    );
+  }
 }).pipe(Effect.withSpan("desktop.startup"));
 
 const scopedProgram = Effect.scoped(
