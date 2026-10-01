@@ -91,8 +91,8 @@ function LaunchModel({
           lockedProvider={null}
           instanceEntries={entries}
           modelOptionsByInstance={options}
-          triggerVariant="outline"
-          triggerClassName="w-full justify-between"
+          // The picker no longer takes a button variant; the border keeps the outline look.
+          triggerClassName="w-full justify-between border border-input"
           onInstanceModelChange={(instanceId, model, options) =>
             onChange(createModelSelection(instanceId, model, options))
           }

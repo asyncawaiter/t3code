@@ -51,8 +51,12 @@ vi.mock("../../state/usage", () => ({
     refresh: () => {},
   }),
 }));
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
+  useCanGoBack: () => true,
+}));
 vi.mock("./UsageLimits", () => ({ UsageLimitsSection: "section" }));
-vi.mock("../ui/button", () => ({ Button: "button" }));
+vi.mock("../ui/button", () => ({ Button: "button", InlineButton: "button" }));
 vi.mock("../ui/scroll-area", () => ({ ScrollArea: "div" }));
 vi.mock("../ui/select", () => ({
   Select: "div",

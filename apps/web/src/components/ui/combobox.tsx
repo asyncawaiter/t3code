@@ -38,6 +38,7 @@ function ComboboxInput({
   unstyled = false,
   ...props
 }: Omit<ComboboxPrimitive.Input.Props, "size"> & {
+  /** Fork screens style the inner element; upstream dropped this hook in #13193. */
   inputClassName?: string;
   showTrigger?: boolean;
   showClear?: boolean;
@@ -71,7 +72,11 @@ function ComboboxInput({
         data-slot="combobox-input"
         render={
           <Input
-            className={cn("has-disabled:opacity-100", inputClassName)}
+            className={cn(
+              "has-disabled:opacity-100",
+              unstyled && "rounded-none bg-transparent text-sm",
+              inputClassName,
+            )}
             nativeInput
             size={sizeValue}
             unstyled={unstyled}
@@ -116,7 +121,6 @@ function ComboboxSearchInput(props: React.ComponentProps<typeof ComboboxInput>) 
         <ComboboxInput
           {...props}
           className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
-          inputClassName="rounded-none bg-transparent text-sm"
           showTrigger={false}
           size="sm"
           unstyled
@@ -190,21 +194,23 @@ function ComboboxItem({
   hideIndicator: _hideIndicator = false,
   ...props
 }: ComboboxPrimitive.Item.Props & {
+  /** Fork screens style the inner element; upstream dropped this hook in #13193. */
   contentClassName?: string;
   hideIndicator?: boolean;
 }) {
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none hover:bg-accent data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-selected:bg-foreground/[0.08] data-selected:text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground [&[data-highlighted][data-selected]]:bg-accent [&[data-highlighted][data-selected]]:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none not-data-disabled:hover:bg-accent data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-selected:bg-foreground/[0.08] data-selected:text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground [&[data-highlighted][data-selected]]:bg-accent [&[data-highlighted][data-selected]]:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       data-slot="combobox-item"
       {...props}
     >
+      {/* Children lay out as one row: a label that truncates, then any trailing meta. */}
       <div
         className={cn(
-          "min-w-0 flex-1 [&_svg:not([class*='text-'])]:text-muted-foreground",
+          "flex min-w-0 flex-1 items-center gap-2 [&_svg:not([class*='text-'])]:text-muted-foreground",
           contentClassName,
         )}
         data-slot="combobox-item-content"
@@ -247,7 +253,7 @@ function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
 function ComboboxListVirtualized({ className, ...props }: ComboboxPrimitive.List.Props) {
   return (
     <ComboboxPrimitive.List
-      className={cn("not-empty:px-1 not-empty:py-1", className)}
+      className={cn("size-full min-w-0 not-empty:px-1 not-empty:py-1", className)}
       data-slot="combobox-list"
       {...props}
     />

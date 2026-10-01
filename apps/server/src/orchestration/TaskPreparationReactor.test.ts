@@ -92,6 +92,7 @@ it.effect("defers busy chats, honors cancellation, and dispatches preparation on
       }),
       Effect.provideService(ProjectionSnapshotQuery, {
         listActivitiesByKind: () => Effect.die("unused"),
+        listThreadsWithPullRequests: () => Effect.die("unused"),
         getDeletedWorktreeThreads: () => Effect.die("unused"),
         getProjectShells: () => Effect.die("unused"),
         getUserInputActivity: () => Effect.die("unused"),

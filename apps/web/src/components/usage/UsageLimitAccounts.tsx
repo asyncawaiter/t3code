@@ -1,12 +1,18 @@
 import {
+  CHATGPT_USAGE_URL,
+  collectExternalUsageLinks,
   collectLimitAccounts,
   collectLimitNotices,
   formatDuration,
   type LimitAccount,
 } from "@t3tools/shared/usageLimits";
-import { AlertTriangleIcon, MonitorIcon, WifiOffIcon } from "lucide-react";
+import { AlertTriangleIcon, ExternalLinkIcon, MonitorIcon, WifiOffIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
+import { ensureLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
+import { OpenAI } from "../Icons";
+import { Button } from "../ui/button";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getDriverOption } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
@@ -192,9 +198,11 @@ function AccountCard({
 export function UsageLimitAccounts({
   presentations,
   now: openedAt,
+  cursorPrompt,
 }: {
   readonly presentations: Presentations;
   readonly now: number;
+  readonly cursorPrompt?: ReactNode;
 }) {
   const accounts = collectLimitAccounts(presentations).toSorted((left, right) =>
     providerName(left).localeCompare(providerName(right)),
@@ -205,15 +213,50 @@ export function UsageLimitAccounts({
     ...accounts.map((account) => Date.parse(account.limits.checkedAt)).filter(Number.isFinite),
   );
   const notices = collectLimitNotices(presentations);
+  const externalLinks = collectExternalUsageLinks(presentations);
   return (
     <div className="flex flex-col gap-4">
-      {accounts.length === 0 && notices.length === 0 ? (
+      {accounts.length === 0 &&
+      notices.length === 0 &&
+      !cursorPrompt &&
+      externalLinks.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
           No provider on the selected devices reports subscription limits.
         </div>
       ) : null}
       {accounts.map((account) => (
         <AccountCard key={account.key} account={account} presentations={presentations} now={now} />
+      ))}
+      {cursorPrompt}
+      {externalLinks.map((link) => (
+        <section
+          key={link.url}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            {link.url === CHATGPT_USAGE_URL ? (
+              <OpenAI className="size-5 shrink-0" aria-hidden="true" />
+            ) : null}
+            <div className="min-w-0 space-y-1">
+              <h2 className="text-sm font-medium">{link.label}</h2>
+              {link.url === CHATGPT_USAGE_URL ? (
+                <p className="text-xs text-muted-foreground">
+                  View usage in ChatGPT with your connected account.
+                </p>
+              ) : link.message ? (
+                <p className="max-w-xl text-xs text-muted-foreground">{link.message}</p>
+              ) : null}
+            </div>
+          </div>
+          <Button
+            variant="ghost-muted"
+            size="xs"
+            onClick={() => void ensureLocalApi().shell.openExternal(link.url)}
+          >
+            Manage usage
+            <ExternalLinkIcon className="size-3.5" aria-hidden="true" />
+          </Button>
+        </section>
       ))}
       {notices.length > 0 ? (
         <Alert variant="warning" controlAlignment="first-line">

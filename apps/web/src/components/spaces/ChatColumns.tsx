@@ -110,7 +110,7 @@ import { ChatColumnActionsContext, ChatPaneContext } from "../chat/ChatPaneConte
 import { Spinner } from "../ui/spinner";
 import { useSidePanelInset } from "./columnsPanel";
 import { useProjects } from "../../state/entities";
-import { usePrimarySettings } from "../../hooks/useSettings";
+import { useClientSettings, usePrimarySettings } from "../../hooks/useSettings";
 import { ALL_PROFILE_ID, indexProfileSpaces } from "@t3tools/contracts";
 import { Popover, PopoverTrigger, PopoverPopup } from "../ui/popover";
 import { Input } from "../ui/input";
@@ -2029,6 +2029,8 @@ function Column({
   );
   const [visible, setVisible] = useState(false);
   const seen = useEffectEvent(onSeen);
+  // Expanding widens a comfortable chat; wider Chat width settings already exceed it.
+  const widenOnExpand = useClientSettings((settings) => settings.chatWidth) === "comfortable";
   useEffect(() => {
     const node = element.current;
     if (!node) return;
@@ -2314,7 +2316,9 @@ function Column({
           <div
             className="flex min-h-0 flex-1 flex-col"
             style={
-              expanded ? ({ "--chat-content-max-width": "72rem" } as CSSProperties) : undefined
+              expanded && widenOnExpand
+                ? ({ "--chat-max-width": "72rem" } as CSSProperties)
+                : undefined
             }
           >
             {!connected ? (

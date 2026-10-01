@@ -68,16 +68,23 @@ function DialogPopup({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
+  /** Fork screens style the inner element; upstream dropped this hook in #13193. */
   backdropClassName?: string;
   viewportClassName?: string;
   variant?: "default" | "media";
 }) {
   return (
     <DialogPortal>
-      <DialogBackdrop className={backdropClassName} variant={variant} />
+      {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
+      <DialogBackdrop
+        className={cn(variant === "media" && "z-[60]", backdropClassName)}
+        variant={variant}
+      />
       <DialogViewport
         className={cn(
           bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
+          variant === "media" &&
+            "z-[60] grid-rows-1 place-items-center px-4 py-6 [-webkit-app-region:no-drag]",
           viewportClassName,
         )}
       >
@@ -146,7 +153,7 @@ function DialogFooter({
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
-      className={cn("break-words font-heading font-semibold text-xl leading-snug", className)}
+      className={cn("break-words font-semibold text-xl leading-snug", className)}
       data-slot="dialog-title"
       {...props}
     />
@@ -172,7 +179,7 @@ function DialogPanel({
     <ScrollArea scrollFade={scrollFade}>
       <div
         className={cn(
-          "p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-header])]:pt-1 in-[[data-slot=dialog-popup]:has([data-slot=dialog-footer]:not(.border-t))]:pb-1",
+          "space-y-4 p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-header])]:pt-1 in-[[data-slot=dialog-popup]:has([data-slot=dialog-footer]:not(.border-t))]:pb-1",
           className,
         )}
         data-slot="dialog-panel"

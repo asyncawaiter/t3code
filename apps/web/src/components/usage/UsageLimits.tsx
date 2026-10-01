@@ -15,7 +15,7 @@ import {
   paceOf,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
-import { Fragment, useRef, useState } from "react";
+import { Fragment, type ReactNode, useRef, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { aliasedEnvironmentLabel, environmentAliasesAtom } from "../../state/environmentAliases";
@@ -88,7 +88,7 @@ function WindowBar({
           />
         ) : null}
       </TooltipTrigger>
-      <TooltipPopup side="top" className="max-w-72 text-xs">
+      <TooltipPopup side="top">
         <div className="flex flex-col gap-0.5">
           <span className="text-foreground">{used}% used</span>
           {elapsed !== null ? (
@@ -359,9 +359,11 @@ export function ResetCredits({
 export function UsageLimitsSection({
   selectedEnvironmentIds,
   now,
+  cursorPrompt,
 }: {
   readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
   readonly now: number;
+  readonly cursorPrompt?: ReactNode;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const aliases = useAtomValue(environmentAliasesAtom);
@@ -380,5 +382,5 @@ export function UsageLimitsSection({
         },
       ]),
   );
-  return <UsageLimitAccounts presentations={selected} now={now} />;
+  return <UsageLimitAccounts presentations={selected} now={now} cursorPrompt={cursorPrompt} />;
 }

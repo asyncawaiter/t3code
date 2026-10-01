@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { SkillsPage } from "../components/skills/SkillsPage";
 
-interface SkillsSearch {
+export interface SkillsSearch {
   skill?: string;
 }
 

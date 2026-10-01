@@ -77,7 +77,8 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -142,9 +143,7 @@ function TurnMenuItems(props: {
   messages: ReadonlyArray<OrchestrationMessage>;
   summaries: ReadonlyArray<OrchestrationCheckpointSummary>;
   inferredTurnCounts: Record<string, number>;
-  selectedTurnId: TurnId | null;
   timestampFormat: TimestampFormat;
-  onSelect: (turnId: TurnId) => void;
 }) {
   const prompts = useMemo(() => turnPrompts(props.messages), [props.messages]);
   return props.summaries.map((summary) => {
@@ -153,27 +152,22 @@ function TurnMenuItems(props: {
     const prompt = prompts.get(summary.turnId);
     const fileCount = summary.files.length;
     return (
-      <DropdownMenuItem
-        key={summary.turnId}
-        className={cn(
-          "flex-col items-stretch gap-0.5",
-          summary.turnId === props.selectedTurnId && "bg-foreground/[0.08]",
-        )}
-        onClick={() => props.onSelect(summary.turnId)}
-      >
-        <span className="flex items-center gap-2">
-          <span className="font-medium">Turn {turnCount}</span>
-          <span className="text-xs text-muted-foreground">
-            {fileCount} {fileCount === 1 ? "file" : "files"}
+      <DropdownMenuRadioItem key={summary.turnId} value={`turn:${summary.turnId}`} closeOnClick>
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="flex items-center gap-2">
+            <span className="font-medium">Turn {turnCount}</span>
+            <span className="text-xs text-muted-foreground">
+              {fileCount} {fileCount === 1 ? "file" : "files"}
+            </span>
+            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+              {formatShortTimestamp(summary.completedAt, props.timestampFormat)}
+            </span>
           </span>
-          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-            {formatShortTimestamp(summary.completedAt, props.timestampFormat)}
-          </span>
+          {prompt ? (
+            <span className="truncate text-xs text-muted-foreground">{promptPreview(prompt)}</span>
+          ) : null}
         </span>
-        {prompt ? (
-          <span className="truncate text-xs text-muted-foreground">{promptPreview(prompt)}</span>
-        ) : null}
-      </DropdownMenuItem>
+      </DropdownMenuRadioItem>
     );
   });
 }
@@ -703,63 +697,65 @@ export default function DiffPanel({
     if (!routeThreadRef) return;
     useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
+  // The scope menu has two radio groups: the top-level one treats the latest
+  // turn as "latest", while the turn sub-menu keys every turn by id so the
+  // latest turn is also marked there.
+  const selectedTurnValue = selectedTurn ? `turn:${selectedTurn.turnId}` : "";
+  const selectedScopeValue =
+    diffSelection.kind === "latest"
+      ? "latest"
+      : selectedTurnId === null
+        ? selectedGitScope
+        : selectedTurn?.turnId === latestTurn?.turnId
+          ? "latest"
+          : selectedTurnValue;
+  const selectScopeValue = (value: string) => {
+    if (value === "unstaged" || value === "branch") {
+      selectGitScope(value);
+    } else if (value === "latest") {
+      // Follows new turns as they land, rather than pinning today's latest.
+      if (routeThreadRef) useDiffPanelStore.getState().selectLatestTurn(routeThreadRef);
+    } else {
+      const turn = orderedTurnDiffSummaries.find((summary) => `turn:${summary.turnId}` === value);
+      if (turn) selectTurn(turn.turnId);
+    }
+  };
 
   const headerRow = (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-accent px-2 text-xs font-medium text-accent-foreground outline-none transition-colors hover:bg-accent/80 focus-visible:ring-2 focus-visible:ring-ring"
+            render={<Button size="xs" variant="secondary" />}
+            className="max-w-full"
             aria-label={`Diff scope: ${selectedScopeLabel}`}
           >
             <span className="truncate">{selectedScopeLabel}</span>
             <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-60">
-            <DropdownMenuItem
-              className={
-                selectedTurnId === null && selectedGitScope === "unstaged"
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => selectGitScope("unstaged")}
-            >
-              <span>Working tree</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={
-                selectedTurnId === null && selectedGitScope === "branch"
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => selectGitScope("branch")}
-            >
-              <span>Branch changes</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={
-                diffSelection.kind === "latest" ||
-                (selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId)
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => {
-                if (routeThreadRef) useDiffPanelStore.getState().selectLatestTurn(routeThreadRef);
-              }}
-            >
-              <span>Latest turn</span>
-            </DropdownMenuItem>
+          <DropdownMenuContent align="start">
+            <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
+              <DropdownMenuRadioItem value="unstaged" closeOnClick>
+                <span>Working tree</span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="branch" closeOnClick>
+                <span>Branch changes</span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="latest" closeOnClick>
+                <span>Latest turn</span>
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="max-h-[70vh] w-96 overflow-y-auto">
-                <TurnMenuItems
-                  messages={activeThread?.messages ?? EMPTY_MESSAGES}
-                  summaries={orderedTurnDiffSummaries}
-                  inferredTurnCounts={inferredCheckpointTurnCountByTurnId}
-                  selectedTurnId={selectedTurn?.turnId ?? null}
-                  timestampFormat={settings.timestampFormat}
-                  onSelect={selectTurn}
-                />
+                <DropdownMenuRadioGroup value={selectedTurnValue} onValueChange={selectScopeValue}>
+                  <TurnMenuItems
+                    messages={activeThread?.messages ?? EMPTY_MESSAGES}
+                    summaries={orderedTurnDiffSummaries}
+                    inferredTurnCounts={inferredCheckpointTurnCountByTurnId}
+                    timestampFormat={settings.timestampFormat}
+                  />
+                </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           </DropdownMenuContent>
@@ -793,7 +789,8 @@ export default function DiffPanel({
               }}
             >
               <ComboboxTrigger
-                className="inline-flex min-w-0 max-w-48 items-center gap-1 overflow-hidden rounded-md px-1.5 py-1 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                render={<Button variant="ghost-muted" size="xs" />}
+                className="min-w-0 max-w-48"
                 aria-label={`Change comparison target. Currently ${selectedGitSource.baseRef}`}
               >
                 <span className="min-w-0 truncate">{selectedGitSource.baseRef}</span>
@@ -808,7 +805,7 @@ export default function DiffPanel({
                   value={baseRefQuery}
                   onChange={(event) => setBaseRefQuery(event.target.value)}
                 />
-                <div className="grid shrink-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 border-b border-border/70 ps-3 pe-6.5 pt-2 pb-1.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+                <div className="grid shrink-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 border-b border-border/70 ps-3 pe-6.5 pt-2 pb-1.5 font-medium text-3xs text-muted-foreground uppercase tracking-wide">
                   <span aria-hidden="true" />
                   <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center">
                     <span>Branch</span>
@@ -818,8 +815,7 @@ export default function DiffPanel({
                 <ComboboxEmpty>No matching refs.</ComboboxEmpty>
                 <ComboboxList className="max-h-64 min-w-0 overflow-x-hidden">
                   <ComboboxItem
-                    className="h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)] py-0"
-                    contentClassName="w-full min-w-0 overflow-hidden"
+                    className="w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)]"
                     value={AUTOMATIC_BASE_REF}
                   >
                     <span className="block min-w-0 truncate">Automatic</span>
@@ -831,8 +827,7 @@ export default function DiffPanel({
                     return (
                       <ComboboxItem
                         key={choice.id}
-                        className="h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)] py-0"
-                        contentClassName="w-full min-w-0 overflow-hidden"
+                        className="w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)]"
                         value={item}
                       >
                         <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center overflow-hidden">
@@ -886,7 +881,7 @@ export default function DiffPanel({
           <DiffStatLabel
             additions={diffLineStat.additions}
             deletions={diffLineStat.deletions}
-            className="mr-1 text-[11px]"
+            className="mr-1 text-2xs"
             layout="inline"
           />
         ) : null}
@@ -903,7 +898,7 @@ export default function DiffPanel({
                 />
               }
             >
-              <RefreshIcon className="size-3.5" refreshing={isRefreshingDiff} />
+              <RefreshIcon size="sm" refreshing={isRefreshingDiff} />
             </TooltipTrigger>
             <TooltipPopup side="top">
               {isRefreshingDiff ? "Refreshing diff…" : "Refresh diff"}
@@ -1037,14 +1032,14 @@ export default function DiffPanel({
         <>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
             {isSelectedPatchTruncated && !lazySource && (
-              <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+              <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground">
                 This preview exceeds the size limit. Changes shown are incomplete.
                 {selectedGitSource?.files ? " Totals include all changes." : ""}
               </p>
             )}
             {selectedPatchError && !renderablePatch && (
               <div className="px-3">
-                <p className="mb-2 text-[11px] text-error/80">{selectedPatchError}</p>
+                <p className="mb-2 text-2xs text-error/80">{selectedPatchError}</p>
               </div>
             )}
             {!renderablePatch && !lazySource ? (
@@ -1170,10 +1165,7 @@ export default function DiffPanel({
                               <Button
                                 size="icon-micro"
                                 variant="ghost"
-                                className={cn(
-                                  "-ms-0.5 [--control-icon-color:currentColor] bg-transparent hover:bg-foreground/10",
-                                  getDiffCollapseIconClassName(fileDiff),
-                                )}
+                                className="-ms-0.5"
                                 aria-label={
                                   collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`
                                 }
@@ -1187,9 +1179,13 @@ export default function DiffPanel({
                             }
                           >
                             {collapsed ? (
-                              <ChevronRightIcon className="size-4" />
+                              <ChevronRightIcon
+                                className={cn("size-4", getDiffCollapseIconClassName(fileDiff))}
+                              />
                             ) : (
-                              <ChevronDownIcon className="size-4" />
+                              <ChevronDownIcon
+                                className={cn("size-4", getDiffCollapseIconClassName(fileDiff))}
+                              />
                             )}
                           </TooltipTrigger>
                           <TooltipPopup side="top">
@@ -1225,12 +1221,12 @@ export default function DiffPanel({
             ) : (
               <div className="min-h-0 flex-1 overflow-auto p-2">
                 <div className="space-y-2">
-                  <p className="text-[11px] text-muted-foreground/75">
+                  <p className="text-2xs text-muted-foreground/75">
                     {renderablePatch?.kind === "raw" ? renderablePatch.reason : null}
                   </p>
                   <pre
                     className={cn(
-                      "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
+                      "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-2xs leading-relaxed text-muted-foreground/90",
                       wordWrap
                         ? "overflow-auto whitespace-pre-wrap wrap-break-word"
                         : "overflow-auto",

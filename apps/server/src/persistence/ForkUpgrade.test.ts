@@ -100,14 +100,14 @@ it.layer(NodeSqliteClient.layer({ filename: ":memory:" }))("September 20 fork up
         );
         assert.deepEqual(
           executed.map(([id]) => id),
-          [52, 53, 54, 55],
+          [52, 53, 54, 55, 56],
         );
         assert.deepEqual(yield* runMigrations(), []);
         const after =
           yield* sql`SELECT projection_threads.* FROM projection_threads WHERE thread_id = 'retained'`;
         assert.deepEqual(
           after,
-          before.map((row) => ({ ...row, title_state_json: null })),
+          before.map((row) => ({ ...row, title_state_json: null, auto_settle_disabled_at: null })),
         );
         assert.deepEqual(
           yield* sql`SELECT text, attachments_json, context_json FROM projection_thread_messages WHERE message_id = 'prompt'`,

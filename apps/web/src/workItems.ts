@@ -3,9 +3,8 @@ import { useAtomValue } from "@effect/atom-react";
 import { useMemo } from "react";
 import { EnvironmentId, type WorkItem } from "@t3tools/contracts";
 import { useTaskCaptures } from "./components/tasks/taskCaptureStorage";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { environmentServerConfigsAtom, serverEnvironment } from "./state/server";
-import { useAtomCommand } from "./state/use-atom-command";
 import { appAtomRegistry } from "./rpc/atomRegistry";
 
 export type LocatedWorkItem = {
@@ -72,22 +71,29 @@ export function useWorkItems() {
   }, [configs, captures]);
 }
 
-export function useSaveWorkItem() {
-  const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
-  return async (environmentId: EnvironmentId, item: WorkItem, base?: WorkItem) => {
-    if (
-      !appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment
-        .capabilities.taskCapture
-    )
-      throw new Error("Update this device before saving tasks to it.");
-    const result = await update({
+/** Saves one task to its storage device. Callable outside React (queued sends use it). */
+export async function saveWorkItem(environmentId: EnvironmentId, item: WorkItem, base?: WorkItem) {
+  if (
+    !appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .taskCapture
+  )
+    throw new Error("Update this device before saving tasks to it.");
+  const result = await runAtomCommand(
+    appAtomRegistry,
+    serverEnvironment.updateSettings,
+    {
       environmentId,
       input: {
         patch: { workItems: [item] },
         baseWorkItems: base ? [base] : [],
       },
-    });
-    if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-    return result.value.workItems?.find((saved) => saved.id === item.id) ?? item;
-  };
+    },
+    { reportFailure: false },
+  );
+  if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+  return result.value.workItems?.find((saved) => saved.id === item.id) ?? item;
+}
+
+export function useSaveWorkItem() {
+  return saveWorkItem;
 }

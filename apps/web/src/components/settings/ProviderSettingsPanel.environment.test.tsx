@@ -58,6 +58,7 @@ vi.mock("./settingsLayout", async (importOriginal) => {
   };
 });
 
+vi.mock("./SettingsScopeSentence", () => ({ SettingsScopeSentence: () => null }));
 vi.mock("react/compiler-runtime", async () => {
   const { reactHookHarness } = await import("../../test/reactHookHarness");
   return { c: reactHookHarness.useMemoCache };
@@ -230,7 +231,21 @@ describe("EnvironmentProviderSettings routing", () => {
   });
 
   it.each([
-    ["onFavoriteModelsChange", { favorites: [{ provider: codexId, model: "chosen" }] }],
+    // Favorites remember the device they were saved from.
+    [
+      "onFavoriteModelsChange",
+      {
+        favorites: [
+          {
+            provider: codexId,
+            model: "chosen",
+            environmentId: "remote-device",
+            environmentLabel: "Remote device",
+            options: [],
+          },
+        ],
+      },
+    ],
     [
       "onHiddenModelsChange",
       { providerModelPreferences: { [codexId]: { hiddenModels: ["chosen"], modelOrder: [] } } },

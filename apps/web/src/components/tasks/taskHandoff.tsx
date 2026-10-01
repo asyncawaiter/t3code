@@ -11,7 +11,7 @@ import {
   confirmWorkItemHandoff,
 } from "@t3tools/contracts";
 import { useComposerDraftStore, composerDraftHasUserContent } from "../../composerDraftStore";
-import { useSaveWorkItem, useWorkItems, type LocatedWorkItem } from "../../workItems";
+import { saveWorkItem, useSaveWorkItem, useWorkItems, type LocatedWorkItem } from "../../workItems";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { useEnvironmentThread } from "../../state/threads";
@@ -76,40 +76,39 @@ export async function prepareTaskDraft(
 }
 
 /** Save the exact message identity before dispatch so reconnect can recover a lost acknowledgement. */
-export function useRegisterTaskHandoffs() {
-  const save = useSaveWorkItem();
-  return async (
-    refs: readonly TaskDraftRef[],
-    handoffs: readonly WorkItemHandoff[],
-    accepted = false,
-  ) => {
-    for (const ref of refs) {
-      const task = appAtomRegistry
-        .get(environmentServerConfigsAtom)
-        .get(ref.environmentId)
-        ?.settings.workItems?.find((item) => item.id === ref.taskId);
-      if (!task)
-        throw new Error("Reconnect the task's storage device before sending this handoff.");
-      const next = handoffs.reduce(
-        (item, handoff) =>
-          accepted
-            ? confirmWorkItemHandoff(item, handoff, handoff.createdAt)
-            : recordWorkItemHandoff(item, handoff),
-        task,
-      );
-      const saved = await save(ref.environmentId, next, task);
-      if (
-        !handoffs.every((handoff) =>
-          saved.handoffs?.some(
-            (entry) =>
-              entry.messageId === handoff.messageId &&
-              entry.environmentId === handoff.environmentId,
-          ),
-        )
+export async function registerTaskHandoffs(
+  refs: readonly TaskDraftRef[],
+  handoffs: readonly WorkItemHandoff[],
+  accepted = false,
+) {
+  for (const ref of refs) {
+    const task = appAtomRegistry
+      .get(environmentServerConfigsAtom)
+      .get(ref.environmentId)
+      ?.settings.workItems?.find((item) => item.id === ref.taskId);
+    if (!task) throw new Error("Reconnect the task's storage device before sending this handoff.");
+    const next = handoffs.reduce(
+      (item, handoff) =>
+        accepted
+          ? confirmWorkItemHandoff(item, handoff, handoff.createdAt)
+          : recordWorkItemHandoff(item, handoff),
+      task,
+    );
+    const saved = await saveWorkItem(ref.environmentId, next, task);
+    if (
+      !handoffs.every((handoff) =>
+        saved.handoffs?.some(
+          (entry) =>
+            entry.messageId === handoff.messageId && entry.environmentId === handoff.environmentId,
+        ),
       )
-        throw new Error("Update the task's storage device before sending this handoff.");
-    }
-  };
+    )
+      throw new Error("Update the task's storage device before sending this handoff.");
+  }
+}
+
+export function useRegisterTaskHandoffs() {
+  return registerTaskHandoffs;
 }
 
 export function TaskHandoffCoordinator() {
