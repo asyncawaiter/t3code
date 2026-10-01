@@ -13,6 +13,7 @@ import { spaceColumnsNavigation, useColumnNavigation } from "./columnNavigation"
 import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
 import { Input } from "../ui/input";
 import { ChatModeSwitch } from "./ChatModeSwitch";
+import { useBoardsOverview } from "./BoardsOverviewHost";
 import { ProfileSpaceNavigator } from "./ProfileSpaceNavigator";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -46,6 +47,7 @@ import {
   SparklesIcon,
   UserRoundIcon,
   ChartNoAxesColumnIcon,
+  LayoutGridIcon,
 } from "lucide-react";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { globalDashboardNavigation } from "../../lib/globalDashboardNavigation";
@@ -72,6 +74,7 @@ export function ColumnsRail() {
   const [newBoard, setNewBoard] = useState(false);
   const [name, setName] = useState("");
   const boards = useChatBoards();
+  const overviewShortcut = shortcutLabelForCommand(keybindings, "boards.overview");
   const visitBoard = (id: string) => {
     boards.setSelected(id);
     setBoardsOpen(false);
@@ -327,6 +330,20 @@ export function ColumnsRail() {
           <PopoverTitle className="px-2.5 pt-1.5 pb-2 text-xs font-semibold tracking-[0.04em] text-muted-foreground uppercase">
             Boards
           </PopoverTitle>
+          <div className="mb-1 border-b border-border pb-1">
+            <button
+              type="button"
+              onClick={() => {
+                setBoardsOpen(false);
+                useBoardsOverview.setState({ open: true });
+              }}
+              className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent"
+            >
+              <LayoutGridIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">Overview</span>
+              {overviewShortcut && <Kbd className="min-w-7 justify-center">{overviewShortcut}</Kbd>}
+            </button>
+          </div>
           <div className="max-h-80 overflow-y-auto">
             {boards.boards.map((board, index) => {
               const shortcut = BOARD_JUMP_KEYBINDING_COMMANDS[index]

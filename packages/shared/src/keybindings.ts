@@ -36,6 +36,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+alt+q", command: "thread.quickReturn", when: "!terminalFocus" },
   { key: "mod+shift+h", command: "dashboard.toggle", when: "!terminalFocus" },
+  { key: "mod+.", command: "boards.overview", when: "!terminalFocus" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
   { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
   { key: "mod+=", command: "preview.zoomIn", when: "previewFocus" },

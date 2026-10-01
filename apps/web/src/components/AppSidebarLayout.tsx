@@ -1,5 +1,6 @@
 import { useUiStateStore } from "../uiStateStore";
 import { ColumnsRail } from "./spaces/ColumnsRail";
+import { BoardsOverviewHost } from "./spaces/BoardsOverviewHost";
 import {
   isColumnsLocation,
   useChatMode,
@@ -420,6 +421,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         {!columnRail && <SidebarControl />}
         <FloatingThreadUndoNotice columnRail={columnRail} />
         <NavigationHistoryShortcuts />
+        <BoardsOverviewHost />
         <MainAppLocationTracker />
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>
