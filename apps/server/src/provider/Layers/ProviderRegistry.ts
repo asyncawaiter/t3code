@@ -557,15 +557,66 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* refreshOneSource(providerSource);
     });
 
+    // Rebuilds every cached per-cwd snapshot of one instance. A cwd whose
+    // rescan fails is dropped, so the composer asks for it again.
+    const refreshWorkspaceSnapshots = Effect.fn("refreshWorkspaceSnapshots")(function* (
+      instanceId: ProviderInstanceId,
+    ) {
+      const instance = yield* instanceRegistry.getInstance(instanceId);
+      const cached = (yield* Ref.get(providersRef)).find(
+        (candidate) => candidate.instanceId === instanceId,
+      )?.workspaceSnapshots;
+      if (!instance?.snapshotForCwd || !cached?.length) return;
+      const snapshotForCwd = instance.snapshotForCwd;
+      const rescanned = yield* Effect.forEach(
+        cached,
+        ({ cwd }) =>
+          snapshotForCwd(cwd).pipe(
+            Effect.map((snapshot) => [cwd, snapshot.status === "error" ? null : snapshot] as const),
+            Effect.orElseSucceed(() => [cwd, null] as const),
+          ),
+        { concurrency: 4 },
+      );
+      if ((yield* instanceRegistry.getInstance(instanceId)) !== instance) return;
+      const [previousProviders, nextProviders] = yield* Ref.modify(
+        providersRef,
+        (currentProviders) => {
+          const next = currentProviders.map((candidate) => {
+            if (candidate.instanceId !== instanceId) return candidate;
+            let provider = candidate;
+            for (const [cwd, snapshot] of rescanned) {
+              provider = snapshot
+                ? upsertProviderWorkspaceSnapshot(provider, cwd, snapshot)
+                : {
+                    ...provider,
+                    workspaceSnapshots: (provider.workspaceSnapshots ?? []).filter(
+                      (entry) => entry.cwd !== cwd,
+                    ),
+                  };
+            }
+            return provider;
+          });
+          return [[currentProviders, next] as const, next];
+        },
+      );
+      if (haveProvidersChanged(previousProviders, nextProviders)) {
+        yield* PubSub.publish(changesPubSub, nextProviders);
+      }
+    });
+
     const refreshInstance = Effect.fn("refreshInstance")(function* (
       instanceId: ProviderInstanceId,
+      options?: { readonly workspaces?: boolean },
     ) {
       const sources = yield* getLiveSources;
       const providerSource = sources.find((candidate) => candidate.instanceId === instanceId);
       if (!providerSource) {
         return yield* Ref.get(providersRef);
       }
-      return yield* refreshOneSource(providerSource);
+      const providers = yield* refreshOneSource(providerSource);
+      if (!options?.workspaces) return providers;
+      yield* refreshWorkspaceSnapshots(instanceId);
+      return yield* Ref.get(providersRef);
     });
 
     const getProviderMaintenanceCapabilitiesForInstance = Effect.fn(
@@ -869,8 +920,10 @@ export const ProviderRegistryLive = Layer.effect(
       getProviders: Ref.get(providersRef),
       refresh: (provider?: ProviderDriverKind) =>
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
-      refreshInstance: (instanceId: ProviderInstanceId) =>
-        refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
+      refreshInstance: (
+        instanceId: ProviderInstanceId,
+        options?: { readonly workspaces?: boolean },
+      ) => refreshInstance(instanceId, options).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshWorkspaceSnapshot: (input) =>
         refreshWorkspaceSnapshot(input).pipe(Effect.catchCause(recoverRefreshFailure)),
       getProviderMaintenanceCapabilitiesForInstance,

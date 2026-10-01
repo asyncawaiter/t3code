@@ -609,7 +609,7 @@ export const makeSkillLibrary = Effect.fn("makeSkillLibrary")(function* () {
   });
 
   const refreshSnapshot = (instanceId: ProviderInstanceId) =>
-    providerRegistry.refreshInstance(instanceId).pipe(Effect.asVoid);
+    providerRegistry.refreshInstance(instanceId, { workspaces: true }).pipe(Effect.asVoid);
 
   /** Refreshes every instance whose skills directory is the one just mutated, not only the addressed instance. */
   const refreshSnapshotsForDirectory = Effect.fn("refreshSkillSnapshotsForDirectory")(function* (

@@ -43,9 +43,12 @@ export interface ProviderRegistryShape {
    * list. When the instance id is unknown the call resolves with the
    * currently cached list (no error) — matching the legacy `refresh` shim
    * behaviour so transport layers don't have to special-case unknowns.
+   * `workspaces` also rebuilds the instance's cached per-cwd snapshots, for
+   * callers that changed what they scan (skill installs), not just health.
    */
   readonly refreshInstance: (
     instanceId: ProviderInstanceId,
+    options?: { readonly workspaces?: boolean },
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   readonly refreshWorkspaceSnapshot: (input: {
