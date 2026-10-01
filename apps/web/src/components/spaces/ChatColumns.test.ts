@@ -1,14 +1,7 @@
 import { expect, it } from "vite-plus/test";
 import { EnvironmentId, ThreadId, TurnId, DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
-import {
-  moveColumn,
-  columnOrder,
-  columnWidth,
-  boardColumnKeys,
-  columnStatus,
-  addChatsToBoard,
-  activeSpaceChats,
-} from "./ChatColumns";
+import { moveColumn, columnWidth, addChatsToBoard, activeSpaceChats } from "./ChatColumns";
+import { columnOrder, boardColumnKeys, columnStatus } from "./columnState";
 it("keeps column order stable, appends new chats, and only retains explicitly chosen settled chats", () => {
   const chat = (id: string) => ({
     id: ThreadId.make(id),

@@ -36,7 +36,13 @@ A Space's live view includes idle and reviewed conversations as well as running 
 
 **Boards** opens a compact picker of your saved collections, with **New board** at the top. A custom board contains only chats you explicitly add and can mix profiles, Spaces, folders, and devices. Use **Add existing chat** to search and select conversations in a dialog. Enable **Include settled chats** for persistent references. Removing a column never changes its Space assignment.
 
-Press `Cmd+.` (`Ctrl+.` elsewhere), or choose **Overview** in the Boards picker, to see every board at once. Each board lists its chats in column order with their status and a one-key hint. Press a chat's key to open its board with that chat's composer focused, press a board's shortcut to open the board, or press Escape to stay where you are.
+Press `Cmd+.` (`Ctrl+.` elsewhere), or choose **Overview** in the Boards picker, to see every board at once. Each board shows its chats in column order with their status and a one-key hint. A chat keeps its key while it stays on that board.
+
+- Press a chat's key to open its board with that chat's composer focused. Add Shift to open it expanded, or Option to remove it from the board (the notification offers Undo).
+- Chats waiting for your input are also collected at the top. The Boards icon in the rail shows how many there are.
+- Press `/` to search chats on every board, then Enter to open the highlighted match.
+- Press `Cmd+.` again to return to the board you used before the current one.
+- Drag a chat onto another board to move it, or use a board's **New chat** slot to start one there.
 
 The column toolbar provides the same chat actions, scoped pins, snooze, settlement, renaming, bookmarks, Git actions, folder tools, and scripts as Chat mode. Review actions are available beside task capture. Workspace tools open in a drawer at narrow column widths, so they do not squeeze the conversation. Task capture preserves selected text or the composer's draft and attachments.
 

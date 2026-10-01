@@ -11,8 +11,18 @@ export function isColumnsLocation(pathname: string, search: string) {
   );
 }
 
-/** Selection in the picker is separate from navigation through profiles and spaces. */
-export const useColumnNavigation = create<{ choosing: boolean }>(() => ({ choosing: false }));
+/**
+ * Selection in the picker is separate from navigation through profiles and spaces.
+ * `creating` asks a board to open its new-chat flow once it mounts; a request older than
+ * a few seconds never landed and is ignored.
+ */
+export const useColumnNavigation = create<{
+  choosing: boolean;
+  creating: { boardId: string; at: number } | null;
+}>(() => ({
+  choosing: false,
+  creating: null,
+}));
 
 /** Location can advance before route matches; never remember that transitional URL. */
 export function chatLocationToRemember(
@@ -116,6 +126,8 @@ declare module "@tanstack/react-router" {
       | undefined;
     dashboardFocusKey?: string | undefined;
     columnFocusRequest?: number | undefined;
+    /** Opens the focused column expanded, as the boards overview's Shift+hint does. */
+    columnExpand?: boolean | undefined;
   }
 }
 

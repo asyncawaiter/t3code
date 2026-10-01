@@ -60,7 +60,10 @@ export function useChatBoards(boardId?: string) {
   }, [source.config?.settings.chatBoards, setCache]);
   const save = useCallback(
     async (edited: readonly ChatBoard[], base: readonly ChatBoard[]) => {
-      if (busy.current) return false;
+      if (busy.current) {
+        setError("Another board change is still saving. Try again in a moment.");
+        return false;
+      }
       if (unavailable || !source.sourceId) {
         setError(unavailable);
         return false;
@@ -106,6 +109,8 @@ export function useChatBoards(boardId?: string) {
     );
   return {
     boards,
+    /** Boards as saved on the profile source; the base for a multi-board save. */
+    persisted,
     board,
     selected,
     setSelected,

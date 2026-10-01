@@ -56,6 +56,7 @@ import {
 } from "../../composerDraftStore";
 import { threadShellHasStarted } from "../ChatView.logic";
 import { useColumnNavigation, spaceColumnsNavigation } from "./columnNavigation";
+import { boardColumnKeys, columnOrder, columnStatus } from "./columnState";
 import { scoreChatPickerMatch } from "./chatPickerSearch";
 import { scopedOverviewNavigation, type OverviewScope } from "../../lib/globalDashboardNavigation";
 import { profileThreadFilter } from "@t3tools/client-runtime/state/profiles";
@@ -171,38 +172,6 @@ const FOCUS_PIN_MS = 4000;
 
 const keyOf = (chat: Pick<EnvironmentThreadShell, "environmentId" | "id">) =>
   `${chat.environmentId}:${chat.id}`;
-
-export function columnOrder<
-  T extends Pick<
-    EnvironmentThreadShell,
-    "environmentId" | "id" | "archivedAt" | "settledOverride" | "createdAt"
-  >,
->(chats: readonly T[], layout: typeof Layout.Type) {
-  const eligible = chats.filter(
-    (chat) =>
-      (!chat.archivedAt || layout.kept.includes(keyOf(chat))) &&
-      !layout.hidden.includes(keyOf(chat)) &&
-      (chat.settledOverride !== "settled" || layout.kept.includes(keyOf(chat))),
-  );
-  const byKey = new Map(eligible.map((chat) => [keyOf(chat), chat]));
-  return [
-    ...new Set([
-      ...layout.order,
-      ...eligible.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt)).map(keyOf),
-    ]),
-  ].flatMap((key) => (byKey.has(key) ? [byKey.get(key)!] : []));
-}
-
-export function boardColumnKeys(
-  chats: Parameters<typeof columnOrder>[0],
-  layout: typeof Layout.Type,
-) {
-  const visible = new Set(columnOrder(chats, layout).map(keyOf));
-  const known = new Set(chats.map(keyOf));
-  return layout.order.filter(
-    (key) => !layout.hidden.includes(key) && (visible.has(key) || !known.has(key)),
-  );
-}
 
 export default function ChatColumns({
   allChats: liveChats,
@@ -599,6 +568,14 @@ function BoardColumns({
       },
     });
   };
+  // The boards overview asks the target board to start a chat once it has mounted.
+  const creating = useColumnNavigation((navigation) => navigation.creating);
+  useEffect(() => {
+    if (scope || creating?.boardId !== state.board.id) return;
+    useColumnNavigation.setState({ creating: null });
+    if (Date.now() - creating.at < 3000) createChat();
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Runs once per request.
+  }, [creating]);
   const saveProfiles = useSaveProfiles();
   const [boardPickerOpen, setBoardPickerOpen] = useState(false);
   const [boardName, setBoardName] = useState("");
@@ -746,6 +723,7 @@ function BoardColumns({
   }, [expanded]);
   const appliedFocus = useRef<string | undefined>(undefined);
   const focusRequest = `${focus}:${location.state.columnFocusRequest ?? ""}`;
+  const expandFocus = location.state.columnExpand === true;
   useLayoutEffect(() => {
     if (focus && focusRequest !== appliedFocus.current && columns.length && rail.current) {
       if (expanded && expanded !== focus) {
@@ -759,9 +737,10 @@ function BoardColumns({
         appliedFocus.current = focusRequest;
         pinnedFocus.current = { key: focus, until: Date.now() + FOCUS_PIN_MS };
         setFocused(focus);
+        if (expandFocus) setExpanded(focus);
       }
     }
-  }, [focus, focusRequest, columns, expanded, setFocused]);
+  }, [focus, focusRequest, columns, expanded, setFocused, expandFocus]);
   // Columns mount their chat once scrolled into view, and a docked panel then
   // widens them, pushing the focused column away (or letting scroll snapping
   // pull the rail back to the first column). Keep the focused column revealed
@@ -1878,30 +1857,6 @@ export function moveColumn(order: readonly string[], from: string, to: string) {
   return source < 0 || target < 0 || source === target
     ? order
     : arrayMove([...order], source, target);
-}
-
-export function columnStatus(
-  chat: Pick<
-    ColumnChat,
-    | "hasPendingApprovals"
-    | "hasPendingUserInput"
-    | "hasActionableProposedPlan"
-    | "session"
-    | "archivedAt"
-    | "settledOverride"
-    | "latestTurn"
-  >,
-  reviewedAt?: string,
-) {
-  if (chat.hasPendingApprovals || chat.hasPendingUserInput || chat.hasActionableProposedPlan)
-    return "Needs input";
-  if (chat.session?.status === "running") return "Running";
-  if (chat.archivedAt) return "Archived";
-  if (chat.settledOverride === "settled") return "Settled";
-  if (chat.latestTurn?.state === "completed" && chat.latestTurn.completedAt) {
-    return reviewedAt === chat.latestTurn.completedAt ? "Reviewed" : "Ready to review";
-  }
-  return "Idle";
 }
 
 function Column({

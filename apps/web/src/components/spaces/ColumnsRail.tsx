@@ -14,6 +14,9 @@ import { DEFAULT_CHAT_BOARD } from "@t3tools/contracts";
 import { Input } from "../ui/input";
 import { ChatModeSwitch } from "./ChatModeSwitch";
 import { useBoardsOverview } from "./BoardsOverviewHost";
+import { boardOverviewTiles, chatsNeedingInput } from "./columnState";
+import { useThreadShells } from "../../state/entities";
+import { useWorkflowState } from "../../workflowState";
 import { ProfileSpaceNavigator } from "./ProfileSpaceNavigator";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -34,7 +37,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { isTerminalFocused } from "../../lib/terminalFocus";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, useRouter } from "@tanstack/react-router";
 import {
   SearchIcon,
@@ -75,6 +78,12 @@ export function ColumnsRail() {
   const [name, setName] = useState("");
   const boards = useChatBoards();
   const overviewShortcut = shortcutLabelForCommand(keybindings, "boards.overview");
+  const shells = useThreadShells();
+  const reviewed = useWorkflowState((state) => state.reviewed);
+  const waitingCount = useMemo(
+    () => chatsNeedingInput(boardOverviewTiles(boards.boards, shells, reviewed)).length,
+    [boards.boards, shells, reviewed],
+  );
   const visitBoard = (id: string) => {
     boards.setSelected(id);
     setBoardsOpen(false);
@@ -313,8 +322,8 @@ export function ColumnsRail() {
             <Button
               size="icon"
               variant="ghost"
-              aria-label="Boards"
-              className={`size-11 sm:size-11 ${
+              aria-label={waitingCount ? `Boards, ${waitingCount} need input` : "Boards"}
+              className={`relative size-11 sm:size-11 ${
                 location.pathname.startsWith("/spaces/") &&
                 new URLSearchParams(location.searchStr).get("view") === "columns" &&
                 new URLSearchParams(location.searchStr).get("workspace") !== "space"
@@ -325,6 +334,14 @@ export function ColumnsRail() {
           }
         >
           <Columns3Icon className="size-5" />
+          {waitingCount > 0 && (
+            <span
+              aria-hidden
+              className="absolute top-0.5 right-0.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full border-2 border-sidebar bg-foreground px-1 text-3xs font-bold leading-none text-background tabular-nums"
+            >
+              {waitingCount}
+            </span>
+          )}
         </PopoverTrigger>
         <PopoverPopup side="right" align="start" className="w-72" viewportClassName="p-1.5">
           <PopoverTitle className="px-2.5 pt-1.5 pb-2 text-xs font-semibold tracking-[0.04em] text-muted-foreground uppercase">
