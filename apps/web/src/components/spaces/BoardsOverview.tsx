@@ -380,12 +380,11 @@ export default function BoardsOverview({
       }}
     >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-background/80 backdrop-blur-md transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <DialogPrimitive.Popup
           // Global shortcut listeners stand down while an aria-modal dialog is open.
           aria-modal="true"
           onKeyDown={onKeyDown}
-          className="fixed inset-0 z-50 flex flex-col outline-none transition-[opacity,scale] duration-150 ease-out data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 [-webkit-app-region:no-drag]"
+          className="fixed inset-0 z-[60] flex flex-col bg-background text-foreground outline-none transition-[opacity,scale] duration-150 ease-out data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 [-webkit-app-region:no-drag]"
         >
           <header className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-3 px-8 pt-12 pb-5">
             <div className="flex items-baseline gap-3">
@@ -505,7 +504,7 @@ export default function BoardsOverview({
                       void moveChat(boardId, key, board);
                     }}
                     className={cn(
-                      "flex min-w-72 max-w-full flex-col gap-3 rounded-2xl bg-muted/40 p-4",
+                      "flex min-w-72 max-w-full flex-col gap-3 rounded-2xl bg-muted p-4",
                       dropping
                         ? "border-2 border-dashed border-foreground"
                         : isCurrent
