@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/desktop",
-  "version": "0.0.45-fork.20261001.6",
+  "version": "0.0.45-fork.20261001.7",
   "private": true,
   "type": "module",
   "main": "dist-electron/boot.cjs",
