@@ -81,6 +81,7 @@ import {
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
+  Columns3Icon,
 } from "lucide-react";
 import {
   useCallback,
@@ -109,10 +110,10 @@ import {
 } from "../hooks/useSettings";
 import { moveProjectToProfile } from "./settings/ProjectSettingsPanel.logic";
 import { useTheme } from "../hooks/useTheme";
+import { useBoardsOverview } from "./spaces/BoardsOverviewHost";
 import { useCustomThemes } from "../hooks/useCustomThemes";
 import { useEnvironmentThemeDefinitions } from "../hooks/useEnvironmentTheme";
-import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
-import { getThemeDefinition } from "../themePalette";
+import { BUILT_IN_THEME_DEFINITIONS, getThemeDefinition } from "../themePalette";
 import {
   STANDARD_THEME_CARDS,
   getThemeCardDefinition,
@@ -854,7 +855,7 @@ function OpenCommandPaletteDialog(props: {
     const seen = new Set<string>();
     return [
       ...STANDARD_THEME_CARDS.map((card) => ({ ...card, id: null })),
-      ...[...BUILT_IN_THEMES, ...customThemes, ...environmentThemes]
+      ...[...BUILT_IN_THEME_DEFINITIONS, ...customThemes, ...environmentThemes]
         .filter((definition) => {
           if (seen.has(definition.id)) return false;
           seen.add(definition.id);
@@ -2081,6 +2082,18 @@ function OpenCommandPaletteDialog(props: {
     icon: <SparklesIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/skills" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:boards-overview",
+    searchTerms: ["boards", "overview", "mission control", "columns", "all boards"],
+    title: "Open boards overview",
+    icon: <Columns3Icon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "boards.overview",
+    run: async () => {
+      useBoardsOverview.setState({ open: true, repeat: 0 });
     },
   });
 

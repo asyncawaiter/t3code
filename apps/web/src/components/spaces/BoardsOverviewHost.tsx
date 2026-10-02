@@ -7,8 +7,10 @@ import { resolveShortcutCommand } from "../../keybindings";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { isTerminalFocused } from "../../lib/terminalFocus";
-import { useChatBoards } from "../../hooks/useChatBoards";
-import { columnSpaceScope, isColumnsLocation } from "./columnNavigation";
+import * as Schema from "effect/Schema";
+import { profileSourceAtom } from "../../state/server";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { columnSpaceScope, isColumnsLocation, useColumnNavigation } from "./columnNavigation";
 
 /**
  * `recent` lists boards most recently shown first, for this session only; the overview's
@@ -36,7 +38,13 @@ export function BoardsOverviewHost() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const open = useBoardsOverview((state) => state.open);
   const location = useLocation();
-  const { selected } = useChatBoards();
+  const source = useAtomValue(profileSourceAtom);
+  // Read directly rather than through useChatBoards, which also rewrites the boards cache.
+  const [selected] = useLocalStorage(
+    `t3.columns-selected.${source.sourceId}`,
+    "default",
+    Schema.String,
+  );
   const board = currentBoardId(location.pathname, location.searchStr, selected);
   useEffect(() => {
     if (!board) return;
@@ -55,10 +63,22 @@ export function BoardsOverviewHost() {
         context: { terminalFocus: isTerminalFocused() },
       });
       if (command !== "boards.overview") return;
+      const { open } = useBoardsOverview.getState();
+      // Another dialog or picker owns the keyboard; opening on top would strand it.
+      if (
+        !open &&
+        (useColumnNavigation.getState().choosing ||
+          document.querySelector(
+            // The docked side panel is a dialog that stays open; it does not own the keyboard.
+            '[role="dialog"][data-open]:not([data-slot="sheet-popup"]), [role="alertdialog"][data-open], [role="dialog"][aria-modal="true"]',
+          ))
+      )
+        return;
       event.preventDefault();
       event.stopPropagation();
+      // `repeat` restarts at 0 so a press made before the overview's code loads still counts.
       useBoardsOverview.setState((state) =>
-        state.open ? { repeat: state.repeat + 1 } : { open: true },
+        state.open ? { repeat: state.repeat + 1 } : { open: true, repeat: 0 },
       );
     };
     window.addEventListener("keydown", onKeyDown, true);

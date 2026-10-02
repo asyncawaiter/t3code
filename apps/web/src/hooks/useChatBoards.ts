@@ -15,6 +15,15 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useLocalStorage } from "./useLocalStorage";
 
 const EMPTY: readonly ChatBoard[] = [];
+
+/** Boards as shown: saved boards, minus leftover imports, with the default board first. */
+export function displayedBoards(persisted: readonly ChatBoard[]) {
+  const saved = persisted.filter(
+    (board) => !(board.id.startsWith("import-") && board.name.startsWith("Imported ")),
+  );
+  return saved.some((board) => board.id === "default") ? saved : [DEFAULT_CHAT_BOARD, ...saved];
+}
+
 export function useChatBoards(boardId?: string) {
   const source = useAtomValue(profileSourceAtom);
   const { environments } = useEnvironments();
@@ -28,13 +37,15 @@ export function useChatBoards(boardId?: string) {
     "default",
     Schema.String,
   );
-  const persisted = source.config?.settings.chatBoards ?? cache;
-  const savedBoards = persisted.filter(
-    (board) => !(board.id.startsWith("import-") && board.name.startsWith("Imported ")),
-  );
-  const boards = savedBoards.some((board) => board.id === "default")
-    ? savedBoards
-    : [DEFAULT_CHAT_BOARD, ...savedBoards];
+  // A save's result stands in for the boards until the server's settings push replaces them,
+  // so a change made right after a save builds on it instead of on the boards before it.
+  const [saved, setSaved] = useState<{
+    over: readonly ChatBoard[] | undefined;
+    boards: readonly ChatBoard[];
+  } | null>(null);
+  const configBoards = source.config?.settings.chatBoards;
+  const persisted = (saved && saved.over === configBoards ? saved.boards : configBoards) ?? cache;
+  const boards = displayedBoards(persisted);
   const activeId = boardId ?? selected;
   const board =
     boards.find((board) => board.id === activeId) ??
@@ -42,6 +53,8 @@ export function useChatBoards(boardId?: string) {
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  /** The latest failure, readable right after an awaited save (state lags a render). */
+  const lastError = useRef<string | null>(null);
   const connected = environments.some(
     (env) => env.environmentId === source.sourceId && env.connection.phase === "connected",
   );
@@ -61,10 +74,12 @@ export function useChatBoards(boardId?: string) {
   const save = useCallback(
     async (edited: readonly ChatBoard[], base: readonly ChatBoard[]) => {
       if (busy.current) {
-        setError("Another board change is still saving. Try again in a moment.");
+        lastError.current = "Another board change is still saving. Try again in a moment.";
+        setError(lastError.current);
         return false;
       }
       if (unavailable || !source.sourceId) {
+        lastError.current = unavailable;
         setError(unavailable);
         return false;
       }
@@ -73,6 +88,8 @@ export function useChatBoards(boardId?: string) {
       setError(null);
       try {
         const current = appAtomRegistry.get(profileSourceAtom);
+        // Read before the request: a push landing before the reply then retires the overlay.
+        const over = current.config?.settings.chatBoards;
         if (current.sourceId !== source.sourceId || current.conflict)
           throw new Error("The shared profile source changed. Reopen Columns before saving.");
         const result = await persist({
@@ -84,17 +101,20 @@ export function useChatBoards(boardId?: string) {
           },
         });
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        setCache(result.value.chatBoards ?? []);
-        return true;
+        const boards = result.value.chatBoards ?? [];
+        setCache(boards);
+        setSaved({ over, boards });
+        lastError.current = null;
+        return boards;
       } catch (error) {
-        setError(
+        lastError.current =
           Schema.is(ServerSettingsError)(error) && error.cause instanceof Error
             ? error.cause.message
             : error instanceof Error
               ? error.message
-              : "Board changes could not be saved. Reconnect and try again.",
-        );
-        return false;
+              : "Board changes could not be saved. Reconnect and try again.";
+        setError(lastError.current);
+        return false as const;
       } finally {
         busy.current = false;
         setPending(false);
@@ -102,15 +122,16 @@ export function useChatBoards(boardId?: string) {
     },
     [persist, setCache, source.sourceId, source.config, unavailable],
   );
-  const update = (next: ChatBoard) =>
-    save(
+  const update = async (next: ChatBoard) =>
+    !!(await save(
       [next],
       persisted.filter((item) => item.id === next.id),
-    );
+    ));
   return {
     boards,
     /** Boards as saved on the profile source; the base for a multi-board save. */
     persisted,
+    lastError,
     board,
     selected,
     setSelected,

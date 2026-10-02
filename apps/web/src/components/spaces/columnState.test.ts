@@ -6,6 +6,9 @@ import {
   boardOverviewTiles,
   chatsNeedingInput,
   moveChatBetweenBoards,
+  shiftChatInBoard,
+  stepCursor,
+  storedHints,
 } from "./columnState";
 
 const chat = (id: string, extra: Partial<EnvironmentThreadShell> = {}) =>
@@ -95,5 +98,46 @@ it("keeps a kept chat visible when moved onto a board that lists it but hides it
   const archived = chat("x", { archivedAt: "2026-09-02T00:00:00.000Z" });
   expect(boardOverviewTiles([target], [archived], {})[0]!.chats.map((item) => item.key)).toEqual([
     "device:x",
+  ]);
+});
+
+it("walks the cursor within a board and between non-empty boards", () => {
+  const tiles = [
+    { board: { id: "one" }, chats: [{ slot: "1a" }, { slot: "1b" }, { slot: "1c" }] },
+    { board: { id: "empty" }, chats: [] },
+    { board: { id: "two" }, chats: [{ slot: "2a" }] },
+  ];
+  expect(stepCursor(tiles, null, "right", "two")).toBe("2a");
+  expect(stepCursor(tiles, "1a", "right", null)).toBe("1b");
+  expect(stepCursor(tiles, "1a", "left", null)).toBe("1a");
+  // Down skips the empty board and clamps to the last chat there.
+  expect(stepCursor(tiles, "1c", "down", null)).toBe("2a");
+  expect(stepCursor(tiles, "2a", "down", null)).toBe("2a");
+});
+
+it("swaps a chat with its visible neighbour, skipping hidden ones", () => {
+  const board = { ...DEFAULT_CHAT_BOARD, order: ["a", "hidden", "b"], hidden: ["hidden"] };
+  expect(shiftChatInBoard(board, ["a", "b"], "a", "right")?.order).toEqual(["b", "hidden", "a"]);
+  expect(shiftChatInBoard(board, ["a", "b"], "a", "left")).toBeNull();
+  // A chat that already left the board (a move still saving) is never written back as a hole.
+  expect(shiftChatInBoard(board, ["a", "gone", "b"], "gone", "right")).toBeNull();
+});
+
+it("stores freed letters for other windows' slots without duplicating a letter", () => {
+  const stored = { "x|1": "a", "x|2": "s", "y|9": "d" };
+  // This window sees x|1 and a new slot that took the letter y|9 used to hold.
+  expect(storedHints(stored, { "x|1": "a", "z|3": "d" })).toEqual({
+    "x|2": "s",
+    "x|1": "a",
+    "z|3": "d",
+  });
+});
+
+it("lists a key the board saved twice as one column and marks local drafts", () => {
+  const board = { ...DEFAULT_CHAT_BOARD, order: ["device:a", "device:draft", "device:a"] };
+  const [tile] = boardOverviewTiles([board], [chat("a")], {}, new Set(["device:draft"]));
+  expect(tile!.chats.map(({ key, status }) => [key, status])).toEqual([
+    ["device:a", "Idle"],
+    ["device:draft", "Draft"],
   ]);
 });

@@ -40,7 +40,8 @@ export function columnOrder<
 export function boardColumnKeys(chats: Parameters<typeof columnOrder>[0], layout: BoardLayout) {
   const visible = new Set(columnOrder(chats, layout).map(keyOf));
   const known = new Set(chats.map(keyOf));
-  return layout.order.filter(
+  // Imported or legacy boards can list a key twice; it is still one column.
+  return [...new Set(layout.order)].filter(
     (key) => !layout.hidden.includes(key) && (visible.has(key) || !known.has(key)),
   );
 }
@@ -57,11 +58,16 @@ export function columnStatus(chat: StatusFields, reviewedAt?: string) {
   return "Idle";
 }
 
-/** Home row first, so the most common jumps need the least reach. */
-export const HINTS = "asdfjklghqweruioptyzxcvbnm1234567890";
+/** Home row first, so the most common jumps need the least reach. H, J, K and L move the cursor. */
+export const HINTS = "asdfgqweruioptyzxcvbnm1234567890";
 
 /** One overview slot: a chat as it appears on one board. A chat on two boards has two slots. */
 export const slotId = (boardId: string, key: string) => `${boardId}|${key}`;
+/** The board and chat a slot names; chat keys never contain "|". */
+export function parseSlot(slot: string) {
+  const at = slot.indexOf("|");
+  return { boardId: slot.slice(0, at), key: slot.slice(at + 1) };
+}
 
 /**
  * Keeps every slot's letter while it stays on its board, so hints become muscle memory.
@@ -84,25 +90,53 @@ export function assignHints(
   return hints;
 }
 
+/**
+ * What to store after assigning: the live hints plus every earlier slot whose letter is still
+ * free. Another window seeing other slots then keeps its letters instead of fighting over them.
+ * Each letter appears once, so the record never outgrows HINTS.
+ */
+export function storedHints(
+  previous: Readonly<Record<string, string>>,
+  hints: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const used = new Set(Object.values(hints));
+  const kept: Record<string, string> = {};
+  for (const [slot, hint] of Object.entries(previous)) {
+    if (slot in hints || used.has(hint) || !HINTS.includes(hint)) continue;
+    kept[slot] = hint;
+    used.add(hint);
+  }
+  return { ...kept, ...hints };
+}
+
+/** A board's visible column keys, given the chat shells this client knows. */
+export function boardChatKeys(board: ChatBoard, shells: readonly EnvironmentThreadShell[]) {
+  const members = shells.filter((shell) => board.order.includes(keyOf(shell)));
+  return boardColumnKeys(members, board);
+}
+
 /** Each board's visible columns in board order, as the overview and the rail badge read them. */
 export function boardOverviewTiles(
   boards: readonly ChatBoard[],
   shells: readonly EnvironmentThreadShell[],
   reviewed: Readonly<Record<string, string>>,
+  /** Keys of this client's unsent drafts, which have no shell yet. */
+  drafts: ReadonlySet<string> = new Set(),
 ) {
   const byKey = new Map(shells.map((shell) => [keyOf(shell), shell]));
   return boards.map((board) => {
-    const members = board.order.flatMap((key) => (byKey.has(key) ? [byKey.get(key)!] : []));
     return {
       board,
-      chats: boardColumnKeys(members, board).map((key) => {
+      chats: boardChatKeys(board, shells).map((key) => {
         const chat = byKey.get(key);
         return {
           key,
           slot: slotId(board.id, key),
           title: chat?.title ?? board.labels?.[key]?.title ?? "Unavailable chat",
-          // Drafts and chats on offline devices have no live state to report.
-          status: chat ? columnStatus(chat, reviewed[key]) : null,
+          /** Where the chat lives, as saved when it joined the board ("Profile / Space / Folder / Device"). */
+          context: board.labels?.[key]?.context || null,
+          // Chats on offline devices have no live state to report.
+          status: chat ? columnStatus(chat, reviewed[key]) : drafts.has(key) ? "Draft" : null,
           runningSince:
             chat?.session?.status === "running"
               ? (chat.latestTurn?.startedAt ?? chat.latestTurn?.requestedAt ?? null)
@@ -147,4 +181,48 @@ export function moveChatBetweenBoards(from: ChatBoard, to: ChatBoard, key: strin
     ...(label && !to.labels?.[key] ? { labels: { ...to.labels, [key]: label } } : {}),
   };
   return { source, target };
+}
+
+export type CursorStep = "left" | "right" | "up" | "down";
+
+/**
+ * Moves the overview cursor: left and right within a board, up and down to the neighbouring
+ * non-empty board at the same position (clamped). With no cursor yet, starts on `start`'s first chat.
+ */
+export function stepCursor(
+  tiles: readonly { board: { id: string }; chats: readonly { slot: string }[] }[],
+  cursor: string | null,
+  step: CursorStep,
+  start: string | null,
+) {
+  const rows = tiles.filter((tile) => tile.chats.length > 0);
+  const row = rows.findIndex((tile) => tile.chats.some((chat) => chat.slot === cursor));
+  if (row < 0) {
+    const first = rows.find((tile) => tile.board.id === start) ?? rows[0];
+    return first?.chats[0]?.slot ?? null;
+  }
+  const chats = rows[row]!.chats;
+  const column = chats.findIndex((chat) => chat.slot === cursor);
+  if (step === "left") return chats[Math.max(0, column - 1)]!.slot;
+  if (step === "right") return chats[Math.min(chats.length - 1, column + 1)]!.slot;
+  const next = rows[row + (step === "down" ? 1 : -1)];
+  if (!next) return cursor;
+  return next.chats[Math.min(column, next.chats.length - 1)]!.slot;
+}
+
+/** Swaps a chat with its visible neighbour in the board's saved order; null at either end. */
+export function shiftChatInBoard(
+  board: ChatBoard,
+  visible: readonly string[],
+  key: string,
+  step: "left" | "right",
+) {
+  const index = visible.indexOf(key);
+  const neighbour = visible[index + (step === "left" ? -1 : 1)];
+  const order = [...board.order];
+  const a = order.indexOf(key);
+  const b = neighbour === undefined ? -1 : order.indexOf(neighbour);
+  if (index < 0 || a < 0 || b < 0) return null;
+  [order[a], order[b]] = [order[b]!, order[a]!];
+  return { ...board, order };
 }

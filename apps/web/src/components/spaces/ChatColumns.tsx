@@ -47,6 +47,7 @@ import {
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { isTerminalFocused } from "../../lib/terminalFocus";
+import { isEditableFocused } from "../../lib/editableFocus";
 import { useNavigate, useLocation, useRouter } from "@tanstack/react-router";
 import { openChatCreation } from "../../chatCreationStore";
 import {
@@ -676,8 +677,34 @@ function BoardColumns({
         ).then(() => markColumnsReturnDestination(router.state.location));
         return;
       }
+      if (command === "thread.rename") {
+        // Same as clicking the focused column's title.
+        const button = rail.current?.querySelector<HTMLButtonElement>(
+          `[data-column-key="${CSS.escape(active ?? "")}"] button[data-column-rename]`,
+        );
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        button.click();
+        return;
+      }
       const jump = threadJumpIndexFromCommand(command ?? "");
-      const direction = threadTraversalDirectionFromCommand(command);
+      // Shift+Left/Right steps between columns too, unless it would extend a text selection or
+      // belongs to a control with its own arrow keys (column grip, resize handle, menus).
+      const arrowStep =
+        event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !isEditableFocused(event.target) &&
+        !(event.target as Element | null)?.closest?.(
+          "[role=separator], [role=menu], [role=listbox], [role=slider], [aria-roledescription=sortable], [data-slot=sheet-popup]",
+        ) &&
+        (document.getSelection()?.isCollapsed ?? true) &&
+        !isTerminalFocused()
+          ? ({ ArrowLeft: "previous", ArrowRight: "next" } as const)[event.key as string]
+          : undefined;
+      const direction = threadTraversalDirectionFromCommand(command) ?? arrowStep ?? null;
       const index =
         jump ??
         (direction === null
@@ -2108,6 +2135,7 @@ function Column({
                       }
                     }}
                     aria-label={`Rename ${chat.title}`}
+                    data-column-rename=""
                     className={`min-w-0 truncate rounded px-1 -ml-1 text-left text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${expanded ? "order-1 max-w-[28rem] shrink" : "flex-1"}`}
                   />
                 }
@@ -2135,6 +2163,7 @@ function Column({
             className={`flex min-w-0 items-center gap-1.5 ${expanded ? "order-2 shrink-0" : ""}`}
           >
             <span
+              data-column-status={statusLabel}
               className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium ${statusLabel === "Needs input" ? "border-warning/25 bg-warning/10 text-foreground" : statusLabel === "Running" || statusLabel === "Ready to review" ? "border-primary/20 bg-primary/8 text-foreground" : "border-border/70 bg-muted/50 text-muted-foreground"}`}
             >
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current opacity-60" />
@@ -2343,14 +2372,22 @@ function ContextLabel(props: {
       <TooltipTrigger
         render={
           props.onClick ? (
-            <button type="button" onClick={props.onClick} className={className} />
+            <button
+              type="button"
+              data-column-tag=""
+              onClick={props.onClick}
+              className={className}
+            />
           ) : (
-            <span className={className} />
+            <span data-column-tag="" className={className} />
           )
         }
       >
         <Icon aria-hidden className="size-3 shrink-0" />
-        <span className="shrink-0 text-[9px] font-semibold tracking-wide uppercase opacity-75">
+        <span
+          data-column-tag-caption=""
+          className="shrink-0 text-[9px] font-semibold tracking-wide uppercase opacity-75"
+        >
           {props.caption}
         </span>
         <span

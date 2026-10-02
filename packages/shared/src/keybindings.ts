@@ -117,6 +117,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     when: "columnsRail && !terminalFocus && !previewFocus",
   },
   { key: "mod+i", command: "columns.addExistingChat", when: "columnsRail && !terminalFocus" },
+  { key: "mod+alt+r", command: "thread.rename", when: "columnsRail && !terminalFocus" },
 ];
 
 function normalizeKeyToken(token: string): string {
