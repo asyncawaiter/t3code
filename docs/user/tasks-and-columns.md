@@ -40,7 +40,7 @@ Press `Cmd+.` (`Ctrl+.` elsewhere), or choose **Overview** in the Boards picker,
 
 - Press a chat's key to open its board with that chat's composer focused. Add Shift to open it expanded.
 - Chats waiting for your input are also collected at the top. The Boards icon in the rail shows how many there are.
-- Use the arrow keys or H, J, K and L to select a chat. Enter opens it, Delete removes it from its board (the notification offers Undo), and holding Shift while moving carries the chat along: left and right reorder it, up and down move it to the neighbouring board.
+- Use the arrow keys or H, J, K and L to select a chat. Enter opens it, Delete removes it from its board (the notification offers Undo), and Ctrl+Option with an arrow carries the chat along: left and right reorder it, up and down move it to the neighbouring board. Cmd+Z undoes the last change.
 - Press `/` to search chats on every board, then Enter to open the highlighted match.
 - Press `Cmd+.` again to return to the board you used before the current one.
 - Drag a chat onto another board to move it, or use a board's **New chat** slot to start one there.
@@ -52,7 +52,7 @@ The rail includes chat and message search, saved-chat focus, pull requests, usag
 
 **New chat** creates an editable draft directly on the board using the usual folder and device picker. Nothing is sent until you submit a message. Unsent drafts are local to this client; another device can open the conversation once it has been started.
 
-Press Shift+Left or Shift+Right to move between columns on a board or Space, whenever you are not typing in a text field. Press Cmd+Option+R to rename the focused column's chat. Drag the grip beside a column title to reorder columns. Focus the grip and press Left or Right for keyboard reordering. Actions > Column arrangement remains available. The saved order updates across connected clients for custom boards; Space arrangements stay local.
+Press Shift+Left or Shift+Right to move between columns on a board or Space, whenever you are not typing in a text field. Press Cmd+Option+R to rename the focused column's chat. Press Ctrl+Option+Left or Ctrl+Option+Right to move the focused column itself. You can also drag the grip beside a column title, or focus the grip and press Left or Right. Actions > Column arrangement remains available. The saved order updates across connected clients for custom boards; Space arrangements stay local.
 
 Start with one board named Columns. Use **Manage** to rename it, create another board, duplicate an arrangement, or delete an extra board. Board names, selected chats, order, and individual widths are saved on the shared profile source and update on connected clients. Both clients and the shared source need a version that supports shared boards. Reconnect the source to edit an arrangement while it is offline. Conflicting edits to the same board are rejected so another device's changes are not overwritten.
 

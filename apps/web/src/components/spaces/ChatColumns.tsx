@@ -575,7 +575,6 @@ function BoardColumns({
     if (scope || creating?.boardId !== state.board.id) return;
     useColumnNavigation.setState({ creating: null });
     if (Date.now() - creating.at < 3000) createChat();
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Runs once per request.
   }, [creating]);
   const saveProfiles = useSaveProfiles();
   const [boardPickerOpen, setBoardPickerOpen] = useState(false);
@@ -688,20 +687,34 @@ function BoardColumns({
         button.click();
         return;
       }
+      const typing = isEditableFocused(event.target) || isTerminalFocused();
+      // Ctrl+Option+Left/Right carries the focused column along; Shift+arrows only move focus.
+      if (
+        event.ctrlKey &&
+        event.altKey &&
+        !event.metaKey &&
+        !event.shiftKey &&
+        (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+        active &&
+        !typing
+      ) {
+        event.preventDefault();
+        reorderLatest.current(active, event.key === "ArrowLeft" ? -1 : 1);
+        return;
+      }
       const jump = threadJumpIndexFromCommand(command ?? "");
       // Shift+Left/Right steps between columns too, unless it would extend a text selection or
-      // belongs to a control with its own arrow keys (column grip, resize handle, menus).
+      // belongs to a control with its own arrow keys (resize handle, menus, side panel).
       const arrowStep =
         event.shiftKey &&
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey &&
-        !isEditableFocused(event.target) &&
+        !typing &&
         !(event.target as Element | null)?.closest?.(
-          "[role=separator], [role=menu], [role=listbox], [role=slider], [aria-roledescription=sortable], [data-slot=sheet-popup]",
+          "[role=separator], [role=menu], [role=listbox], [role=slider], [data-slot=sheet-popup]",
         ) &&
-        (document.getSelection()?.isCollapsed ?? true) &&
-        !isTerminalFocused()
+        (document.getSelection()?.isCollapsed ?? true)
           ? ({ ArrowLeft: "previous", ArrowRight: "next" } as const)[event.key as string]
           : undefined;
       const direction = threadTraversalDirectionFromCommand(command) ?? arrowStep ?? null;
@@ -760,7 +773,9 @@ function BoardColumns({
       const node = rail.current.querySelector(`[data-column-key="${CSS.escape(focus)}"]`);
       if (node instanceof HTMLElement) {
         node.scrollIntoView({ block: "nearest", inline: "nearest" });
-        node.querySelector<HTMLButtonElement>("header button")?.focus({ preventScroll: true });
+        // The column itself takes focus: its first header button is the drag grip, which
+        // owns plain arrow keys for reordering.
+        node.focus({ preventScroll: true });
         appliedFocus.current = focusRequest;
         pinnedFocus.current = { key: focus, until: Date.now() + FOCUS_PIN_MS };
         setFocused(focus);
@@ -798,13 +813,17 @@ function BoardColumns({
       observer.disconnect();
       for (const type of events) node.removeEventListener(type, release);
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-observe when the column set changes.
   }, [columns]);
   useEffect(() => () => setSavedScroll(scroll.current), [setSavedScroll]);
   const [draggingColumn, setDraggingColumn] = useState(false);
   const dragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
+  // The shortcut listener above outlives renders; it reorders through the latest layout.
+  const reorderLatest = useRef(reorder);
+  useEffect(() => {
+    reorderLatest.current = reorder;
+  });
   function reorder(key: string, delta: number) {
     const visible = boardColumnKeys(allChats, visibleLayout);
     const index = visible.indexOf(key),
@@ -823,6 +842,43 @@ function BoardColumns({
     });
   }
   const selectedKeys = new Set(boardColumnKeys(allChats, visibleLayout));
+  // Chats mount one per frame, the focused column first and then outward, so the column in
+  // view shows its messages without waiting for every other column to build.
+  const columnKeys = [...selectedKeys].join("\n");
+  const mountOrder = useMemo(() => {
+    const keys = columnKeys.split("\n");
+    const centre = Math.max(0, keys.indexOf(active ?? ""));
+    return keys.toSorted(
+      (a, b) => Math.abs(keys.indexOf(a) - centre) - Math.abs(keys.indexOf(b) - centre),
+    );
+    // Ranked once per column set (not on focus moves), so nothing ever unmounts.
+  }, [columnKeys]);
+  const [mountBudget, setMountBudget] = useState(1);
+  useEffect(() => {
+    if (mountBudget >= mountOrder.length) return;
+    const frame = requestAnimationFrame(() => setMountBudget((budget) => budget + 1));
+    return () => cancelAnimationFrame(frame);
+  }, [mountBudget, mountOrder.length]);
+  // Moving a column's DOM (reordering) or hiding it resets every scroller inside it to
+  // the top without a scroll event, so the message list keeps drawing rows for its old offset
+  // and looks blank. Remember each scroller's offset and put back any that were reset.
+  const scrollOffsets = useRef(new Map<Element, number>());
+  useEffect(() => {
+    const node = rail.current;
+    if (!node) return;
+    const record = (event: Event) => {
+      if (event.target instanceof Element && event.target !== node)
+        scrollOffsets.current.set(event.target, event.target.scrollTop);
+    };
+    node.addEventListener("scroll", record, { capture: true, passive: true });
+    return () => node.removeEventListener("scroll", record, { capture: true });
+  }, []);
+  useLayoutEffect(() => {
+    for (const [element, offset] of scrollOffsets.current) {
+      if (!element.isConnected) scrollOffsets.current.delete(element);
+      else if (element.scrollTop === 0 && offset > 0) element.scrollTop = offset;
+    }
+  }, [columnKeys, expanded]);
   const resetPickerFilters = () => {
     setProfileFilter("all");
     setSpaceFilter("all");
@@ -1689,6 +1745,7 @@ function BoardColumns({
                   expanded={expanded === key}
                   hidden={expanded !== null && expanded !== key}
                   warm={warmKeys.includes(key)}
+                  mountReady={mountOrder.indexOf(key) < mountBudget}
                   onSeen={() => markSeen(key)}
                   onFocus={() => setFocused(key)}
                   onUse={() => rememberUse(key)}
@@ -1892,6 +1949,7 @@ function Column({
   expanded,
   hidden,
   warm,
+  mountReady,
   onSeen,
   onFocus,
   onOpenScope,
@@ -1923,6 +1981,8 @@ function Column({
   hidden: boolean;
   /** Recently viewed, so the chat stays mounted while offscreen. */
   warm: boolean;
+  /** This column's turn has come in the board's one-per-frame mount order. */
+  mountReady: boolean;
   onSeen: () => void;
   onFocus: () => void;
   /** Opens the columns view filtered to this chat's profile, space, project or device. */
@@ -2048,6 +2108,7 @@ function Column({
       }}
       onKeyDownCapture={onUse}
       onFocusCapture={onFocus}
+      tabIndex={-1}
       hidden={hidden}
       style={{
         width: expanded ? "100%" : columnCssWidth(width),
@@ -2056,7 +2117,7 @@ function Column({
         zIndex: isDragging ? 10 : undefined,
         opacity: isDragging ? 0.85 : undefined,
       }}
-      className={`${hidden ? "hidden" : "flex"} relative min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl ${active && !expanded ? "surface-focused" : "surface-raised"}`}
+      className={`${hidden ? "hidden" : "flex"} relative min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-xl outline-none ${active && !expanded ? "surface-focused" : "surface-raised"}`}
     >
       {/* Expanded, the three header rows flow into one line: title, status, labels, review,
           actions. `contents` lets each row's children join the header's single flex row. */}
@@ -2077,6 +2138,8 @@ function Column({
                     {...attributes}
                     {...listeners}
                     onKeyDown={(event) => {
+                      // Plain arrows only: Shift+arrows move focus between columns.
+                      if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
                       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
                       event.preventDefault();
                       event.stopPropagation();
@@ -2317,7 +2380,7 @@ function Column({
                   Reconnect {device} to load this conversation.
                 </p>
               </div>
-            ) : (visible || warm) && !hidden ? (
+            ) : (visible || warm) && mountReady && !hidden ? (
               <Suspense
                 fallback={<p className="p-3 text-xs text-muted-foreground">Loading chat...</p>}
               >

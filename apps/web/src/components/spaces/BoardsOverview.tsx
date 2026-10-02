@@ -521,6 +521,15 @@ export default function BoardsOverview({
       }
       return;
     }
+    // Ctrl+Option+arrow (or H/J/K/L, read by physical key) carries the selected chat along.
+    const step =
+      CURSOR_KEYS[event.key] ??
+      CURSOR_KEYS[event.code.startsWith("Key") ? event.code.slice(3).toLowerCase() : ""];
+    if (step && event.ctrlKey && event.altKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+      if (!event.repeat) void moveCursorChat(step);
+      return;
+    }
     if (event.metaKey || event.ctrlKey) {
       if (event.key.toLowerCase() === "z" && !event.shiftKey && !event.altKey) {
         event.preventDefault();
@@ -545,17 +554,15 @@ export default function BoardsOverview({
       cursorTarget !== null &&
       (event.target === event.currentTarget ||
         (event.target as HTMLElement).dataset.overviewSlot === cursor);
-    const editing = event.shiftKey || event.key === "Backspace" || event.key === "Delete";
     // Held keys would queue a burst of saves; one press, one edit.
-    if (event.repeat && editing) {
+    if (event.repeat && (event.key === "Backspace" || event.key === "Delete")) {
       event.preventDefault();
       return;
     }
-    const step = CURSOR_KEYS[event.key];
+    // Shift+arrows select too, matching Shift+Left/Right between columns.
     if (step && !event.altKey) {
       event.preventDefault();
-      if (event.shiftKey) void moveCursorChat(step);
-      else setCursor(stepCursor(tiles, cursor, step, currentBoard));
+      setCursor(stepCursor(tiles, cursor, step, currentBoard));
       return;
     }
     if (onCursor && event.key === "Enter") {
@@ -592,7 +599,7 @@ export default function BoardsOverview({
     ["A", "Open"],
     ["⇧A", "Open expanded"],
     ["←↑↓→ or HJKL", "Select"],
-    ["⇧ + move", "Move chat"],
+    ["⌃⌥ + move", "Move chat"],
     ["⌫", "Remove selected"],
     ["⌘Z", "Undo"],
     ["/", "Search"],
