@@ -334,34 +334,42 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 @utility surface-raised {
   background: var(--card);
   border: 1px solid color-mix(in srgb, var(--foreground) 13%, transparent);
-  box-shadow:
+  box-shadow: var(
+    --surface-shadow,
     0 1px 2px rgb(0 0 0 / 0.06),
     0 8px 22px -6px rgb(0 0 0 / 0.14),
-    inset 0 1px 0 rgb(255 255 255 / 0.65);
+    inset 0 1px 0 rgb(255 255 255 / 0.65)
+  );
 
   &:is(.dark, .dark *) {
     border-color: color-mix(in srgb, var(--foreground) 15%, transparent);
-    box-shadow:
+    box-shadow: var(
+      --surface-shadow,
       0 1px 2px rgb(0 0 0 / 0.5),
       0 10px 26px -6px rgb(0 0 0 / 0.6),
-      inset 0 1px 0 rgb(255 255 255 / 0.07);
+      inset 0 1px 0 rgb(255 255 255 / 0.07)
+    );
   }
 }
 
 @utility surface-raised-strong {
   background: var(--card);
   border: 1px solid color-mix(in srgb, var(--foreground) 30%, transparent);
-  box-shadow:
+  box-shadow: var(
+    --surface-shadow,
     0 1px 3px rgb(0 0 0 / 0.08),
     0 14px 34px -8px rgb(0 0 0 / 0.22),
-    inset 0 1px 0 rgb(255 255 255 / 0.65);
+    inset 0 1px 0 rgb(255 255 255 / 0.65)
+  );
 
   &:is(.dark, .dark *) {
     border-color: color-mix(in srgb, var(--foreground) 32%, transparent);
-    box-shadow:
+    box-shadow: var(
+      --surface-shadow,
       0 1px 3px rgb(0 0 0 / 0.55),
       0 16px 36px -8px rgb(0 0 0 / 0.7),
-      inset 0 1px 0 rgb(255 255 255 / 0.1);
+      inset 0 1px 0 rgb(255 255 255 / 0.1)
+    );
   }
 }
 
@@ -370,48 +378,94 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 @utility surface-focused {
   background: var(--card);
   border: 1px solid color-mix(in srgb, var(--foreground) 78%, transparent);
-  box-shadow:
+  box-shadow: var(
+    --surface-focused-shadow,
     0 0 0 0.5px color-mix(in srgb, var(--foreground) 78%, transparent),
     0 2px 4px rgb(0 0 0 / 0.08),
     0 16px 36px -8px rgb(0 0 0 / 0.24),
-    inset 0 1px 0 rgb(255 255 255 / 0.65);
+    inset 0 1px 0 rgb(255 255 255 / 0.65)
+  );
 
   &:is(.dark, .dark *) {
     border-color: color-mix(in srgb, var(--foreground) 70%, transparent);
-    box-shadow:
+    box-shadow: var(
+      --surface-focused-shadow,
       0 0 0 0.5px color-mix(in srgb, var(--foreground) 70%, transparent),
       0 2px 4px rgb(0 0 0 / 0.55),
       0 18px 38px -8px rgb(0 0 0 / 0.72),
-      inset 0 1px 0 rgb(255 255 255 / 0.1);
+      inset 0 1px 0 rgb(255 255 255 / 0.1)
+    );
   }
 }
 
 @utility surface-raised-sm {
   background: var(--card);
   border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
-  box-shadow:
+  box-shadow: var(
+    --surface-shadow,
     0 1px 2px rgb(0 0 0 / 0.06),
     0 4px 10px -3px rgb(0 0 0 / 0.1),
-    inset 0 1px 0 rgb(255 255 255 / 0.6);
+    inset 0 1px 0 rgb(255 255 255 / 0.6)
+  );
 
   &:is(.dark, .dark *) {
     border-color: color-mix(in srgb, var(--foreground) 14%, transparent);
-    box-shadow:
+    box-shadow: var(
+      --surface-shadow,
       0 1px 2px rgb(0 0 0 / 0.45),
       0 6px 14px -4px rgb(0 0 0 / 0.5),
-      inset 0 1px 0 rgb(255 255 255 / 0.06);
+      inset 0 1px 0 rgb(255 255 255 / 0.06)
+    );
   }
 }
 
 /* The header strip of a raised surface. */
 @utility surface-lid {
-  background: color-mix(in srgb, var(--foreground) 3.5%, var(--card));
+  background: var(
+    --surface-lid-background,
+    color-mix(in srgb, var(--foreground) 3.5%, var(--card))
+  );
   border-bottom: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent);
 }
 
 /* The slightly darker ground raised surfaces sit on. */
 @utility surface-canvas {
-  background: color-mix(in srgb, var(--foreground) 4%, var(--background));
+  background: var(
+    --surface-canvas-background,
+    color-mix(in srgb, var(--foreground) 4%, var(--background))
+  );
+}
+
+/* The Codex theme lays the same surfaces flat on its page: hairline edges, no lift. The
+   focused column keeps its near-black edge so focus still reads without color. */
+:root[data-theme-id="codex"] {
+  --surface-shadow: none;
+  --surface-focused-shadow: 0 0 0 0.5px color-mix(in srgb, var(--foreground) 75%, transparent);
+  --surface-lid-background: var(--card);
+  --surface-canvas-background: var(--background);
+}
+
+/* Column tags and status: the same words, in quiet outlined text instead of tinted pills. */
+:root[data-theme-id="codex"] [data-column-tag],
+:root[data-theme-id="codex"] [data-column-status] {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+}
+:root[data-theme-id="codex"] button[data-column-tag]:hover {
+  background: var(--accent);
+}
+:root[data-theme-id="codex"] [data-column-tag-caption] {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  font-size: inherit;
+  opacity: 1;
+}
+:root[data-theme-id="codex"] [data-column-status="Needs input"] {
+  border-color: var(--foreground);
+  color: var(--foreground);
+  font-weight: 600;
 }
 
 @utility alert-glass {

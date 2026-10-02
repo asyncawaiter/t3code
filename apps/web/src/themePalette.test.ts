@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 
 import {
   applyThemeColorPreview,
+  BUILT_IN_THEME_DEFINITIONS,
   applyThemePalette,
   getThemeColorsForMode,
   getThemeDefinition,
@@ -81,7 +81,7 @@ function contrastRatio(first: string, second: string): number {
 
 describe("theme files", () => {
   it("keeps every built-in palette value in canonical OKLCH form", () => {
-    for (const theme of BUILT_IN_THEMES) {
+    for (const theme of BUILT_IN_THEME_DEFINITIONS) {
       for (const colors of [theme.colors, ...Object.values(theme.variants ?? {})]) {
         for (const value of Object.values(colors)) {
           expect(toCanonicalThemeColor(value)).toBe(value);
