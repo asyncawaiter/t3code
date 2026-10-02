@@ -2708,7 +2708,14 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ],
       ...(signed
         ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") }
-        : { identity: "-", hardenedRuntime: false }),
+        : {
+            identity: "-",
+            hardenedRuntime: false,
+            // A local self-signed certificate (see scripts/sign-macos.ts) instead of ad hoc.
+            ...(process.env.T3CODE_MAC_LOCAL_SIGN_KEYCHAIN?.trim()
+              ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") }
+              : {}),
+          }),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,
