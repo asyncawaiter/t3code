@@ -3224,10 +3224,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       };
     };
 
-    const initialCompactness = measureFooterCompactness();
-    setIsComposerPrimaryActionsCompact(initialCompactness.primaryActionsCompact);
-    setIsComposerFooterCompact(initialCompactness.footerCompact);
-    if (typeof ResizeObserver === "undefined") return;
+    if (typeof ResizeObserver === "undefined") {
+      const initialCompactness = measureFooterCompactness();
+      setIsComposerPrimaryActionsCompact(initialCompactness.primaryActionsCompact);
+      setIsComposerFooterCompact(initialCompactness.footerCompact);
+      return;
+    }
+    // No synchronous first read: the observer reports the initial size after layout and before
+    // paint, batched with every other composer, instead of forcing one layout per column.
     const observer = new ResizeObserver(() => {
       const nextCompactness = measureFooterCompactness();
       setIsComposerPrimaryActionsCompact((previous) =>

@@ -29,7 +29,8 @@ export function useComposerMultilinePrompt(body: HTMLElement | null): boolean {
       const next = measureComposerMultilinePrompt(body);
       if (next !== null) setIsMultiline(next);
     };
-    measure();
+    // The observer's first callback measures after layout and before paint, batched across
+    // composers; a synchronous read here forced a full layout for every column that mounted.
     const resizeObserver = new ResizeObserver(measure);
     resizeObserver.observe(body);
     const editor = body.querySelector<HTMLElement>('[data-testid="composer-editor"]');

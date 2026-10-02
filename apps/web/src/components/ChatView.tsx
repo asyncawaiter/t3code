@@ -1646,12 +1646,19 @@ export default function ChatView(props: ChatViewProps) {
       });
     }
   };
-  const citationLocation = useLocation({
-    select: (location) => ({
-      href: location.href,
-      key: location.state.assistantCitationActivation ?? location.state.__TSR_key,
-    }),
+  // Only the hash carries citation and message targets. Selecting one string keeps every other
+  // navigation, such as stepping focus between columns, from re-rendering each open chat.
+  const citationTarget = useLocation({
+    select: (location) =>
+      location.hash
+        ? `${location.state.assistantCitationActivation ?? location.state.__TSR_key ?? ""}#${location.hash}`
+        : "",
   });
+  const citationHashAt = citationTarget.indexOf("#");
+  const citationLocation = {
+    href: citationHashAt < 0 ? "" : citationTarget.slice(citationHashAt),
+    key: citationHashAt > 0 ? citationTarget.slice(0, citationHashAt) : undefined,
+  };
   const citationRequest = useMemo<AssistantCitationRequest | null>(() => {
     const citation = assistantCitationFromLocation(citationLocation.href);
     return citation && citation.environmentId === environmentId && citation.threadId === threadId
